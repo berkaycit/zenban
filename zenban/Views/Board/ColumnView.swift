@@ -53,6 +53,9 @@ struct ColumnView: View {
                 .stroke(isTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .animation(.easeInOut(duration: 0.2), value: isTargeted)
+        // Use draggedCardID directly instead of droppedCards parameter.
+        // droppedCards requires async NSItemProvider deserialization which causes noticeable delay.
+        // Since we already track draggedCardID in store during onDrag, we can move instantly.
         .dropDestination(for: Card.self) { _, _ in
             guard let cardID = store.draggedCardID else { return false }
             withAnimation(.spring(duration: 0.25, bounce: 0.2)) {
