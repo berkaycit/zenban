@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ColumnView: View {
     let column: Column
@@ -15,11 +16,33 @@ struct ColumnView: View {
                 LazyVStack(spacing: 8) {
                     ForEach(cards) { card in
                         CardView(card: card, boardID: boardID)
+                            .opacity(store.draggedCardID == card.id ? 0 : 1)
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.8).combined(with: .opacity),
                                 removal: .scale(scale: 0.8).combined(with: .opacity)
                             ))
-                            .draggable(card)
+                            .onDrag {
+                                store.draggedCardID = card.id
+                                let provider = NSItemProvider()
+                                if let data = try? JSONEncoder().encode(card) {
+                                    provider.registerDataRepresentation(
+                                        forTypeIdentifier: UTType.card.identifier,
+                                        visibility: .all
+                                    ) { completion in
+                                        completion(data, nil)
+                                        return nil
+                                    }
+                                }
+                                return provider
+                            } preview: {
+                                CardView(card: card, boardID: boardID)
+                                    .frame(width: 256)
+                                    .onDisappear {
+                                        if store.draggedCardID == card.id {
+                                            store.draggedCardID = nil
+                                        }
+                                    }
+                            }
                     }
                 }
                 .padding(12)
@@ -35,8 +58,9 @@ struct ColumnView: View {
         .animation(.easeInOut(duration: 0.2), value: isTargeted)
         .dropDestination(for: Card.self) { droppedCards, _ in
             guard let card = droppedCards.first else { return false }
-            withAnimation(.spring(duration: 0.3, bounce: 0.2)) {
+            withAnimation(.spring(duration: 0.25, bounce: 0.2)) {
                 store.moveCard(card.id, to: column, in: boardID)
+                store.draggedCardID = nil
             }
             return true
         } isTargeted: { targeted in

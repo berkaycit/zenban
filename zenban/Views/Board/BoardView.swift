@@ -14,6 +14,10 @@ struct BoardView: View {
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.boardBackground)
+        .dropDestination(for: Card.self) { _, _ in
+            store.draggedCardID = nil
+            return false
+        }
         .navigationTitle(board.name)
         .toolbar {
             ToolbarItem {

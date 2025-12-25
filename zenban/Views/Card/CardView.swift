@@ -26,11 +26,9 @@ struct CardView: View {
         .padding(12)
         .background(Color.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: .black.opacity(isHovering ? 0.1 : 0.05), radius: isHovering ? 4 : 2, y: 1)
+        .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovering = hovering
-            }
+            isHovering = hovering
         }
         .onTapGesture(count: 2) {
             isEditing = true
