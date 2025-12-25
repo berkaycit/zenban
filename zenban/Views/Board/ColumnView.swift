@@ -20,7 +20,6 @@ struct ColumnView: View {
                             .transition(.scale(scale: 0.8).combined(with: .opacity))
                             .onDrag {
                                 store.draggedCardID = card.id
-                                store.selectedCardID = card.id
                                 let data = try? JSONEncoder().encode(card)
                                 let provider = NSItemProvider()
                                 provider.registerDataRepresentation(
