@@ -15,23 +15,22 @@ struct ColumnView: View {
                 LazyVStack(spacing: 8) {
                     ForEach(cards) { card in
                         CardView(card: card, boardID: boardID)
-                            .draggable(card.id.uuidString)
+                            .draggable(card)
                     }
                 }
                 .padding(12)
             }
         }
         .frame(width: 280)
-        .background(Color.columnBackground)
+        .background(isTargeted ? Color.accentColor.opacity(0.1) : Color.columnBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(isTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
         )
-        .dropDestination(for: String.self) { items, _ in
-            guard let cardIDString = items.first,
-                  let cardID = UUID(uuidString: cardIDString) else { return false }
-            store.moveCard(cardID, to: column, in: boardID)
+        .dropDestination(for: Card.self) { droppedCards, _ in
+            guard let card = droppedCards.first else { return false }
+            store.moveCard(card.id, to: column, in: boardID)
             return true
         } isTargeted: { targeted in
             isTargeted = targeted

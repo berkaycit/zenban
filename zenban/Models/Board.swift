@@ -1,4 +1,9 @@
 import SwiftUI
+import UniformTypeIdentifiers
+
+extension UTType {
+    static let card = UTType(exportedAs: "com.berkaycit.zenban.card")
+}
 
 enum Column: String, Codable, CaseIterable, Identifiable {
     case todo = "To Do"
@@ -16,7 +21,7 @@ enum Column: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct Card: Identifiable, Codable, Hashable {
+struct Card: Identifiable, Codable, Hashable, Transferable {
     let id: UUID
     var title: String
     var column: Column
@@ -29,6 +34,10 @@ struct Card: Identifiable, Codable, Hashable {
         self.column = column
         self.createdAt = Date()
         self.orderIndex = orderIndex
+    }
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .card)
     }
 }
 
