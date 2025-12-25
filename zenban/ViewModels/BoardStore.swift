@@ -42,32 +42,40 @@ final class BoardStore {
     // MARK: - Card Operations
 
     func addCard(title: String, to boardID: UUID) {
-        guard let index = boards.firstIndex(where: { $0.id == boardID }) else { return }
-        let card = Card(title: title, orderIndex: boards[index].nextOrderIndex)
-        boards[index].cards.append(card)
+        guard let i = boardIndex(for: boardID) else { return }
+        let card = Card(title: title, orderIndex: boards[i].nextOrderIndex)
+        boards[i].cards.append(card)
         scheduleSave()
     }
 
     func moveCard(_ cardID: UUID, to column: Column, in boardID: UUID) {
-        guard let boardIndex = boards.firstIndex(where: { $0.id == boardID }),
-              let cardIndex = boards[boardIndex].cards.firstIndex(where: { $0.id == cardID }) else { return }
-
-        boards[boardIndex].cards[cardIndex].column = column
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        boards[bi].cards[ci].column = column
         scheduleSave()
     }
 
     func updateCard(_ cardID: UUID, title: String, in boardID: UUID) {
-        guard let boardIndex = boards.firstIndex(where: { $0.id == boardID }),
-              let cardIndex = boards[boardIndex].cards.firstIndex(where: { $0.id == cardID }) else { return }
-
-        boards[boardIndex].cards[cardIndex].title = title
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        boards[bi].cards[ci].title = title
         scheduleSave()
     }
 
     func deleteCard(_ cardID: UUID, from boardID: UUID) {
-        guard let boardIndex = boards.firstIndex(where: { $0.id == boardID }) else { return }
-        boards[boardIndex].cards.removeAll { $0.id == cardID }
+        guard let i = boardIndex(for: boardID) else { return }
+        boards[i].cards.removeAll { $0.id == cardID }
         scheduleSave()
+    }
+
+    // MARK: - Private Helpers
+
+    private func boardIndex(for id: UUID) -> Int? {
+        boards.firstIndex { $0.id == id }
+    }
+
+    private func cardIndices(cardID: UUID, boardID: UUID) -> (board: Int, card: Int)? {
+        guard let bi = boardIndex(for: boardID),
+              let ci = boards[bi].cards.firstIndex(where: { $0.id == cardID }) else { return nil }
+        return (bi, ci)
     }
 
     // MARK: - Persistence

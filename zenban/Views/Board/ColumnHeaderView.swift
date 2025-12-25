@@ -4,18 +4,10 @@ struct ColumnHeaderView: View {
     let column: Column
     let count: Int
 
-    private var accentColor: Color {
-        switch column {
-        case .todo: return .blue
-        case .inProgress: return .orange
-        case .done: return .green
-        }
-    }
-
     var body: some View {
         HStack {
             Circle()
-                .fill(accentColor)
+                .fill(column.accentColor)
                 .frame(width: 8, height: 8)
 
             Text(column.rawValue)

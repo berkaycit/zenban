@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 enum Column: String, Codable, CaseIterable, Identifiable {
     case todo = "To Do"
@@ -6,6 +6,14 @@ enum Column: String, Codable, CaseIterable, Identifiable {
     case done = "Done"
 
     var id: String { rawValue }
+
+    var accentColor: Color {
+        switch self {
+        case .todo: .blue
+        case .inProgress: .orange
+        case .done: .green
+        }
+    }
 }
 
 struct Card: Identifiable, Codable, Hashable {

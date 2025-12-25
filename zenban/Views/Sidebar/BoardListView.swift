@@ -3,7 +3,6 @@ import SwiftUI
 struct BoardListView: View {
     @Environment(BoardStore.self) private var store
     @State private var isAddingBoard = false
-    @State private var newBoardName = ""
 
     var body: some View {
         @Bindable var store = store

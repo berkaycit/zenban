@@ -29,5 +29,6 @@ zenban/
 |-----------|---------|
 | `BoardStore` | Central state manager, injected via environment |
 | `BoardStorage` | JSON persistence to Application Support |
+| `Column` | Enum with display name and accent color |
 | `NavigationSplitView` | Sidebar + detail layout |
 | `ColumnView` | Handles drag-drop with `.dropDestination()` |
