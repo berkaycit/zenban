@@ -42,6 +42,7 @@ The project uses Swift 6 concurrency features:
 
 ## Rules
 
+- Efficiency is critical. This will be a continuously running program, so minimize CPU and memory usage as much as possible.
 - ALWAYS read and understand relevant files before proposing edits. Do not speculate about code you have not inspected
 - If critical info is needed and you suspect your knowledge may be outdated, fetch the latest docs via Context7 MCP first
 - Before writing new code, check for existing related methods/classes and reuse or modify them instead of duplicating functionality
