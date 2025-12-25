@@ -40,6 +40,15 @@ The project uses Swift 6 concurrency features:
 
 `com.berkaycit.zenban`
 
+## When to Read Agent Docs
+
+| Task | Read |
+|------|------|
+| Project structure, components, data flow | agent_docs/architecture.md |
+| Code patterns, naming, performance | agent_docs/conventions.md |
+| App features, shortcuts, storage | agent_docs/features.md |
+| Recent changes history | agent_docs/memory-bank.md |
+
 ## Rules
 
 - Efficiency is critical. This will be a continuously running program, so minimize CPU and memory usage as much as possible.

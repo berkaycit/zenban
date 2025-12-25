@@ -9,9 +9,15 @@ import SwiftUI
 
 @main
 struct zenbanApp: App {
+    @State private var store = BoardStore()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(store)
+        }
+        .commands {
+            BoardCommands(store: store)
         }
     }
 }

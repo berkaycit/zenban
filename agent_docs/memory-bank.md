@@ -7,3 +7,5 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Initial Kanban board implementation
+- **Description**: Created full Kanban app with multiple boards, 3 fixed columns (To Do, In Progress, Done), drag-drop cards, JSON persistence with debounced save, keyboard shortcuts (Cmd+N, Cmd+Shift+N). Uses @Observable for state, LazyVStack for performance.
