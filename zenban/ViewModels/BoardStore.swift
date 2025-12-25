@@ -51,7 +51,12 @@ final class BoardStore {
 
     func moveCard(_ cardID: UUID, to column: Column, in boardID: UUID) {
         guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        let maxOrderIndex = boards[bi].cards
+            .filter { $0.column == column }
+            .map(\.orderIndex)
+            .max() ?? -1
         boards[bi].cards[ci].column = column
+        boards[bi].cards[ci].orderIndex = maxOrderIndex + 1
         scheduleSave()
     }
 
