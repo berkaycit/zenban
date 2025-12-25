@@ -4,6 +4,7 @@ import SwiftUI
 final class BoardStore {
     var boards: [Board] = []
     var selectedBoardID: UUID?
+    var draggedCardID: UUID?
 
     private var saveTask: Task<Void, Never>?
 
