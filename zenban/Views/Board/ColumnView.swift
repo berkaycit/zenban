@@ -56,7 +56,13 @@ struct ColumnView: View {
         // droppedCards requires async NSItemProvider deserialization which causes noticeable delay.
         // Since we already track draggedCardID in store during onDrag, we can move instantly.
         .dropDestination(for: Card.self) { _, _ in
-            guard let cardID = store.draggedCardID else { return false }
+            guard let cardID = store.draggedCardID,
+                  let board = store.boards.first(where: { $0.id == boardID }),
+                  let card = board.cards.first(where: { $0.id == cardID }),
+                  card.column != column else {
+                store.draggedCardID = nil
+                return false
+            }
             withAnimation(.spring(duration: 0.25, bounce: 0.2)) {
                 store.moveCard(cardID, to: column, in: boardID)
                 store.draggedCardID = nil

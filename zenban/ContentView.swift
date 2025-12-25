@@ -39,6 +39,7 @@ struct ContentView: View {
         }
         .onChange(of: store.selectedBoardID) {
             store.selectedCardID = nil
+            store.draggedCardID = nil
         }
         .frame(minWidth: 1100, minHeight: 600)
     }
