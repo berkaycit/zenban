@@ -17,10 +17,7 @@ struct ColumnView: View {
                     ForEach(cards) { card in
                         CardView(card: card, boardID: boardID)
                             .opacity(store.draggedCardID == card.id ? 0 : 1)
-                            .transition(.asymmetric(
-                                insertion: .scale(scale: 0.8).combined(with: .opacity),
-                                removal: .scale(scale: 0.8).combined(with: .opacity)
-                            ))
+                            .transition(.scale(scale: 0.8).combined(with: .opacity))
                             .onDrag {
                                 store.draggedCardID = card.id
                                 let provider = NSItemProvider()

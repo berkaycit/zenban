@@ -31,4 +31,4 @@ zenban/
 | `BoardStorage` | JSON persistence to Application Support |
 | `Column` | Enum with display name and accent color |
 | `NavigationSplitView` | Sidebar + detail layout |
-| `ColumnView` | Handles drag-drop with `.dropDestination()` |
+| `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
