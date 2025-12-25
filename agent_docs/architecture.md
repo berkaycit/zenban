@@ -30,5 +30,6 @@ zenban/
 | `BoardStore` | Central state manager, injected via environment |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Column` | Enum with display name and accent color |
-| `NavigationSplitView` | Sidebar + detail layout |
+| `NavigationSplitView` | Three-column layout: sidebar, board, card detail |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
+| `CardDetailView` | Right panel for viewing and editing selected card |

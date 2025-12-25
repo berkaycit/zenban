@@ -25,7 +25,11 @@ Sync documentation after major code changes.
 ## Doc Mapping
 
 | Area | Document |
-|------|----------|
+|------|------|
+| Project structure, components, data flow | agent_docs/architecture.md |
+| Code patterns, naming, performance | agent_docs/conventions.md |
+| App features, shortcuts, storage | agent_docs/features.md |
+| Recent changes history | agent_docs/memory-bank.md |
 
 ## Rules
 

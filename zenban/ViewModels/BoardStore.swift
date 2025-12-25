@@ -4,12 +4,18 @@ import SwiftUI
 final class BoardStore {
     var boards: [Board] = []
     var selectedBoardID: UUID?
+    var selectedCardID: UUID?
     var draggedCardID: UUID?
 
     private var saveTask: Task<Void, Never>?
 
     var selectedBoard: Board? {
         boards.first { $0.id == selectedBoardID }
+    }
+
+    var selectedCard: Card? {
+        guard let cardID = selectedCardID else { return nil }
+        return selectedBoard?.cards.first { $0.id == cardID }
     }
 
     init() {
@@ -30,6 +36,7 @@ final class BoardStore {
         boards.removeAll { $0.id == board.id }
         if selectedBoardID == board.id {
             selectedBoardID = boards.first?.id
+            selectedCardID = nil
         }
         scheduleSave()
     }
@@ -69,6 +76,8 @@ final class BoardStore {
     func deleteCard(_ cardID: UUID, from boardID: UUID) {
         guard let i = boardIndex(for: boardID) else { return }
         boards[i].cards.removeAll { $0.id == cardID }
+        if selectedCardID == cardID { selectedCardID = nil }
+        if draggedCardID == cardID { draggedCardID = nil }
         scheduleSave()
     }
 

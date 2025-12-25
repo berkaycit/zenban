@@ -4,8 +4,11 @@ struct CardView: View {
     let card: Card
     let boardID: UUID
     @Environment(BoardStore.self) private var store
-    @State private var isEditing = false
     @State private var isHovering = false
+
+    private var isSelected: Bool {
+        store.selectedCardID == card.id
+    }
 
     var body: some View {
         HStack {
@@ -24,17 +27,18 @@ struct CardView: View {
             }
         }
         .padding(12)
-        .background(Color.cardBackground)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
         .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
         .onHover { hovering in
             isHovering = hovering
         }
-        .onTapGesture(count: 2) {
-            isEditing = true
-        }
-        .sheet(isPresented: $isEditing) {
-            CardEditorView(boardID: boardID, card: card, isPresented: $isEditing)
+        .onTapGesture {
+            store.selectedCardID = card.id
         }
     }
 }

@@ -16,7 +16,7 @@ struct ContentView: View {
         NavigationSplitView {
             BoardListView()
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
-        } detail: {
+        } content: {
             if let board = store.selectedBoard {
                 BoardView(board: board)
             } else {
@@ -26,8 +26,21 @@ struct ContentView: View {
                     subtitle: "Select a board from the sidebar or create a new one"
                 )
             }
+        } detail: {
+            if let board = store.selectedBoard, let card = store.selectedCard {
+                CardDetailView(card: card, boardID: board.id)
+            } else {
+                EmptyStateView(
+                    icon: "rectangle.on.rectangle",
+                    title: "No Card Selected",
+                    subtitle: "Select a card to view its details"
+                )
+            }
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .onChange(of: store.selectedBoardID) {
+            store.selectedCardID = nil
+        }
+        .frame(minWidth: 1100, minHeight: 600)
     }
 }
 
