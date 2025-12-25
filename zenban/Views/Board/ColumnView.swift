@@ -20,15 +20,14 @@ struct ColumnView: View {
                             .transition(.scale(scale: 0.8).combined(with: .opacity))
                             .onDrag {
                                 store.draggedCardID = card.id
+                                let data = try? JSONEncoder().encode(card)
                                 let provider = NSItemProvider()
-                                if let data = try? JSONEncoder().encode(card) {
-                                    provider.registerDataRepresentation(
-                                        forTypeIdentifier: UTType.card.identifier,
-                                        visibility: .all
-                                    ) { completion in
-                                        completion(data, nil)
-                                        return nil
-                                    }
+                                provider.registerDataRepresentation(
+                                    forTypeIdentifier: UTType.card.identifier,
+                                    visibility: .all
+                                ) { completion in
+                                    completion(data, nil)
+                                    return nil
                                 }
                                 return provider
                             } preview: {
