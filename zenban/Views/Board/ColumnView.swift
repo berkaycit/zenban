@@ -53,7 +53,10 @@ struct ColumnView: View {
         )
         .animation(.easeInOut(duration: 0.2), value: isTargeted)
         .dropDestination(for: Card.self) { droppedCards, _ in
-            guard let card = droppedCards.first else { return false }
+            guard let card = droppedCards.first else {
+                store.draggedCardID = nil
+                return false
+            }
             withAnimation(.spring(duration: 0.25, bounce: 0.2)) {
                 store.moveCard(card.id, to: column, in: boardID)
                 store.draggedCardID = nil
