@@ -42,11 +42,27 @@ final class TerminalManager {
 
     private func startShell(terminalView: LocalProcessTerminalView) {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let startDirectory = defaultStartDirectory()
+
         terminalView.startProcess(
             executable: shell,
             args: ["--login"],
             environment: nil,
-            execName: nil
+            execName: nil,
+            currentDirectory: startDirectory
         )
+    }
+
+    private func defaultStartDirectory() -> String? {
+        let fileManager = FileManager.default
+        let home = fileManager.homeDirectoryForCurrentUser.path
+
+        for folder in ["Documents", "Desktop"] {
+            let path = home + "/" + folder
+            if fileManager.isReadableFile(atPath: path) {
+                return path
+            }
+        }
+        return nil
     }
 }
