@@ -70,8 +70,6 @@ struct TerminalContainerView: NSViewRepresentable {
             hostView.hideLoading()
         } catch is CancellationError {
             // Task was cancelled, ignore
-        } catch TerminalError.alreadyLoading {
-            // Already loading, ignore
         } catch {
             hostView.showError(error.localizedDescription)
         }

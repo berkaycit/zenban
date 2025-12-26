@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct zenbanApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var store = BoardStore()
     @State private var terminalManager = TerminalManager()
 
@@ -32,5 +33,11 @@ struct zenbanApp: App {
                 await terminalManager.killSessionForCard(cardID)
             }
         }
+    }
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        TmuxSessionController.killAllZenbanSessionsSync()
     }
 }

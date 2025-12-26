@@ -8,8 +8,8 @@ final class TerminalManager {
     private var tmuxController: TmuxSessionController?
     private var activeTerminalView: LocalProcessTerminalView?
     private var currentCardID: UUID?
-    private var pendingCardID: UUID?
     private var initializationTask: Task<Void, Never>?
+    private var currentLoadingTask: Task<LocalProcessTerminalView, Error>?
 
     var isLoading: Bool = false
     var error: String?
@@ -45,23 +45,39 @@ final class TerminalManager {
         // Wait for initialization to complete
         await initializationTask?.value
 
-        // Prevent duplicate requests for same card
+        // Return existing view if same card
         if currentCardID == cardID, let existingView = activeTerminalView {
             return existingView
         }
 
-        // Prevent race condition: if already loading for this card, wait
-        if pendingCardID == cardID {
-            throw TerminalError.alreadyLoading
-        }
+        // Cancel any pending loading task for different card
+        currentLoadingTask?.cancel()
 
-        pendingCardID = cardID
+        // Create new loading task
+        let task = Task<LocalProcessTerminalView, Error> {
+            try await loadTerminal(for: cardID)
+        }
+        currentLoadingTask = task
+
+        do {
+            let view = try await task.value
+            currentLoadingTask = nil
+            return view
+        } catch is CancellationError {
+            currentLoadingTask = nil
+            throw CancellationError()
+        } catch {
+            currentLoadingTask = nil
+            throw error
+        }
+    }
+
+    private func loadTerminal(for cardID: UUID) async throws -> LocalProcessTerminalView {
         isLoading = true
         error = nil
 
         defer {
             isLoading = false
-            pendingCardID = nil
         }
 
         // Properly detach current terminal
@@ -97,7 +113,7 @@ final class TerminalManager {
     func detachCurrentTerminal() {
         guard let view = activeTerminalView else { return }
 
-        // Send tmux detach command (fire and forget - no need to wait)
+        // Send tmux detach command - this detaches the client but keeps the session running
         view.send(txt: "\u{02}d")  // Ctrl+B, d
 
         activeTerminalView = nil
@@ -136,8 +152,7 @@ final class TerminalManager {
     }
 
     private func startTmuxAttach(terminalView: LocalProcessTerminalView, sessionName: String) {
-        let paths = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
-        let tmuxPath = paths.first(where: { FileManager.default.fileExists(atPath: $0) }) ?? "/opt/homebrew/bin/tmux"
+        guard let tmuxPath = TmuxSessionController.findTmuxPath() else { return }
 
         terminalView.startProcess(
             executable: tmuxPath,
@@ -151,7 +166,6 @@ final class TerminalManager {
 enum TerminalError: LocalizedError {
     case tmuxNotAvailable
     case sessionCreationFailed
-    case alreadyLoading
 
     var errorDescription: String? {
         switch self {
@@ -159,8 +173,6 @@ enum TerminalError: LocalizedError {
             return "tmux is not available"
         case .sessionCreationFailed:
             return "Failed to create terminal session"
-        case .alreadyLoading:
-            return "Terminal is already loading"
         }
     }
 }

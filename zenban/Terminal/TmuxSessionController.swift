@@ -7,11 +7,46 @@ actor TmuxSessionController {
         case sessionCreationFailed(String)
     }
 
+    private static let tmuxPaths = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
     private let tmuxPath: String
 
+    static func findTmuxPath() -> String? {
+        tmuxPaths.first { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    /// Synchronously kills all zenban tmux sessions. Safe to call during app termination.
+    static func killAllZenbanSessionsSync() {
+        guard let tmuxPath = findTmuxPath() else { return }
+
+        let listProcess = Process()
+        listProcess.executableURL = URL(fileURLWithPath: tmuxPath)
+        listProcess.arguments = ["list-sessions", "-F", "#{session_name}"]
+        let pipe = Pipe()
+        listProcess.standardOutput = pipe
+        listProcess.standardError = FileHandle.nullDevice
+
+        do {
+            try listProcess.run()
+            listProcess.waitUntilExit()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            let sessions = output.split(separator: "\n").map(String.init)
+
+            for session in sessions where session.hasPrefix("zenban_card_") {
+                let killProcess = Process()
+                killProcess.executableURL = URL(fileURLWithPath: tmuxPath)
+                killProcess.arguments = ["kill-session", "-t", session]
+                try? killProcess.run()
+                killProcess.waitUntilExit()
+            }
+        } catch {
+            // Ignore - tmux server might not be running
+        }
+    }
+
     init() async throws {
-        let paths = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
-        guard let path = paths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+        guard let path = Self.findTmuxPath() else {
             throw TmuxError.tmuxNotInstalled
         }
         self.tmuxPath = path
