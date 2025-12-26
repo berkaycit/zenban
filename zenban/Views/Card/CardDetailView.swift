@@ -127,6 +127,7 @@ struct CardDetailView: View {
         VStack(spacing: 0) {
             terminalHeader
             TerminalContainerView(cardID: card.id)
+                .id(card.id)
                 .frame(minHeight: 200)
                 .frame(maxHeight: .infinity)
         }
