@@ -33,9 +33,22 @@
 		23B6DABD2EFDA93700D5AB34 /* zenbanUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		23B6DBB12EFFAA0000D5AB34 /* Exceptions for "zenban" folder in "zenban" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 23B6DAA52EFDA93600D5AB34 /* zenban */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		23B6DAA82EFDA93600D5AB34 /* zenban */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				23B6DBB12EFFAA0000D5AB34 /* Exceptions for "zenban" folder in "zenban" target */,
+			);
 			path = zenban;
 			sourceTree = "<group>";
 		};
