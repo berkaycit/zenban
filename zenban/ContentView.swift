@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  zenban
 //
-//  Created by Berkay Çit on 25.12.2025.
+//  Created by Berkay Cit on 25.12.2025.
 //
 
 import SwiftUI
@@ -13,35 +13,49 @@ struct ContentView: View {
     var body: some View {
         @Bindable var store = store
 
-        NavigationSplitView {
-            BoardListView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
-        } content: {
-            if let board = store.selectedBoard {
-                BoardView(board: board)
-            } else {
-                EmptyStateView(
-                    icon: "square.stack.3d.up",
-                    title: "No Board Selected",
-                    subtitle: "Select a board from the sidebar or create a new one"
-                )
+        HSplitView {
+            // Sidebar
+            NavigationStack {
+                BoardListView()
             }
-        } detail: {
-            if let board = store.selectedBoard, let card = store.selectedCard {
-                CardDetailView(card: card, boardID: board.id)
-            } else {
-                EmptyStateView(
-                    icon: "rectangle.on.rectangle",
-                    title: "No Card Selected",
-                    subtitle: "Select a card to view its details"
-                )
+            .frame(minWidth: 160, idealWidth: 160, maxWidth: 260)
+
+            // Content + Detail
+            HSplitView {
+                // Board content
+                NavigationStack {
+                    if let board = store.selectedBoard {
+                        BoardView(board: board)
+                    } else {
+                        EmptyStateView(
+                            icon: "square.stack.3d.up",
+                            title: "No Board Selected",
+                            subtitle: "Select a board from the sidebar or create a new one"
+                        )
+                    }
+                }
+                .frame(minWidth: 900, maxWidth: 950)
+
+                // Card detail
+                Group {
+                    if let board = store.selectedBoard, let card = store.selectedCard {
+                        CardDetailView(card: card, boardID: board.id)
+                    } else {
+                        EmptyStateView(
+                            icon: "rectangle.on.rectangle",
+                            title: "No Card Selected",
+                            subtitle: "Select a card to view its details"
+                        )
+                    }
+                }
+                .frame(minWidth: 400, idealWidth: 500, maxWidth: .infinity)
             }
         }
         .onChange(of: store.selectedBoardID) {
             store.selectedCardID = nil
             store.draggedCardID = nil
         }
-        .frame(minWidth: 1100, minHeight: 600)
+        .frame(minWidth: 1500, minHeight: 600)
     }
 }
 

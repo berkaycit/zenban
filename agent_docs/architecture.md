@@ -31,7 +31,7 @@ zenban/
 | `BoardStore` | Central state manager, injected via environment |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Column` | Enum with display name and accent color |
-| `NavigationSplitView` | Three-column layout: sidebar, board, card detail |
+| `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel for viewing and editing selected card |
 | `TerminalManager` | Manages tmux sessions and terminal views per card |

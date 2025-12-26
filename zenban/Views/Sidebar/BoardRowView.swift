@@ -6,25 +6,26 @@ struct BoardRowView: View {
     @State private var isRenaming = false
     @State private var newName = ""
 
-    var body: some View {
-        HStack {
-            Image(systemName: "square.grid.2x2")
-                .foregroundStyle(.secondary)
+    private let titleFont = Font.system(size: 13, weight: .semibold)
 
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
             if isRenaming {
                 TextField("Board name", text: $newName, onCommit: saveRename)
                     .textFieldStyle(.plain)
+                    .font(titleFont)
             } else {
                 Text(board.name)
+                    .font(titleFont)
                     .lineLimit(1)
             }
 
-            Spacer()
-
-            Text("\(board.cards.count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(board.createdAt.formatted(date: .numeric, time: .omitted))
+                .font(.system(size: 11))
+                .opacity(0.8)
         }
+        .padding(.vertical, 4)
+        .padding(.leading, 8)
         .contextMenu {
             Button("Rename") {
                 newName = board.name

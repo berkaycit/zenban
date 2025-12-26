@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Switch to HSplitView for enforced column widths
+- **Description**: Replaced NavigationSplitView with nested HSplitView to enforce minimum column widths that NavigationSplitView ignored when dragging dividers. Layout now has sidebar (160-260px), board (900-950px), and card detail (400px+). Terminal now starts in Documents or Desktop directory. BoardRowView updated to show board name with creation date.
+
 - **Summary**: Fix terminal mouse selection with local SwiftTerm
 - **Description**: Removed tmux dependency to fix scroll issues. Found bug in SwiftTerm where yDisp was added twice in mouse coordinate calculation (once in calculateMouseHit, once in selection functions), causing selection offset after scrolling. Using local SwiftTerm fork at LocalPackages/SwiftTerm with fix applied. Simplified TerminalContainerView and TerminalManager, removed TmuxSessionController and AppDelegate.
 

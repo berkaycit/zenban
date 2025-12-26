@@ -21,7 +21,6 @@ struct CardDetailView: View {
                 terminalSection
             }
         }
-        .frame(minWidth: 400, idealWidth: 500, maxWidth: .infinity)
         .frame(maxHeight: .infinity)
         .background(Color.cardBackground)
         .onAppear {
