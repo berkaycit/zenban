@@ -558,6 +558,31 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// OS specific feature.
     public var optionAsMetaKey: Bool = true
     
+    // Handle Cmd+C and Cmd+V before keyDown clears selection
+    public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command) else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        switch event.charactersIgnoringModifiers {
+        case "c":
+            if selection.active {
+                copy(self)
+                return true
+            }
+        case "v":
+            paste(self)
+            return true
+        case "a":
+            selectAll(self)
+            return true
+        default:
+            break
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
     //
     // We capture a handful of keydown events and pre-process those, and then let
     // interpretKeyEvents do the rest of the work, that includes text-insertion, and
@@ -972,12 +997,12 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             sharedMouseEvent(with: event)
             return
         }
-        
+
         #if DEBUG
         // let hit = calculateMouseHit(with: event)
         //print ("Up at col=\(hit.col) row=\(hit.row) count=\(event.clickCount) selection.active=\(selection.active) didSelectionDrag=\(didSelectionDrag) ")
         #endif
-        
+
         didSelectionDrag = false
     }
     
