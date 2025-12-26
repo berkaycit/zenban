@@ -7,6 +7,8 @@ final class BoardStore {
     var selectedCardID: UUID?
     var draggedCardID: UUID?
 
+    var onCardDeleted: ((UUID) -> Void)?
+
     private var saveTask: Task<Void, Never>?
 
     var selectedBoard: Board? {
@@ -78,6 +80,7 @@ final class BoardStore {
         boards[i].cards.removeAll { $0.id == cardID }
         if selectedCardID == cardID { selectedCardID = nil }
         if draggedCardID == cardID { draggedCardID = nil }
+        onCardDeleted?(cardID)
         scheduleSave()
     }
 

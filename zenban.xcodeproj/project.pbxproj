@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		23B6DBB02EFEEA8800D5AB34 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 23B6DAD12EFDA93700D5AB34 /* SwiftTerm */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		23B6DAB42EFDA93700D5AB34 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				23B6DBB02EFEEA8800D5AB34 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = zenban;
 			packageProductDependencies = (
+				23B6DAD12EFDA93700D5AB34 /* SwiftTerm */,
 			);
 			productName = zenban;
 			productReference = 23B6DAA62EFDA93600D5AB34 /* zenban.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = 23B6DA9D2EFDA93600D5AB34;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				23B6DAD02EFDA93700D5AB34 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23B6DAA72EFDA93600D5AB34 /* Products */;
 			projectDirPath = "";
@@ -394,11 +403,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = zenban/zenban.entitlements;
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -428,11 +438,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = zenban/zenban.entitlements;
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -577,6 +588,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		23B6DAD02EFDA93700D5AB34 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		23B6DAD12EFDA93700D5AB34 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 23B6DAD02EFDA93700D5AB34 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 23B6DA9E2EFDA93600D5AB34 /* Project object */;
 }

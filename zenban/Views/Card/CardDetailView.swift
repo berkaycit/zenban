@@ -4,11 +4,41 @@ struct CardDetailView: View {
     let card: Card
     let boardID: UUID
     @Environment(BoardStore.self) private var store
+    @Environment(TerminalManager.self) private var terminalManager
     @State private var editedTitle = ""
     @State private var isEditing = false
+    @State private var showTerminal = true
     @FocusState private var isFocused: Bool
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cardInfoSection
+                .frame(height: showTerminal && terminalManager.isTmuxAvailable ? 200 : nil)
+
+            if showTerminal && terminalManager.isTmuxAvailable {
+                Divider()
+                terminalSection
+            }
+        }
+        .frame(minWidth: 400, idealWidth: 500, maxWidth: 600)
+        .background(Color.cardBackground)
+        .onAppear {
+            editedTitle = card.title
+        }
+        .onChange(of: card.id) {
+            editedTitle = card.title
+            isEditing = false
+        }
+    }
+
+    private var cardInfoSection: some View {
+        ScrollView {
+            cardInfoContent
+                .padding(20)
+        }
+    }
+
+    private var cardInfoContent: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
                 Text(card.column.rawValue)
@@ -90,19 +120,37 @@ struct CardDetailView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var terminalSection: some View {
+        VStack(spacing: 0) {
+            terminalHeader
+            TerminalContainerView(cardID: card.id)
+                .frame(minHeight: 200)
+                .frame(maxHeight: .infinity)
+        }
+    }
+
+    private var terminalHeader: some View {
+        HStack {
+            Image(systemName: "terminal")
+                .foregroundStyle(.secondary)
+            Text("Terminal")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Spacer()
+
+            Button(action: { showTerminal.toggle() }) {
+                Image(systemName: showTerminal ? "chevron.down" : "chevron.up")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
         }
-        .padding(20)
-        .frame(minWidth: 280, idealWidth: 320, maxWidth: 400)
-        .background(Color.cardBackground)
-        .onAppear {
-            editedTitle = card.title
-        }
-        .onChange(of: card.id) {
-            editedTitle = card.title
-            isEditing = false
-        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.1))
     }
 
     private func startEditing() {
