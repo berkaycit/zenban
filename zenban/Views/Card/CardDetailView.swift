@@ -13,10 +13,10 @@ struct CardDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             cardInfoSection
-                .frame(height: showTerminal && terminalManager.isTmuxAvailable ? 240 : nil)
-                .frame(maxHeight: showTerminal && terminalManager.isTmuxAvailable ? 240 : .infinity)
+                .frame(height: showTerminal && terminalManager.isTerminalAvailable ? 240 : nil)
+                .frame(maxHeight: showTerminal && terminalManager.isTerminalAvailable ? 240 : .infinity)
 
-            if terminalManager.isTmuxAvailable {
+            if terminalManager.isTerminalAvailable {
                 Divider()
                 terminalSection
             }

@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Fix terminal mouse selection with local SwiftTerm
+- **Description**: Removed tmux dependency to fix scroll issues. Found bug in SwiftTerm where yDisp was added twice in mouse coordinate calculation (once in calculateMouseHit, once in selection functions), causing selection offset after scrolling. Using local SwiftTerm fork at LocalPackages/SwiftTerm with fix applied. Simplified TerminalContainerView and TerminalManager, removed TmuxSessionController and AppDelegate.
+
 - **Summary**: Fix terminal robustness and cleanup
 - **Description**: Fixed race condition on fast card switching with task cancellation. Added sync cleanup of all zenban tmux sessions on app termination via AppDelegate. Centralized tmux path detection in TmuxSessionController as static reusable methods. Removed async cleanup that caused deadlock. Terminal background color matched to app theme (#2A2A27).
 
