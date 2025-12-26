@@ -65,7 +65,7 @@ final class TerminalManager {
         }
 
         // Properly detach current terminal
-        await detachCurrentTerminal()
+        detachCurrentTerminal()
 
         guard let controller = tmuxController else {
             throw TerminalError.tmuxNotAvailable
@@ -94,14 +94,11 @@ final class TerminalManager {
         return terminalView
     }
 
-    func detachCurrentTerminal() async {
+    func detachCurrentTerminal() {
         guard let view = activeTerminalView else { return }
 
-        // Send tmux detach command
+        // Send tmux detach command (fire and forget - no need to wait)
         view.send(txt: "\u{02}d")  // Ctrl+B, d
-
-        // Give tmux time to process detach
-        try? await Task.sleep(for: .milliseconds(100))
 
         activeTerminalView = nil
         currentCardID = nil
@@ -112,7 +109,7 @@ final class TerminalManager {
 
         // If this is the active card, detach first
         if currentCardID == cardID {
-            await detachCurrentTerminal()
+            detachCurrentTerminal()
         }
 
         let sessionName = "zenban_card_\(cardID.uuidString)"

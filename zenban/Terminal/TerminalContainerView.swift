@@ -4,6 +4,7 @@ import AppKit
 
 struct TerminalContainerView: NSViewRepresentable {
     let cardID: UUID
+    var backgroundColor: SwiftUI.Color = SwiftUI.Color(red: 0.165, green: 0.165, blue: 0.153)
     @Environment(TerminalManager.self) private var terminalManager
 
     func makeCoordinator() -> Coordinator {
@@ -13,18 +14,21 @@ struct TerminalContainerView: NSViewRepresentable {
     func makeNSView(context: Context) -> TerminalHostView {
         let hostView = TerminalHostView()
         hostView.wantsLayer = true
-        hostView.layer?.backgroundColor = NSColor.black.cgColor
+        hostView.layer?.backgroundColor = NSColor(backgroundColor).cgColor
 
         context.coordinator.loadTask = Task { @MainActor in
-            await loadTerminal(into: hostView)
+            await loadTerminal(into: hostView, backgroundColor: backgroundColor)
         }
 
         return hostView
     }
 
     func updateNSView(_ nsView: TerminalHostView, context: Context) {
+        // Update background color
+        nsView.layer?.backgroundColor = NSColor(backgroundColor).cgColor
         if let terminal = nsView.terminalView {
             terminal.frame = nsView.bounds
+            terminal.nativeBackgroundColor = NSColor(backgroundColor)
         }
 
         // Update error state
@@ -48,7 +52,7 @@ struct TerminalContainerView: NSViewRepresentable {
     }
 
     @MainActor
-    private func loadTerminal(into hostView: TerminalHostView) async {
+    private func loadTerminal(into hostView: TerminalHostView, backgroundColor: SwiftUI.Color) async {
         do {
             let view = try await terminalManager.terminalView(for: cardID)
 
@@ -57,6 +61,7 @@ struct TerminalContainerView: NSViewRepresentable {
 
             view.frame = hostView.bounds
             view.autoresizingMask = [.width, .height]
+            view.nativeBackgroundColor = NSColor(backgroundColor)
 
             hostView.subviews.forEach { $0.removeFromSuperview() }
             hostView.addSubview(view)
