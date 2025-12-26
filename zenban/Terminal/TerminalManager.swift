@@ -42,34 +42,21 @@ final class TerminalManager {
     // MARK: - Public API
 
     func terminalView(for cardID: UUID) async throws -> LocalProcessTerminalView {
-        // Wait for initialization to complete
         await initializationTask?.value
 
-        // Return existing view if same card
         if currentCardID == cardID, let existingView = activeTerminalView {
             return existingView
         }
 
-        // Cancel any pending loading task for different card
         currentLoadingTask?.cancel()
 
-        // Create new loading task
         let task = Task<LocalProcessTerminalView, Error> {
             try await loadTerminal(for: cardID)
         }
         currentLoadingTask = task
+        defer { currentLoadingTask = nil }
 
-        do {
-            let view = try await task.value
-            currentLoadingTask = nil
-            return view
-        } catch is CancellationError {
-            currentLoadingTask = nil
-            throw CancellationError()
-        } catch {
-            currentLoadingTask = nil
-            throw error
-        }
+        return try await task.value
     }
 
     private func loadTerminal(for cardID: UUID) async throws -> LocalProcessTerminalView {

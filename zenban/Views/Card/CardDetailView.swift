@@ -13,14 +13,16 @@ struct CardDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             cardInfoSection
-                .frame(height: showTerminal && terminalManager.isTmuxAvailable ? 200 : nil)
+                .frame(height: showTerminal && terminalManager.isTmuxAvailable ? 240 : nil)
+                .frame(maxHeight: showTerminal && terminalManager.isTmuxAvailable ? 240 : .infinity)
 
-            if showTerminal && terminalManager.isTmuxAvailable {
+            if terminalManager.isTmuxAvailable {
                 Divider()
                 terminalSection
             }
         }
-        .frame(minWidth: 400, idealWidth: 500, maxWidth: 600)
+        .frame(minWidth: 400, idealWidth: 500, maxWidth: .infinity)
+        .frame(maxHeight: .infinity)
         .background(Color.cardBackground)
         .onAppear {
             editedTitle = card.title
@@ -126,10 +128,12 @@ struct CardDetailView: View {
     private var terminalSection: some View {
         VStack(spacing: 0) {
             terminalHeader
-            TerminalContainerView(cardID: card.id)
-                .id(card.id)
-                .frame(minHeight: 200)
-                .frame(maxHeight: .infinity)
+            if showTerminal {
+                TerminalContainerView(cardID: card.id)
+                    .id(card.id)
+                    .frame(minHeight: 200)
+                    .frame(maxHeight: .infinity)
+            }
         }
     }
 
