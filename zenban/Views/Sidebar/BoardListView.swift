@@ -16,12 +16,20 @@ struct BoardListView: View {
             .onDelete(perform: deleteBoards)
         }
         .listStyle(.plain)
-        .navigationTitle("Boards")
+        .navigationTitle(" ")
         .toolbar {
-            ToolbarItem {
+            ToolbarItemGroup(placement: .navigation) {
                 Button(action: { isAddingBoard = true }) {
-                    Image(systemName: "plus")
+                    Image(systemName: "folder.badge.plus")
                 }
+                .controlSize(.large)
+                .help("New Board")
+
+                Button(action: { NotificationCenter.default.post(name: .newCard, object: nil) }) {
+                    Image(systemName: "square.and.pencil")
+                }
+                .controlSize(.large)
+                .help("New Task")
             }
         }
         .sheet(isPresented: $isAddingBoard) {

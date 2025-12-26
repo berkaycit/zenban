@@ -18,14 +18,6 @@ struct BoardView: View {
             store.draggedCardID = nil
             return false
         }
-        .navigationTitle(board.name)
-        .toolbar {
-            ToolbarItem {
-                Button(action: { isAddingCard = true }) {
-                    Image(systemName: "plus")
-                }
-            }
-        }
         .sheet(isPresented: $isAddingCard) {
             CardEditorView(boardID: board.id, isPresented: $isAddingCard)
         }

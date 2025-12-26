@@ -25,7 +25,7 @@ struct BoardRowView: View {
                 .opacity(0.8)
         }
         .padding(.vertical, 4)
-        .padding(.leading, 8)
+        .padding(.leading, 14)
         .contextMenu {
             Button("Rename") {
                 newName = board.name
