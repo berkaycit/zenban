@@ -34,7 +34,7 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
     }
 
     // Idle detection
-    private var idleTimer: Timer?
+    private var idleWorkItem: DispatchWorkItem?
     private var activityByteCount: Int = 0
     private let idleThreshold: TimeInterval = 2.0
     private let minActivityBytes: Int = 10
@@ -42,13 +42,13 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
     // Input/Output buffers for agent detection
     private var inputBuffer = ""
     private var outputBuffer = ""
-    private let outputBufferMaxSize = 500
+    private let outputBufferMaxSize = 100
 
     // Focus tracking
     private var hasBeenFocused = false
 
     deinit {
-        idleTimer?.invalidate()
+        idleWorkItem?.cancel()
     }
 
     // MARK: - State Machine
@@ -82,12 +82,12 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
     }
 
     private func handleStateChange(from oldState: TerminalState, to newState: TerminalState) {
-        activityByteCount = 0
-        idleTimer?.invalidate()
-        idleTimer = nil
+        idleWorkItem?.cancel()
+        idleWorkItem = nil
 
         switch (oldState, newState) {
         case (_, .agentActive):
+            activityByteCount = 0
             outputBuffer = ""
             if oldState == .agentIdle {
                 triggerAgentResumed()
@@ -139,16 +139,23 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
 
     // MARK: - Agent Detection
 
+    private let agentKeyword = "claude"
+
     private func detectAgentInOutput(_ slice: ArraySlice<UInt8>) {
         guard let str = String(bytes: slice, encoding: .utf8) else { return }
 
+        let oldLength = outputBuffer.count
         outputBuffer.append(str)
-        if outputBuffer.count > outputBufferMaxSize {
-            outputBuffer = String(outputBuffer.suffix(outputBufferMaxSize))
+
+        // Search only in newly added portion + keyword overlap
+        let searchStart = max(0, oldLength - agentKeyword.count)
+        let searchStartIndex = outputBuffer.index(outputBuffer.startIndex, offsetBy: searchStart)
+        if outputBuffer[searchStartIndex...].contains(agentKeyword) {
+            transition(event: .agentDetected)
         }
 
-        if outputBuffer.contains("claude") {
-            transition(event: .agentDetected)
+        if outputBuffer.count > outputBufferMaxSize {
+            outputBuffer = String(outputBuffer.suffix(outputBufferMaxSize))
         }
     }
 
@@ -199,10 +206,14 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
     // MARK: - Idle Detection
 
     private func scheduleIdleCheck() {
-        idleTimer?.invalidate()
-        idleTimer = Timer.scheduledTimer(withTimeInterval: idleThreshold, repeats: false) { [weak self] _ in
+        idleWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
             self?.onBecameIdle()
         }
+        idleWorkItem = workItem
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + idleThreshold, execute: workItem)
     }
 
     private var isFirstResponder: Bool {
@@ -210,12 +221,9 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
     }
 
     private func onBecameIdle() {
-        idleTimer = nil
-
         guard state == .agentActive,
               hasBeenFocused,
               activityByteCount >= minActivityBytes else {
-            activityByteCount = 0
             return
         }
 
