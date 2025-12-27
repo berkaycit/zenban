@@ -5,6 +5,7 @@ struct BoardRowView: View {
     @Environment(BoardStore.self) private var store
     @State private var isRenaming = false
     @State private var newName = ""
+    @FocusState private var isTextFieldFocused: Bool
 
     private let titleFont = Font.system(size: 13, weight: .semibold)
 
@@ -14,6 +15,9 @@ struct BoardRowView: View {
                 TextField("Board name", text: $newName, onCommit: saveRename)
                     .textFieldStyle(.plain)
                     .font(titleFont)
+                    .focused($isTextFieldFocused)
+                    .onExitCommand { cancelRename() }
+                    .onAppear { isTextFieldFocused = true }
             } else {
                 Text(board.name)
                     .font(titleFont)
@@ -45,6 +49,10 @@ struct BoardRowView: View {
         if !trimmedName.isEmpty {
             store.renameBoard(board, to: trimmedName)
         }
+        isRenaming = false
+    }
+
+    private func cancelRename() {
         isRenaming = false
     }
 }
