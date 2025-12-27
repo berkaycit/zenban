@@ -147,16 +147,17 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
 
     // MARK: - Agent Detection
 
-    private let agentKeyword = "claude"
+    private static let agentKeyword = "claude"
 
     // Regex to strip ANSI escape sequences (e.g., \e[32m, \e[0m)
     // Required because Ctrl+R history search wraps text in ANSI codes,
     // which can split "claude" into "cla\e[0mude" and break detection.
-    private let ansiPattern = try! NSRegularExpression(pattern: "\\x1B\\[[0-9;]*[A-Za-z]")
+    // Static to share single instance across all terminals.
+    private static let ansiPattern = try! NSRegularExpression(pattern: "\\x1B\\[[0-9;]*[A-Za-z]")
 
     private func stripAnsiCodes(_ str: String) -> String {
         let range = NSRange(str.startIndex..., in: str)
-        return ansiPattern.stringByReplacingMatches(in: str, range: range, withTemplate: "")
+        return Self.ansiPattern.stringByReplacingMatches(in: str, range: range, withTemplate: "")
     }
 
     private func detectAgentInOutput(_ slice: ArraySlice<UInt8>) {
@@ -169,7 +170,7 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
 
         // Set flag when keyword found - flag persists until Enter is pressed
         // This handles Ctrl+R where keyword may appear early then get pushed out of buffer
-        if outputBuffer.contains(agentKeyword) {
+        if outputBuffer.contains(Self.agentKeyword) {
             agentDetectedInOutput = true
         }
 
@@ -210,7 +211,7 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
         switch state {
         case .shell:
             // Detect agent from direct input ("claude ...") or output flag (Ctrl+R history)
-            if trimmed.hasPrefix(agentKeyword) || agentDetectedInOutput {
+            if trimmed.hasPrefix(Self.agentKeyword) || agentDetectedInOutput {
                 transition(event: .agentDetected)
             }
             outputBuffer = ""

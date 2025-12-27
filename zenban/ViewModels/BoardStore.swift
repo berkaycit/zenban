@@ -58,8 +58,11 @@ final class BoardStore {
         scheduleSave()
     }
 
+    // Skip if card is already in target column to prevent reordering.
+    // Agent detection triggers this frequently when card is already in correct column.
     func moveCard(_ cardID: UUID, to column: Column, in boardID: UUID) {
-        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID),
+              boards[bi].cards[ci].column != column else { return }
         let maxOrderIndex = boards[bi].cards
             .filter { $0.column == column }
             .map(\.orderIndex)
