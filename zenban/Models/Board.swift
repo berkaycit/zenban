@@ -7,7 +7,7 @@ extension UTType {
 
 enum Column: String, Codable, CaseIterable, Identifiable {
     case todo = "To Do"
-    case inProgress = "In Progress"
+    case inProgress = "In Review"
     case done = "Done"
 
     var id: String { rawValue }
