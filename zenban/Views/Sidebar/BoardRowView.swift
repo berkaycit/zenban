@@ -10,7 +10,7 @@ struct BoardRowView: View {
     private let titleFont = Font.system(size: 13, weight: .semibold)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             if isRenaming {
                 TextField("Board name", text: $newName, onCommit: saveRename)
                     .textFieldStyle(.plain)
@@ -26,10 +26,10 @@ struct BoardRowView: View {
 
             Text(board.createdAt.formatted(date: .numeric, time: .omitted))
                 .font(.system(size: 11))
-                .opacity(0.8)
+                .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4)
-        .padding(.leading, 14)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 6)
         .contextMenu {
             Button("Rename") {
                 newName = board.name

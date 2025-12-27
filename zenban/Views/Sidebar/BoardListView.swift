@@ -11,11 +11,13 @@ struct BoardListView: View {
             ForEach(store.boards) { board in
                 BoardRowView(board: board)
                     .tag(board.id)
-                    .listRowSeparator(.visible)
+                    .listRowSeparator(.visible, edges: .bottom)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
             }
             .onDelete(perform: deleteBoards)
         }
-        .listStyle(.plain)
+        .listStyle(.inset)
+        .scrollContentBackground(.hidden)
         .navigationTitle(" ")
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
