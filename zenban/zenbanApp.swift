@@ -41,5 +41,11 @@ struct zenbanApp: App {
             store.selectedBoardID = boardID
             store.selectedCardID = cardID
         }
+        NotificationService.shared.onTaskCompleted = { [store] cardID, boardID in
+            store.moveCard(cardID, to: .inProgress, in: boardID)
+        }
+        NotificationService.shared.onAgentResumed = { [store] cardID, boardID in
+            store.moveCard(cardID, to: .todo, in: boardID)
+        }
     }
 }

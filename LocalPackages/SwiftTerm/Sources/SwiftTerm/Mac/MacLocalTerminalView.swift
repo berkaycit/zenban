@@ -65,8 +65,8 @@ public protocol LocalProcessTerminalViewDelegate: AnyObject {
  * subclass this and override the methods
  */
 open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalProcessDelegate {
-    
-    var process: LocalProcess!
+
+    public var process: LocalProcess!
     
     public override init (frame: CGRect)
     {

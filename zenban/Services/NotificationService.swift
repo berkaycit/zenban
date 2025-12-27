@@ -6,6 +6,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationService()
 
     var onNotificationClicked: ((UUID, UUID) -> Void)?
+    var onTaskCompleted: ((UUID, UUID) -> Void)?
+    var onAgentResumed: ((UUID, UUID) -> Void)?
 
     private override init() {
         super.init()
@@ -37,6 +39,14 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         )
 
         UNUserNotificationCenter.current().add(request)
+    }
+
+    func triggerTaskCompleted(cardID: UUID, boardID: UUID) {
+        onTaskCompleted?(cardID, boardID)
+    }
+
+    func triggerAgentResumed(cardID: UUID, boardID: UUID) {
+        onAgentResumed?(cardID, boardID)
     }
 
     // MARK: - UNUserNotificationCenterDelegate
