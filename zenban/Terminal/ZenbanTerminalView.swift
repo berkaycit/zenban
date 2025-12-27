@@ -50,13 +50,15 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
 
     private func onBecameIdle() {
         idleTimer = nil
-        guard !notificationSent, hasBeenFocused, activityByteCount >= minActivityBytes, !isFirstResponder else {
+        guard !notificationSent, hasBeenFocused, activityByteCount >= minActivityBytes else {
             activityByteCount = 0
             return
         }
         notificationSent = true
         activityByteCount = 0
-        sendNotification(title: cardTitle ?? "Terminal", body: "Task completed")
+        if !isFirstResponder {
+            sendNotification(title: cardTitle ?? "Terminal", body: "Task completed")
+        }
     }
 
     private func sendNotification(title: String, body: String) {
