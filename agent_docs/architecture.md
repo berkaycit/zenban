@@ -38,3 +38,21 @@ zenban/
 | `TerminalManager` | Manages terminal views per card |
 | `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
+
+## Terminal Agent Detection
+
+State machine with 3 states: `shell` → `agentActive` → `agentIdle`
+
+**Flow:**
+1. User types "claude" + Enter → `agentActive`, card stays
+2. User sends message to Claude → card moves to "To Do"
+3. Claude responds, 2s idle → `agentIdle`, card moves to "In Progress"
+4. User sends new message → back to step 2
+5. Ctrl+C exits → back to `shell`
+
+**Ctrl+R Support:** Shell history search bypasses input buffer. Solution: monitor output buffer for "claude", strip ANSI codes (they split keywords), persist flag until Enter.
+
+**Key Guards:**
+- `hasBeenFocused`: prevents triggering on terminal init
+- `minActivityBytes`: ignores tiny outputs (< 10 bytes)
+- `BoardStore.moveCard`: skips if card already in target column
