@@ -256,18 +256,20 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
 
     // MARK: - Notifications
 
-    private func sendNotification(title: String, body: String) {
+    private func withCardContext(_ action: (UUID, UUID) -> Void) {
         guard let cardID = cardID, let boardID = boardID else { return }
-        NotificationService.shared.showNotification(title: title, body: body, cardID: cardID, boardID: boardID)
+        action(cardID, boardID)
+    }
+
+    private func sendNotification(title: String, body: String) {
+        withCardContext { NotificationService.shared.showNotification(title: title, body: body, cardID: $0, boardID: $1) }
     }
 
     private func triggerTaskCompleted() {
-        guard let cardID = cardID, let boardID = boardID else { return }
-        NotificationService.shared.triggerTaskCompleted(cardID: cardID, boardID: boardID)
+        withCardContext { NotificationService.shared.triggerTaskCompleted(cardID: $0, boardID: $1) }
     }
 
     private func triggerAgentResumed() {
-        guard let cardID = cardID, let boardID = boardID else { return }
-        NotificationService.shared.triggerAgentResumed(cardID: cardID, boardID: boardID)
+        withCardContext { NotificationService.shared.triggerAgentResumed(cardID: $0, boardID: $1) }
     }
 }
