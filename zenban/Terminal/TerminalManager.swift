@@ -23,7 +23,16 @@ final class TerminalManager {
     }
 
     func killSessionForCard(_ cardID: UUID) async {
-        terminalViews.removeValue(forKey: cardID)
+        if let terminalView = terminalViews.removeValue(forKey: cardID) {
+            terminalView.process.terminate()
+        }
+    }
+
+    func terminateAllSessions() {
+        for terminalView in terminalViews.values {
+            terminalView.process.terminate()
+        }
+        terminalViews.removeAll()
     }
 
     // MARK: - Private Helpers

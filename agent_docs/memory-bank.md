@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Fix terminal process leaks on card/board deletion and app quit
+- **Description**: Three memory leak issues fixed: (1) Card deletion: killSessionForCard now calls process.terminate() to send SIGTERM. (2) Board deletion: deleteBoard calls onCardDeleted for each card before removing the board. (3) App termination: Added willTerminateNotification observer in zenbanApp.init that calls terminateAllSessions(). Note: LocalProcess cleanup in SwiftTerm was attempted but caused crashes, reverted to original. See TerminalManager.swift:25-29, BoardStore.swift:37-47, zenbanApp.swift:16-24.
+
 - **Summary**: Fix Ctrl+R history search agent detection
 - **Description**: Ctrl+R sends commands directly to shell without going through inputBuffer. Two problems: (1) ANSI escape codes can split "claude" into "cla\e[0mude", breaking string matching. (2) Excessive terminal output overflows small buffer. Fixed by: stripping ANSI codes with regex before buffering, increasing buffer to 500 chars, and using agentDetectedInOutput flag that persists until Enter. See ZenbanTerminalView.swift:152-177 for implementation.
 

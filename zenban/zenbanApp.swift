@@ -6,11 +6,22 @@
 //
 
 import SwiftUI
+import AppKit
 
 @main
 struct zenbanApp: App {
     @State private var store = BoardStore()
     @State private var terminalManager = TerminalManager()
+
+    init() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [terminalManager] _ in
+            terminalManager.terminateAllSessions()
+        }
+    }
 
     var body: some Scene {
         WindowGroup {

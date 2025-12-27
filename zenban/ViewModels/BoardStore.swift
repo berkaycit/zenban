@@ -35,6 +35,9 @@ final class BoardStore {
     }
 
     func deleteBoard(_ board: Board) {
+        for card in board.cards {
+            onCardDeleted?(card.id)
+        }
         boards.removeAll { $0.id == board.id }
         if selectedBoardID == board.id {
             selectedBoardID = boards.first?.id
