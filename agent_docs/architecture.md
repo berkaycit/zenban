@@ -36,5 +36,5 @@ zenban/
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel for viewing and editing selected card |
 | `TerminalManager` | Manages terminal views per card |
-| `ZenbanTerminalView` | Terminal subclass with idle-based task completion notifications |
-| `NotificationService` | macOS notification handling with click-to-navigate |
+| `ZenbanTerminalView` | Terminal with state machine (shell/agentActive/agentIdle) for Claude agent detection and auto card movement |
+| `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
