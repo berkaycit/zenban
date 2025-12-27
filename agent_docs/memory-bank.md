@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Fix Ctrl+R history search agent detection
+- **Description**: Ctrl+R sends commands directly to shell without going through inputBuffer. Two problems: (1) ANSI escape codes can split "claude" into "cla\e[0mude", breaking string matching. (2) Excessive terminal output overflows small buffer. Fixed by: stripping ANSI codes with regex before buffering, increasing buffer to 500 chars, and using agentDetectedInOutput flag that persists until Enter. See ZenbanTerminalView.swift:152-177 for implementation.
+
 - **Summary**: Optimize terminal agent detection performance
 - **Description**: Replaced Timer with DispatchWorkItem for lighter idle detection. Reduced output buffer from 500 to 100 chars. Optimized string search to check only newly added portion plus keyword overlap. Moved activityByteCount reset to agentActive transition only, removing unnecessary resets.
 
