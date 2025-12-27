@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add terminal task completion notifications
+- **Description**: Added macOS notifications when terminal output stops and user is not focused on that terminal. ZenbanTerminalView subclass detects idle state via 2-second timer after output. NotificationService handles UNUserNotificationCenter with click-to-navigate. Made becomeFirstResponder open in local SwiftTerm fork to track focus. Services/ folder added for app-wide services.
+
 - **Summary**: Switch to HSplitView for enforced column widths
 - **Description**: Replaced NavigationSplitView with nested HSplitView to enforce minimum column widths that NavigationSplitView ignored when dragging dividers. Layout now has sidebar (160-260px), board (900-950px), and card detail (400px+). Terminal now starts in Documents or Desktop directory. BoardRowView updated to show board name with creation date.
 

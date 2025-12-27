@@ -19,6 +19,7 @@ struct zenbanApp: App {
                 .environment(terminalManager)
                 .onAppear {
                     setupCardDeletionHandler()
+                    setupNotifications()
                 }
         }
         .commands {
@@ -31,6 +32,14 @@ struct zenbanApp: App {
             Task {
                 await terminalManager.killSessionForCard(cardID)
             }
+        }
+    }
+
+    private func setupNotifications() {
+        NotificationService.shared.requestAuthorization()
+        NotificationService.shared.onNotificationClicked = { [store] boardID, cardID in
+            store.selectedBoardID = boardID
+            store.selectedCardID = cardID
         }
     }
 }

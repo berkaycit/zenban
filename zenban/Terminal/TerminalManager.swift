@@ -5,16 +5,17 @@ import AppKit
 @Observable
 final class TerminalManager {
 
-    private var terminalViews: [UUID: LocalProcessTerminalView] = [:]
+    private var terminalViews: [UUID: ZenbanTerminalView] = [:]
 
     var isTerminalAvailable: Bool { true }
 
-    func terminalView(for cardID: UUID) async throws -> LocalProcessTerminalView {
+    func terminalView(for cardID: UUID, boardID: UUID, cardTitle: String) async throws -> ZenbanTerminalView {
         if let existingView = terminalViews[cardID] {
+            existingView.cardTitle = cardTitle
             return existingView
         }
 
-        let terminalView = createTerminalView()
+        let terminalView = createTerminalView(cardID: cardID, boardID: boardID, cardTitle: cardTitle)
         startShell(terminalView: terminalView)
 
         terminalViews[cardID] = terminalView
@@ -27,11 +28,14 @@ final class TerminalManager {
 
     // MARK: - Private Helpers
 
-    private func createTerminalView() -> LocalProcessTerminalView {
+    private func createTerminalView(cardID: UUID, boardID: UUID, cardTitle: String) -> ZenbanTerminalView {
         let config = TerminalConfiguration()
         let frame = NSRect(x: 0, y: 0, width: 600, height: 400)
 
-        let terminalView = LocalProcessTerminalView(frame: frame)
+        let terminalView = ZenbanTerminalView(frame: frame)
+        terminalView.cardID = cardID
+        terminalView.boardID = boardID
+        terminalView.cardTitle = cardTitle
 
         terminalView.font = config.font
         terminalView.nativeBackgroundColor = config.backgroundColor

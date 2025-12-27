@@ -4,6 +4,8 @@ import AppKit
 
 struct TerminalContainerView: NSViewRepresentable {
     let cardID: UUID
+    let boardID: UUID
+    let cardTitle: String
     var backgroundColor: SwiftUI.Color = SwiftUI.Color(red: 0.165, green: 0.165, blue: 0.153)
     @Environment(TerminalManager.self) private var terminalManager
 
@@ -39,7 +41,7 @@ struct TerminalContainerView: NSViewRepresentable {
     @MainActor
     private func loadTerminal(into hostView: NSView, coordinator: Coordinator, backgroundColor: SwiftUI.Color) async {
         do {
-            let terminal = try await terminalManager.terminalView(for: cardID)
+            let terminal = try await terminalManager.terminalView(for: cardID, boardID: boardID, cardTitle: cardTitle)
 
             try Task.checkCancellation()
 
@@ -59,6 +61,6 @@ struct TerminalContainerView: NSViewRepresentable {
 
     final class Coordinator {
         var loadTask: Task<Void, Never>?
-        var terminalView: LocalProcessTerminalView?
+        var terminalView: ZenbanTerminalView?
     }
 }

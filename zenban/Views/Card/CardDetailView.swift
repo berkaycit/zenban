@@ -128,7 +128,7 @@ struct CardDetailView: View {
         VStack(spacing: 0) {
             terminalHeader
             if showTerminal {
-                TerminalContainerView(cardID: card.id)
+                TerminalContainerView(cardID: card.id, boardID: boardID, cardTitle: card.title)
                     .id(card.id)
                     .frame(minHeight: 200)
                     .frame(maxHeight: .infinity)

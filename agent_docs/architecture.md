@@ -12,7 +12,8 @@ zenban/
 │   ├── Board/       # Kanban board layout
 │   ├── Card/        # Card display and editing
 │   └── Components/  # Reusable UI components
-├── Terminal/        # Embedded terminal per card (SwiftTerm + tmux)
+├── Terminal/        # Embedded terminal per card (SwiftTerm)
+├── Services/        # App-wide services (notifications)
 ├── Commands/        # Menu keyboard shortcuts
 └── Extensions/      # Color theme extensions
 ```
@@ -34,5 +35,6 @@ zenban/
 | `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel for viewing and editing selected card |
-| `TerminalManager` | Manages tmux sessions and terminal views per card |
-| `TmuxSessionController` | Actor for tmux process communication |
+| `TerminalManager` | Manages terminal views per card |
+| `ZenbanTerminalView` | Terminal subclass with idle-based task completion notifications |
+| `NotificationService` | macOS notification handling with click-to-navigate |
