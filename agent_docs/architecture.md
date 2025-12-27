@@ -29,12 +29,12 @@ zenban/
 
 | Component | Purpose |
 |-----------|---------|
-| `BoardStore` | Central state manager, injected via environment |
+| `BoardStore` | Central state manager, skips redundant column moves to prevent reordering |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Column` | Enum with display name and accent color |
 | `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel for viewing and editing selected card |
 | `TerminalManager` | Manages terminal views per card |
-| `ZenbanTerminalView` | Terminal with state machine (shell/agentActive/agentIdle) for Claude agent detection and auto card movement |
+| `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
