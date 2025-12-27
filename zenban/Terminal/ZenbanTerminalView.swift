@@ -39,10 +39,18 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
     private let idleThreshold: TimeInterval = 2.0
     private let minActivityBytes: Int = 10
 
-    // Input/Output buffers for agent detection
+    // Agent detection buffers
+    // Note: Ctrl+R history search sends commands directly to shell without going through inputBuffer.
+    // The shell echoes the selected command to output, so we monitor outputBuffer for "claude".
+    // However, Ctrl+R generates lots of terminal output (search UI, ANSI codes) that can overflow
+    // the buffer or split keywords with escape codes. Solution:
+    // 1. Strip ANSI codes before adding to buffer
+    // 2. Use larger buffer (500 chars)
+    // 3. agentDetectedInOutput flag persists once "claude" is seen, reset on Enter
     private var inputBuffer = ""
     private var outputBuffer = ""
-    private let outputBufferMaxSize = 100
+    private let outputBufferMaxSize = 500
+    private var agentDetectedInOutput = false
 
     // Focus tracking
     private var hasBeenFocused = false
@@ -141,17 +149,28 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
 
     private let agentKeyword = "claude"
 
+    // Regex to strip ANSI escape sequences (e.g., \e[32m, \e[0m)
+    // Required because Ctrl+R history search wraps text in ANSI codes,
+    // which can split "claude" into "cla\e[0mude" and break detection.
+    private let ansiPattern = try! NSRegularExpression(pattern: "\\x1B\\[[0-9;]*[A-Za-z]")
+
+    private func stripAnsiCodes(_ str: String) -> String {
+        let range = NSRange(str.startIndex..., in: str)
+        return ansiPattern.stringByReplacingMatches(in: str, range: range, withTemplate: "")
+    }
+
     private func detectAgentInOutput(_ slice: ArraySlice<UInt8>) {
-        guard let str = String(bytes: slice, encoding: .utf8) else { return }
+        guard !agentDetectedInOutput,
+              let str = String(bytes: slice, encoding: .utf8) else { return }
 
-        let oldLength = outputBuffer.count
-        outputBuffer.append(str)
+        // Strip ANSI codes to prevent keyword splitting by escape sequences
+        let cleanStr = stripAnsiCodes(str)
+        outputBuffer.append(cleanStr)
 
-        // Search only in newly added portion + keyword overlap
-        let searchStart = max(0, oldLength - agentKeyword.count)
-        let searchStartIndex = outputBuffer.index(outputBuffer.startIndex, offsetBy: searchStart)
-        if outputBuffer[searchStartIndex...].contains(agentKeyword) {
-            transition(event: .agentDetected)
+        // Set flag when keyword found - flag persists until Enter is pressed
+        // This handles Ctrl+R where keyword may appear early then get pushed out of buffer
+        if outputBuffer.contains(agentKeyword) {
+            agentDetectedInOutput = true
         }
 
         if outputBuffer.count > outputBufferMaxSize {
@@ -187,16 +206,20 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
 
     private func handleCommand(_ command: String) {
         let trimmed = command.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
 
         switch state {
         case .shell:
-            if trimmed.hasPrefix("claude") {
+            // Detect agent from direct input ("claude ...") or output flag (Ctrl+R history)
+            if trimmed.hasPrefix(agentKeyword) || agentDetectedInOutput {
                 transition(event: .agentDetected)
             }
+            outputBuffer = ""
+            agentDetectedInOutput = false
 
         case .agentActive:
-            break
+            if !trimmed.isEmpty {
+                triggerAgentResumed()
+            }
 
         case .agentIdle:
             transition(event: .newMessageSent)
