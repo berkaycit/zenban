@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Optimize terminal agent detection performance
+- **Description**: Replaced Timer with DispatchWorkItem for lighter idle detection. Reduced output buffer from 500 to 100 chars. Optimized string search to check only newly added portion plus keyword overlap. Moved activityByteCount reset to agentActive transition only, removing unnecessary resets.
+
+- **Summary**: Add state machine for Claude agent detection
+- **Description**: ZenbanTerminalView now uses state machine (shell/agentActive/agentIdle) to detect Claude agent activity. Detects "claude" in input or output buffers, tracks idle via 2-second timer, handles Ctrl+C exit. Auto-moves cards: agentIdle triggers "In Review", new message moves back to "To Do". NotificationService extended with onTaskCompleted and onAgentResumed callbacks.
+
 - **Summary**: Add terminal task completion notifications
 - **Description**: Added macOS notifications when terminal output stops and user is not focused on that terminal. ZenbanTerminalView subclass detects idle state via 2-second timer after output. NotificationService handles UNUserNotificationCenter with click-to-navigate. Made becomeFirstResponder open in local SwiftTerm fork to track focus. Services/ folder added for app-wide services.
 
