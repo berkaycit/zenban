@@ -75,6 +75,7 @@ State machine with 3 states: `shell` → `agentActive` → `agentIdle`
 For boards with a git repository, each card gets its own worktree:
 - Created automatically when card is added (branch: `card/<uuid>`)
 - Location: `../repo-worktrees/card/<uuid>` (sibling to main repo)
-- Deleted automatically when card is deleted
+- Deleted automatically when card or board is deleted
 - Terminal starts in worktree directory, agent launches when shell is ready
 - CardDetailView shows worktree status with context menu (Copy Path, Reveal in Finder)
+- Cleanup is resilient: prunes stale entries, handles missing directories, best-effort branch deletion

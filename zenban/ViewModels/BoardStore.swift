@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 @Observable
 final class BoardStore {
     var boards: [Board] = []
@@ -44,9 +45,22 @@ final class BoardStore {
     }
 
     func deleteBoard(_ board: Board) {
+        let repoPath = board.repositoryPath
+
         for card in board.cards {
             onCardDeleted?(card.id)
+
+            // Delete worktree if exists
+            if let repoPath = repoPath,
+               card.worktreePath != nil,
+               GitService.isGitRepository(path: repoPath) {
+                let cardID = card.id
+                Task {
+                    await deleteWorktreeForCard(cardID, repositoryPath: repoPath)
+                }
+            }
         }
+
         boards.removeAll { $0.id == board.id }
         if selectedBoardID == board.id {
             selectedBoardID = boards.first?.id
@@ -161,11 +175,8 @@ final class BoardStore {
     }
 
     private func deleteWorktreeForCard(_ cardID: UUID, repositoryPath: String) async {
-        do {
-            try await GitService.deleteWorktree(cardID: cardID, repositoryPath: repositoryPath)
-        } catch {
-            print("Failed to delete worktree for card \(cardID): \(error)")
-        }
+        guard FileManager.default.fileExists(atPath: repositoryPath) else { return }
+        await GitService.deleteWorktree(cardID: cardID, repositoryPath: repositoryPath)
     }
 
     // MARK: - Persistence

@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Make worktree cleanup robust and resilient
+- **Description**: Board deletion now cleans up worktrees for all cards. Worktree operations use best-effort cleanup: prune stale entries, remove worktree registration, delete branch, remove directory. Handles edge cases like manually deleted worktrees, leftover branches from failed deletions. Refactored GitService with WorktreePaths struct and shared pruneAndCleanup helper. BoardStore marked @MainActor for thread safety.
+
 - **Summary**: Add automatic git worktree per card
 - **Description**: Cards in boards with git repos now get their own worktree automatically. Created on card add (branch: card/uuid), deleted on card delete. Terminal starts in worktree directory. Shell readiness detection via output instead of fixed delay. CardDetailView shows worktree status with Copy Path/Reveal in Finder context menu.
 

@@ -27,6 +27,18 @@ enum GitError: Error, LocalizedError {
 }
 
 struct GitService {
+    private struct WorktreePaths {
+        let branch: String
+        let directory: String
+
+        init(cardID: UUID, repositoryPath: String) {
+            branch = "card/\(cardID.uuidString)"
+            let repoParent = (repositoryPath as NSString).deletingLastPathComponent
+            let worktreesDir = (repoParent as NSString).appendingPathComponent("repo-worktrees")
+            directory = (worktreesDir as NSString).appendingPathComponent(branch)
+        }
+    }
+
     static func createRepository(name: String, parentPath: String) async throws -> String {
         let repoPath = (parentPath as NSString).appendingPathComponent(name)
         let fileManager = FileManager.default
@@ -50,48 +62,58 @@ struct GitService {
     }
 
     static func createWorktree(cardID: UUID, repositoryPath: String) async throws -> String {
-        let branchName = "card/\(cardID.uuidString)"
-        let repoParent = (repositoryPath as NSString).deletingLastPathComponent
-        let worktreesDir = (repoParent as NSString).appendingPathComponent("repo-worktrees")
-        let worktreePath = (worktreesDir as NSString).appendingPathComponent(branchName)
+        let paths = WorktreePaths(cardID: cardID, repositoryPath: repositoryPath)
+        let parentDir = (paths.directory as NSString).deletingLastPathComponent
 
         let fileManager = FileManager.default
-        if !fileManager.fileExists(atPath: worktreesDir) {
-            try fileManager.createDirectory(atPath: worktreesDir, withIntermediateDirectories: true)
+        if !fileManager.fileExists(atPath: parentDir) {
+            try fileManager.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
         }
 
+        await pruneAndCleanup(paths: paths, repositoryPath: repositoryPath)
+
         return try await runGitCommand(
-            args: ["worktree", "add", "-b", branchName, worktreePath],
+            args: ["worktree", "add", "-b", paths.branch, paths.directory],
             directory: repositoryPath,
             errorMapper: { .worktreeCreationFailed($0) },
-            successResult: worktreePath
+            successResult: paths.directory
         )
     }
 
-    static func deleteWorktree(cardID: UUID, repositoryPath: String) async throws {
-        let branchName = "card/\(cardID.uuidString)"
-        let repoParent = (repositoryPath as NSString).deletingLastPathComponent
-        let worktreesDir = (repoParent as NSString).appendingPathComponent("repo-worktrees")
-        let worktreePath = (worktreesDir as NSString).appendingPathComponent(branchName)
-
-        try await runGitCommand(
-            args: ["worktree", "remove", "--force", worktreePath],
-            directory: repositoryPath,
-            errorMapper: { .worktreeDeletionFailed($0) },
-            successResult: ()
-        )
-
-        try await runGitCommand(
-            args: ["branch", "-D", branchName],
-            directory: repositoryPath,
-            errorMapper: { .branchDeletionFailed($0) },
-            successResult: ()
-        )
+    static func deleteWorktree(cardID: UUID, repositoryPath: String) async {
+        let paths = WorktreePaths(cardID: cardID, repositoryPath: repositoryPath)
+        await pruneAndCleanup(paths: paths, repositoryPath: repositoryPath)
     }
 
     static func isGitRepository(path: String) -> Bool {
         let gitPath = (path as NSString).appendingPathComponent(".git")
         return FileManager.default.fileExists(atPath: gitPath)
+    }
+
+    /// Cleans up stale worktree entries, removes worktree registration, deletes branch, and removes directory
+    private static func pruneAndCleanup(paths: WorktreePaths, repositoryPath: String) async {
+        _ = try? await runGitCommand(
+            args: ["worktree", "prune"],
+            directory: repositoryPath,
+            errorMapper: { _ in GitError.worktreeDeletionFailed("") },
+            successResult: ()
+        )
+
+        _ = try? await runGitCommand(
+            args: ["worktree", "remove", "--force", paths.directory],
+            directory: repositoryPath,
+            errorMapper: { _ in GitError.worktreeDeletionFailed("") },
+            successResult: ()
+        )
+
+        _ = try? await runGitCommand(
+            args: ["branch", "-D", paths.branch],
+            directory: repositoryPath,
+            errorMapper: { _ in GitError.branchDeletionFailed("") },
+            successResult: ()
+        )
+
+        try? FileManager.default.removeItem(atPath: paths.directory)
     }
 
     private static func runGitCommand<T>(
