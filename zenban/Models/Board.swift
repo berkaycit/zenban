@@ -44,14 +44,16 @@ struct Card: Identifiable, Codable, Hashable, Transferable {
     var createdAt: Date
     var orderIndex: Int
     var agent: Agent?
+    var worktreePath: String?
 
-    init(id: UUID = UUID(), title: String, column: Column = .todo, orderIndex: Int = 0, agent: Agent? = nil) {
+    init(id: UUID = UUID(), title: String, column: Column = .todo, orderIndex: Int = 0, agent: Agent? = nil, worktreePath: String? = nil) {
         self.id = id
         self.title = title
         self.column = column
         self.createdAt = Date()
         self.orderIndex = orderIndex
         self.agent = agent
+        self.worktreePath = worktreePath
     }
 
     static var transferRepresentation: some TransferRepresentation {

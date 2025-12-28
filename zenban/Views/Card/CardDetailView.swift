@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct CardDetailView: View {
     let card: Card
@@ -100,6 +101,10 @@ struct CardDetailView: View {
                 .font(.caption)
             }
 
+            if store.board(for: boardID)?.repositoryPath != nil {
+                worktreeSection
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 Text("Move to")
                     .font(.caption)
@@ -149,6 +154,46 @@ struct CardDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(currentAgent == agent)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var worktreeSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Worktree")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                Image(systemName: card.worktreePath != nil ? "checkmark.circle.fill" : "clock")
+                    .foregroundStyle(card.worktreePath != nil ? .green : .orange)
+
+                if let path = card.worktreePath {
+                    Text((path as NSString).lastPathComponent)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    Text("Creating...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .contextMenu {
+                if let path = card.worktreePath {
+                    Button("Copy Path") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(path, forType: .string)
+                    }
+                    Button("Reveal in Finder") {
+                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+                    }
                 }
             }
         }

@@ -24,6 +24,10 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
     var boardID: UUID?
     var cardTitle: String?
 
+    // Shell readiness tracking
+    private(set) var isShellReady = false
+    private var pendingCommand: String?
+
     // State machine
     private var state: TerminalState = .shell {
         didSet {
@@ -132,6 +136,12 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
 
+        // Detect shell readiness on first output
+        if !isShellReady && slice.count > 0 {
+            isShellReady = true
+            executePendingCommandIfNeeded()
+        }
+
         switch state {
         case .shell:
             detectAgentInOutput(slice)
@@ -142,6 +152,25 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
 
         case .agentIdle:
             break
+        }
+    }
+
+    // MARK: - Pending Command
+
+    func sendWhenReady(_ command: String) {
+        if isShellReady {
+            send(txt: command)
+        } else {
+            pendingCommand = command
+        }
+    }
+
+    private func executePendingCommandIfNeeded() {
+        guard let command = pendingCommand else { return }
+        pendingCommand = nil
+        // Small delay to ensure prompt is fully rendered
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.send(txt: command)
         }
     }
 

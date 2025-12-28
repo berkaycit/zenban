@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add automatic git worktree per card
+- **Description**: Cards in boards with git repos now get their own worktree automatically. Created on card add (branch: card/uuid), deleted on card delete. Terminal starts in worktree directory. Shell readiness detection via output instead of fixed delay. CardDetailView shows worktree status with Copy Path/Reveal in Finder context menu.
+
 - **Summary**: Add per-card agent switching in card detail
 - **Description**: Cards can now override board's default agent. CardDetailView shows agent picker below column buttons. Selecting different agent sends Ctrl+C twice, clears terminal, then launches new agent. Card model has optional agent property (nil = use board's default). TerminalManager.switchAgent handles the terminal commands.
 

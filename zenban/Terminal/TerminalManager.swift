@@ -6,6 +6,7 @@ import AppKit
 final class TerminalManager {
 
     private var terminalViews: [UUID: ZenbanTerminalView] = [:]
+    private var agentLaunchedForCard: Set<UUID> = []
     weak var boardStore: BoardStore?
 
     var isTerminalAvailable: Bool { true }
@@ -21,9 +22,24 @@ final class TerminalManager {
         let agent = card?.agent ?? board?.agent
 
         let terminalView = createTerminalView(cardID: cardID, boardID: boardID, cardTitle: cardTitle)
-        startShell(terminalView: terminalView, directory: startDirectory(for: boardID), agentCommand: agent?.launchCommand)
+
+        // For boards with repo, agent is launched via worktreeReady (not here)
+        let boardHasRepo = board?.repositoryPath != nil
+        let agentToLaunch = boardHasRepo ? nil : agent
+
+        startShell(terminalView: terminalView, directory: startDirectory(for: cardID, boardID: boardID), agentCommand: agentToLaunch?.launchCommand)
+
+        if agentToLaunch != nil {
+            agentLaunchedForCard.insert(cardID)
+        }
 
         terminalViews[cardID] = terminalView
+
+        // For existing cards that already have worktreePath, launch agent now
+        if let worktreePath = card?.worktreePath, let agent = agent {
+            worktreeReady(cardID: cardID, worktreePath: worktreePath, agent: agent)
+        }
+
         return terminalView
     }
 
@@ -31,6 +47,7 @@ final class TerminalManager {
         if let terminalView = terminalViews.removeValue(forKey: cardID) {
             terminalView.process.terminate()
         }
+        agentLaunchedForCard.remove(cardID)
     }
 
     func switchAgent(for cardID: UUID, to agent: Agent) {
@@ -53,11 +70,23 @@ final class TerminalManager {
         }
     }
 
+    func worktreeReady(cardID: UUID, worktreePath: String, agent: Agent) {
+        guard let terminalView = terminalViews[cardID],
+              !agentLaunchedForCard.contains(cardID) else { return }
+
+        agentLaunchedForCard.insert(cardID)
+
+        // Send command when shell is ready (detected via terminal output)
+        let command = "cd \"\(worktreePath)\" && \(agent.launchCommand)\n"
+        terminalView.sendWhenReady(command)
+    }
+
     func terminateAllSessions() {
         for terminalView in terminalViews.values {
             terminalView.process.terminate()
         }
         terminalViews.removeAll()
+        agentLaunchedForCard.removeAll()
     }
 
     // MARK: - Private Helpers
@@ -78,7 +107,7 @@ final class TerminalManager {
         return terminalView
     }
 
-    private func startShell(terminalView: LocalProcessTerminalView, directory: String?, agentCommand: String?) {
+    private func startShell(terminalView: ZenbanTerminalView, directory: String?, agentCommand: String?) {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
 
         terminalView.startProcess(
@@ -90,18 +119,26 @@ final class TerminalManager {
         )
 
         if let command = agentCommand {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                terminalView.send(txt: command + "\n")
-            }
+            terminalView.sendWhenReady(command + "\n")
         }
     }
 
-    private func startDirectory(for boardID: UUID) -> String? {
-        if let board = boardStore?.board(for: boardID),
-           let repoPath = board.repositoryPath,
+    private func startDirectory(for cardID: UUID, boardID: UUID) -> String? {
+        guard let board = boardStore?.board(for: boardID) else {
+            return defaultStartDirectory()
+        }
+
+        if let card = board.cards.first(where: { $0.id == cardID }),
+           let worktreePath = card.worktreePath,
+           FileManager.default.fileExists(atPath: worktreePath) {
+            return worktreePath
+        }
+
+        if let repoPath = board.repositoryPath,
            FileManager.default.fileExists(atPath: repoPath) {
             return repoPath
         }
+
         return defaultStartDirectory()
     }
 

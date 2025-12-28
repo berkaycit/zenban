@@ -29,7 +29,7 @@ zenban/
 
 | Component | Purpose |
 |-----------|---------|
-| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Skips redundant column moves. |
+| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Skips redundant column moves. Creates/deletes worktrees for cards. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board` | Data model with `isPinned`, optional `repositoryPath`, and `agent` selection |
 | `Agent` | Enum (Claude/Codex/Gemini) with launch commands. Board sets default, Card can override. |
@@ -37,10 +37,10 @@ zenban/
 | `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel with card editing, column move, and agent picker (switches terminal) |
-| `TerminalManager` | Manages terminal views per card. Uses board's `repositoryPath` as start directory and auto-launches selected agent. Terminates processes on card/board deletion and app quit. |
-| `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. |
+| `TerminalManager` | Manages terminal views per card. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell is ready. Terminates processes on card/board deletion and app quit. |
+| `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. Detects shell readiness via output. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
-| `GitService` | Creates git repositories (mkdir + git init) |
+| `GitService` | Git operations: repository init, worktree create/delete |
 | `DirectoryPicker` | NSOpenPanel wrapper for folder selection |
 
 ## Board Creation
@@ -69,3 +69,12 @@ State machine with 3 states: `shell` → `agentActive` → `agentIdle`
 - `hasBeenFocused`: prevents triggering on terminal init
 - `minActivityBytes`: ignores tiny outputs (< 10 bytes)
 - `BoardStore.moveCard`: skips if card already in target column
+
+## Card Worktrees
+
+For boards with a git repository, each card gets its own worktree:
+- Created automatically when card is added (branch: `card/<uuid>`)
+- Location: `../repo-worktrees/card/<uuid>` (sibling to main repo)
+- Deleted automatically when card is deleted
+- Terminal starts in worktree directory, agent launches when shell is ready
+- CardDetailView shows worktree status with context menu (Copy Path, Reveal in Finder)

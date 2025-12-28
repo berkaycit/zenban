@@ -8,6 +8,7 @@ final class BoardStore {
     var draggedCardID: UUID?
 
     var onCardDeleted: ((UUID) -> Void)?
+    weak var terminalManager: TerminalManager?
 
     private var saveTask: Task<Void, Never>?
 
@@ -74,6 +75,13 @@ final class BoardStore {
         boards[i].cards.append(card)
         selectedCardID = card.id
         scheduleSave()
+
+        if let repoPath = boards[i].repositoryPath,
+           GitService.isGitRepository(path: repoPath) {
+            Task {
+                await createWorktreeForCard(card.id, in: boardID, repositoryPath: repoPath)
+            }
+        }
     }
 
     // Skip if card is already in target column to prevent reordering.
@@ -104,11 +112,23 @@ final class BoardStore {
 
     func deleteCard(_ cardID: UUID, from boardID: UUID) {
         guard let i = boardIndex(for: boardID) else { return }
+
+        let card = boards[i].cards.first { $0.id == cardID }
+        let repoPath = boards[i].repositoryPath
+
         boards[i].cards.removeAll { $0.id == cardID }
         if selectedCardID == cardID { selectedCardID = nil }
         if draggedCardID == cardID { draggedCardID = nil }
         onCardDeleted?(cardID)
         scheduleSave()
+
+        if let repoPath = repoPath,
+           card?.worktreePath != nil,
+           GitService.isGitRepository(path: repoPath) {
+            Task {
+                await deleteWorktreeForCard(cardID, repositoryPath: repoPath)
+            }
+        }
     }
 
     // MARK: - Private Helpers
@@ -121,6 +141,31 @@ final class BoardStore {
         guard let bi = boardIndex(for: boardID),
               let ci = boards[bi].cards.firstIndex(where: { $0.id == cardID }) else { return nil }
         return (bi, ci)
+    }
+
+    // MARK: - Worktree Operations
+
+    private func createWorktreeForCard(_ cardID: UUID, in boardID: UUID, repositoryPath: String) async {
+        do {
+            let worktreePath = try await GitService.createWorktree(cardID: cardID, repositoryPath: repositoryPath)
+            guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+            boards[bi].cards[ci].worktreePath = worktreePath
+            scheduleSave()
+
+            // Notify terminal to launch agent in worktree
+            let agent = boards[bi].cards[ci].agent ?? boards[bi].agent
+            terminalManager?.worktreeReady(cardID: cardID, worktreePath: worktreePath, agent: agent)
+        } catch {
+            print("Failed to create worktree for card \(cardID): \(error)")
+        }
+    }
+
+    private func deleteWorktreeForCard(_ cardID: UUID, repositoryPath: String) async {
+        do {
+            try await GitService.deleteWorktree(cardID: cardID, repositoryPath: repositoryPath)
+        } catch {
+            print("Failed to delete worktree for card \(cardID): \(error)")
+        }
     }
 
     // MARK: - Persistence
