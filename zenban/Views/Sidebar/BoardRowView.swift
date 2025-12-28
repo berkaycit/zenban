@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct BoardRowView: View {
     let board: Board
@@ -52,6 +53,12 @@ struct BoardRowView: View {
                 isRenaming = true
             }
 
+            Button {
+                revealFolder()
+            } label: {
+                Label("Reveal Folder", systemImage: "folder")
+            }
+
             Divider()
 
             Button("Delete", role: .destructive) {
@@ -66,5 +73,10 @@ struct BoardRowView: View {
             store.renameBoard(board, to: trimmedName)
         }
         isRenaming = false
+    }
+
+    private func revealFolder() {
+        guard let path = board.repositoryPath else { return }
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
     }
 }
