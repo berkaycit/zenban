@@ -46,12 +46,14 @@ struct Board: Identifiable, Codable, Hashable {
     var name: String
     var cards: [Card]
     var createdAt: Date
+    var isPinned: Bool
 
-    init(id: UUID = UUID(), name: String, cards: [Card] = []) {
+    init(id: UUID = UUID(), name: String, cards: [Card] = [], isPinned: Bool = false) {
         self.id = id
         self.name = name
         self.cards = cards
         self.createdAt = Date()
+        self.isPinned = isPinned
     }
 
     func cards(in column: Column) -> [Card] {

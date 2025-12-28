@@ -15,6 +15,10 @@ final class BoardStore {
         boards.first { $0.id == selectedBoardID }
     }
 
+    var sortedBoards: [Board] {
+        boards.sorted { $0.isPinned && !$1.isPinned }
+    }
+
     var selectedCard: Card? {
         guard let cardID = selectedCardID else { return nil }
         return selectedBoard?.cards.first { $0.id == cardID }
@@ -29,7 +33,7 @@ final class BoardStore {
 
     func createBoard(name: String) {
         let board = Board(name: name)
-        boards.append(board)
+        boards.insert(board, at: 0)
         selectedBoardID = board.id
         scheduleSave()
     }
@@ -49,6 +53,12 @@ final class BoardStore {
     func renameBoard(_ board: Board, to name: String) {
         guard let index = boards.firstIndex(where: { $0.id == board.id }) else { return }
         boards[index].name = name
+        scheduleSave()
+    }
+
+    func togglePin(_ board: Board) {
+        guard let index = boards.firstIndex(where: { $0.id == board.id }) else { return }
+        boards[index].isPinned.toggle()
         scheduleSave()
     }
 

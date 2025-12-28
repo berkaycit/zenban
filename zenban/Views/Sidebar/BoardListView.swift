@@ -8,13 +8,12 @@ struct BoardListView: View {
         @Bindable var store = store
 
         List(selection: $store.selectedBoardID) {
-            ForEach(store.boards) { board in
+            ForEach(store.sortedBoards) { board in
                 BoardRowView(board: board)
                     .tag(board.id)
                     .listRowSeparator(.visible, edges: .bottom)
                     .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
             }
-            .onDelete(perform: deleteBoards)
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
@@ -39,12 +38,6 @@ struct BoardListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newBoard)) { _ in
             isAddingBoard = true
-        }
-    }
-
-    private func deleteBoards(at offsets: IndexSet) {
-        for index in offsets {
-            store.deleteBoard(store.boards[index])
         }
     }
 }
