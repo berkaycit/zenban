@@ -13,8 +13,16 @@ struct BoardCommands: Commands {
             Button("New Card") {
                 NotificationCenter.default.post(name: .newCard, object: nil)
             }
-            .keyboardShortcut("n", modifiers: .command)
+            .keyboardShortcut("a", modifiers: .shift)
             .disabled(store.selectedBoard == nil)
+        }
+
+        CommandGroup(after: .pasteboard) {
+            Button("Delete Card") {
+                store.deleteSelectedCard()
+            }
+            .keyboardShortcut("d", modifiers: .shift)
+            .disabled(store.selectedCardID == nil)
         }
     }
 }

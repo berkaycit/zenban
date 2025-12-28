@@ -124,16 +124,28 @@ final class BoardStore {
         scheduleSave()
     }
 
+    func deleteSelectedCard() {
+        guard let boardID = selectedBoardID, let cardID = selectedCardID else { return }
+        deleteCard(cardID, from: boardID)
+    }
+
     func deleteCard(_ cardID: UUID, from boardID: UUID) {
         guard let i = boardIndex(for: boardID) else { return }
 
         let card = boards[i].cards.first { $0.id == cardID }
         let repoPath = boards[i].repositoryPath
+        let wasSelected = selectedCardID == cardID
 
         boards[i].cards.removeAll { $0.id == cardID }
-        if selectedCardID == cardID { selectedCardID = nil }
         if draggedCardID == cardID { draggedCardID = nil }
         onCardDeleted?(cardID)
+
+        if wasSelected {
+            selectedCardID = boards[i].cards(in: .todo).first?.id
+                ?? boards[i].cards(in: .inProgress).first?.id
+                ?? boards[i].cards(in: .done).first?.id
+        }
+
         scheduleSave()
 
         if let repoPath = repoPath,

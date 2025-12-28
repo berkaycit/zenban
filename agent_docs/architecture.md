@@ -29,7 +29,7 @@ zenban/
 
 | Component | Purpose |
 |-----------|---------|
-| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Skips redundant column moves. Creates/deletes worktrees for cards. |
+| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Skips redundant column moves. Creates/deletes worktrees for cards. Auto-selects next card after deletion (priority: To Do, In Review, Done). |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board` | Data model with `isPinned`, optional `repositoryPath`, and `agent` selection |
 | `Agent` | Enum (Claude/Codex/Gemini) with launch commands. Board sets default, Card can override. |
@@ -79,3 +79,11 @@ For boards with a git repository, each card gets its own worktree:
 - Terminal starts in worktree directory, agent launches when shell is ready
 - CardDetailView shows worktree status with context menu (Copy Path, Reveal in Finder)
 - Cleanup is resilient: prunes stale entries, handles missing directories, best-effort branch deletion
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| Cmd+Shift+N | New Board |
+| Shift+A | New Card |
+| Shift+D | Delete selected card |
