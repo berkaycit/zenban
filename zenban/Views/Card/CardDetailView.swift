@@ -21,8 +21,8 @@ struct CardDetailView: View {
             // Normal card detail content
             VStack(alignment: .leading, spacing: 0) {
                 cardInfoSection
-                    .frame(height: showTerminal && terminalManager.isTerminalAvailable ? 240 : nil)
-                    .frame(maxHeight: showTerminal && terminalManager.isTerminalAvailable ? 240 : .infinity)
+                    .frame(height: showTerminal && terminalManager.isTerminalAvailable ? 160 : nil)
+                    .frame(maxHeight: showTerminal && terminalManager.isTerminalAvailable ? 160 : .infinity)
 
                 if terminalManager.isTerminalAvailable {
                     Divider()
@@ -85,206 +85,174 @@ struct CardDetailView: View {
     private var cardInfoSection: some View {
         ScrollView {
             cardInfoContent
-                .padding(20)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
         }
     }
 
     private var cardInfoContent: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text(card.column.rawValue)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(card.column.accentColor)
-                    .clipShape(Capsule())
+        VStack(alignment: .leading, spacing: 24) {
+            // Header: Title + Actions
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if isEditing {
+                        TextField("Card title", text: $editedTitle, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .lineLimit(1...3)
+                            .focused($isFocused)
+                            .onSubmit(saveTitle)
+                            .onExitCommand(perform: cancelEdit)
+
+                        HStack(spacing: 8) {
+                            Button("Cancel", action: cancelEdit)
+                                .keyboardShortcut(.cancelAction)
+                            Button("Save", action: saveTitle)
+                                .keyboardShortcut(.defaultAction)
+                                .disabled(editedTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                        .font(.subheadline)
+                    } else {
+                        Text(card.title)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture { startEditing() }
+                    }
+
+                    // Metadata line
+                    Text(card.createdAt.formatted(date: .abbreviated, time: .omitted))
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                }
 
                 Spacer()
 
-                Button(action: deleteCard) {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.red)
-                }
-                .buttonStyle(.plain)
-            }
+                // Quick actions
+                HStack(spacing: 12) {
+                    if store.board(for: boardID)?.repositoryPath != nil && card.worktreePath != nil {
+                        Button(action: { showGitChanges = true }) {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 15))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("View Changes")
 
-            if isEditing {
-                TextField("Card title", text: $editedTitle, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.title2)
-                    .lineLimit(1...10)
-                    .focused($isFocused)
-                    .onSubmit(saveTitle)
-                    .onExitCommand(perform: cancelEdit)
-
-                HStack {
-                    Button("Cancel", action: cancelEdit)
-                        .keyboardShortcut(.cancelAction)
-                    Button("Save", action: saveTitle)
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(editedTitle.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            } else {
-                Text(card.title)
-                    .font(.title2)
-                    .fontWeight(.medium)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        startEditing()
+                        Button(action: startDevServer) {
+                            Image(systemName: "play.circle")
+                                .font(.system(size: 15))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Dev Server")
+                        .contextMenu {
+                            if store.board(for: boardID)?.devServerConfig != nil {
+                                Button("Reconfigure") { showDevServerCommand = true }
+                            }
+                        }
                     }
-            }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Label {
-                    Text("Created \(card.createdAt.formatted(date: .abbreviated, time: .shortened))")
-                        .foregroundStyle(.secondary)
-                } icon: {
-                    Image(systemName: "calendar")
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption)
-            }
-
-            if store.board(for: boardID)?.repositoryPath != nil {
-                worktreeSection
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Move to")
-                    .font(.caption)
+                    Button(action: deleteCard) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 15))
+                    }
+                    .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
+                    .help("Delete")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
 
-                HStack(spacing: 8) {
+            // Status & Controls
+            HStack(spacing: 24) {
+                // Column pills
+                HStack(spacing: 2) {
                     ForEach(Column.allCases) { column in
                         Button(action: { moveToColumn(column) }) {
                             Text(column.rawValue)
-                                .font(.caption)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(card.column == column ? column.accentColor : Color.secondary.opacity(0.2))
-                                .foregroundStyle(card.column == column ? .white : .primary)
+                                .font(.callout)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(card.column == column ? column.accentColor : Color.clear)
+                                .foregroundStyle(card.column == column ? .white : .secondary)
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
                         .disabled(card.column == column)
                     }
                 }
-            }
+                .padding(4)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            agentPickerSection
-        }
-    }
-
-    private var currentAgent: Agent {
-        card.agent ?? store.board(for: boardID)?.agent ?? .claude
-    }
-
-    private var agentPickerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Agent")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                ForEach(Agent.allCases) { agent in
-                    Button(action: { switchAgent(to: agent) }) {
-                        Text(agent.rawValue)
-                            .font(.caption)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(currentAgent == agent ? Color.accentColor : Color.secondary.opacity(0.2))
-                            .foregroundStyle(currentAgent == agent ? .white : .primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                // Agent pills
+                HStack(spacing: 2) {
+                    ForEach(Agent.allCases) { agent in
+                        Button(action: { switchAgent(to: agent) }) {
+                            Text(agent.rawValue)
+                                .font(.callout)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(currentAgent == agent ? Color.accentColor : Color.clear)
+                                .foregroundStyle(currentAgent == agent ? .white : .secondary)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(currentAgent == agent)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(currentAgent == agent)
+                }
+                .padding(4)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                Spacer()
+
+                // Worktree indicator
+                if store.board(for: boardID)?.repositoryPath != nil {
+                    worktreeIndicator
                 }
             }
         }
     }
 
     @ViewBuilder
-    private var worktreeSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Worktree")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private var worktreeIndicator: some View {
+        HStack(spacing: 8) {
+            Image(systemName: card.worktreePath != nil ? "checkmark.circle.fill" : "clock")
+                .font(.system(size: 13))
+                .foregroundStyle(card.worktreePath != nil ? .green : .orange)
 
-            HStack(spacing: 8) {
-                Image(systemName: card.worktreePath != nil ? "checkmark.circle.fill" : "clock")
-                    .foregroundStyle(card.worktreePath != nil ? .green : .orange)
-
-                if let path = card.worktreePath {
-                    Text((path as NSString).lastPathComponent)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                } else {
-                    Text("Creating...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            if let path = card.worktreePath {
+                Text((path as NSString).lastPathComponent)
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("Creating...")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.secondary.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .contextMenu {
-                if let path = card.worktreePath {
-                    Button("Copy Path") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(path, forType: .string)
-                    }
-                    Button("Reveal in Finder") {
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
-                    }
+        }
+        .contextMenu {
+            if let path = card.worktreePath {
+                Button("Copy Path") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(path, forType: .string)
                 }
-            }
-
-            if card.worktreePath != nil {
-                HStack(spacing: 8) {
-                    Button(action: { showGitChanges = true }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.triangle.branch")
-                            Text("View Changes")
-                        }
-                        .font(.caption)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.accentColor.opacity(0.1))
-                        .foregroundStyle(Color.accentColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: startDevServer) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "play.circle")
-                            Text("Start Dev Server")
-                        }
-                        .font(.caption)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.green.opacity(0.1))
-                        .foregroundStyle(Color.green)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        if store.board(for: boardID)?.devServerConfig != nil {
-                            Button("Reconfigure Dev Server") {
-                                showDevServerCommand = true
-                            }
-                        }
-                    }
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
                 }
             }
         }
+    }
+
+    private var currentAgent: Agent {
+        card.agent ?? store.board(for: boardID)?.agent ?? .claude
     }
 
     private func switchAgent(to agent: Agent) {
