@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add per-card agent switching in card detail
+- **Description**: Cards can now override board's default agent. CardDetailView shows agent picker below column buttons. Selecting different agent sends Ctrl+C twice, clears terminal, then launches new agent. Card model has optional agent property (nil = use board's default). TerminalManager.switchAgent handles the terminal commands.
+
 - **Summary**: Add agent selection and Reveal Folder for boards
 - **Description**: Board creation now includes agent picker (Claude Code, Codex, Gemini). Selected agent auto-launches in terminal after shell starts. Agent enum in Board.swift stores launch commands. BoardRowView context menu adds "Reveal Folder" to open board directory in Finder. UI improvements: larger popup (420px), bigger buttons, consistent input box styling.
 

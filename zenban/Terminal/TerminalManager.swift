@@ -17,8 +17,11 @@ final class TerminalManager {
         }
 
         let board = boardStore?.board(for: boardID)
+        let card = board?.cards.first { $0.id == cardID }
+        let agent = card?.agent ?? board?.agent
+
         let terminalView = createTerminalView(cardID: cardID, boardID: boardID, cardTitle: cardTitle)
-        startShell(terminalView: terminalView, directory: startDirectory(for: boardID), agentCommand: board?.agent.launchCommand)
+        startShell(terminalView: terminalView, directory: startDirectory(for: boardID), agentCommand: agent?.launchCommand)
 
         terminalViews[cardID] = terminalView
         return terminalView
@@ -27,6 +30,26 @@ final class TerminalManager {
     func killSessionForCard(_ cardID: UUID) async {
         if let terminalView = terminalViews.removeValue(forKey: cardID) {
             terminalView.process.terminate()
+        }
+    }
+
+    func switchAgent(for cardID: UUID, to agent: Agent) {
+        guard let terminalView = terminalViews[cardID] else { return }
+
+        // Send Ctrl+C twice to exit agent
+        terminalView.send(txt: "\u{03}")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            terminalView.send(txt: "\u{03}")
+        }
+
+        // Clear terminal
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            terminalView.send(txt: "clear\n")
+        }
+
+        // Launch new agent
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            terminalView.send(txt: agent.launchCommand + "\n")
         }
     }
 

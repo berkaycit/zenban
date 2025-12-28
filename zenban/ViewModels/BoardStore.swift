@@ -96,6 +96,12 @@ final class BoardStore {
         scheduleSave()
     }
 
+    func updateCardAgent(_ cardID: UUID, agent: Agent?, in boardID: UUID) {
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        boards[bi].cards[ci].agent = agent
+        scheduleSave()
+    }
+
     func deleteCard(_ cardID: UUID, from boardID: UUID) {
         guard let i = boardIndex(for: boardID) else { return }
         boards[i].cards.removeAll { $0.id == cardID }

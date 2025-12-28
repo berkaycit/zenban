@@ -32,11 +32,11 @@ zenban/
 | `BoardStore` | Central state manager with `sortedBoards` (pinned first). Skips redundant column moves. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board` | Data model with `isPinned`, optional `repositoryPath`, and `agent` selection |
-| `Agent` | Enum (Claude/Codex/Gemini) with launch commands for terminal auto-start |
+| `Agent` | Enum (Claude/Codex/Gemini) with launch commands. Board sets default, Card can override. |
 | `Column` | Enum with display name and accent color |
 | `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
-| `CardDetailView` | Right panel for viewing and editing selected card |
+| `CardDetailView` | Right panel with card editing, column move, and agent picker (switches terminal) |
 | `TerminalManager` | Manages terminal views per card. Uses board's `repositoryPath` as start directory and auto-launches selected agent. Terminates processes on card/board deletion and app quit. |
 | `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |

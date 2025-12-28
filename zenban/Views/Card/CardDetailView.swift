@@ -121,7 +121,42 @@ struct CardDetailView: View {
                     }
                 }
             }
+
+            agentPickerSection
         }
+    }
+
+    private var currentAgent: Agent {
+        card.agent ?? store.board(for: boardID)?.agent ?? .claude
+    }
+
+    private var agentPickerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Agent")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                ForEach(Agent.allCases) { agent in
+                    Button(action: { switchAgent(to: agent) }) {
+                        Text(agent.rawValue)
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(currentAgent == agent ? Color.accentColor : Color.secondary.opacity(0.2))
+                            .foregroundStyle(currentAgent == agent ? .white : .primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(currentAgent == agent)
+                }
+            }
+        }
+    }
+
+    private func switchAgent(to agent: Agent) {
+        store.updateCardAgent(card.id, agent: agent, in: boardID)
+        terminalManager.switchAgent(for: card.id, to: agent)
     }
 
     private var terminalSection: some View {

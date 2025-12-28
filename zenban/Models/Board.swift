@@ -43,13 +43,15 @@ struct Card: Identifiable, Codable, Hashable, Transferable {
     var column: Column
     var createdAt: Date
     var orderIndex: Int
+    var agent: Agent?
 
-    init(id: UUID = UUID(), title: String, column: Column = .todo, orderIndex: Int = 0) {
+    init(id: UUID = UUID(), title: String, column: Column = .todo, orderIndex: Int = 0, agent: Agent? = nil) {
         self.id = id
         self.title = title
         self.column = column
         self.createdAt = Date()
         self.orderIndex = orderIndex
+        self.agent = agent
     }
 
     static var transferRepresentation: some TransferRepresentation {
