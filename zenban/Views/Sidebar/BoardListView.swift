@@ -85,7 +85,8 @@ struct AddBoardSheet: View {
 
             VStack(spacing: 8) {
                 optionButton(icon: "folder", title: "From Existing Directory", subtitle: "Select an existing folder from your system") {
-                    if let url = DirectoryPicker.selectDirectory(title: "Select Directory") {
+                    DirectoryPicker.selectDirectory(title: "Select Directory") { url in
+                        guard let url else { return }
                         name = url.lastPathComponent
                         step = .enterName(repositoryPath: url.path)
                     }
@@ -159,7 +160,8 @@ struct AddBoardSheet: View {
                         .lineLimit(1).truncationMode(.middle)
                     Spacer()
                     Button("Browse...") {
-                        if let url = DirectoryPicker.selectDirectory(title: "Select Parent Folder") {
+                        DirectoryPicker.selectDirectory(title: "Select Parent Folder") { url in
+                            guard let url else { return }
                             parentPath = url.path
                         }
                     }
