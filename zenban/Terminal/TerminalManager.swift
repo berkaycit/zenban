@@ -6,6 +6,7 @@ import AppKit
 final class TerminalManager {
 
     private var terminalViews: [UUID: ZenbanTerminalView] = [:]
+    weak var boardStore: BoardStore?
 
     var isTerminalAvailable: Bool { true }
 
@@ -16,7 +17,7 @@ final class TerminalManager {
         }
 
         let terminalView = createTerminalView(cardID: cardID, boardID: boardID, cardTitle: cardTitle)
-        startShell(terminalView: terminalView)
+        startShell(terminalView: terminalView, directory: startDirectory(for: boardID))
 
         terminalViews[cardID] = terminalView
         return terminalView
@@ -53,17 +54,24 @@ final class TerminalManager {
         return terminalView
     }
 
-    private func startShell(terminalView: LocalProcessTerminalView) {
+    private func startShell(terminalView: LocalProcessTerminalView, directory: String?) {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let startDirectory = defaultStartDirectory()
 
         terminalView.startProcess(
             executable: shell,
             args: ["--login"],
             environment: nil,
             execName: nil,
-            currentDirectory: startDirectory
+            currentDirectory: directory
         )
+    }
+
+    private func startDirectory(for boardID: UUID) -> String? {
+        if let repoPath = boardStore?.repositoryPath(for: boardID),
+           FileManager.default.fileExists(atPath: repoPath) {
+            return repoPath
+        }
+        return defaultStartDirectory()
     }
 
     private func defaultStartDirectory() -> String? {

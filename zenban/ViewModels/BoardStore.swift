@@ -31,11 +31,15 @@ final class BoardStore {
 
     // MARK: - Board Operations
 
-    func createBoard(name: String) {
-        let board = Board(name: name)
+    func createBoard(name: String, repositoryPath: String? = nil) {
+        let board = Board(name: name, repositoryPath: repositoryPath)
         boards.insert(board, at: 0)
         selectedBoardID = board.id
         scheduleSave()
+    }
+
+    func repositoryPath(for boardID: UUID) -> String? {
+        boards.first { $0.id == boardID }?.repositoryPath
     }
 
     func deleteBoard(_ board: Board) {

@@ -39,6 +39,7 @@ struct zenbanApp: App {
     }
 
     private func setupCardDeletionHandler() {
+        terminalManager.boardStore = store
         store.onCardDeleted = { [terminalManager] cardID in
             Task {
                 await terminalManager.killSessionForCard(cardID)
