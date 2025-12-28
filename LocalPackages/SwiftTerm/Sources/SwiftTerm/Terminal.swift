@@ -688,8 +688,8 @@ open class Terminal {
         // correct the savedY cursor to follow changes to y
         let dy = normalBuffer.savedY - normalBuffer.y
         normalBuffer.resize (newCols: newColumns, newRows: newRows)
-        normalBuffer.savedY = normalBuffer.y + dy
-        
+        normalBuffer.savedY = max(0, normalBuffer.y + dy)
+
         altBuffer.resize (newCols: newColumns, newRows: newRows)
 
     }
@@ -2300,8 +2300,8 @@ open class Terminal {
 
     func cmdRestoreCursor (_ pars: [Int], _ collect: cstring)
     {
-        buffer.x = buffer.savedX
-        buffer.y = buffer.savedY
+        buffer.x = max(0, buffer.savedX)
+        buffer.y = max(0, buffer.savedY)
         curAttr = buffer.savedAttr
         charset = buffer.savedCharset
         originMode = buffer.savedOriginMode
