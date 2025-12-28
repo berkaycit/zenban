@@ -10,6 +10,17 @@ struct BoardRowView: View {
 
     private let titleFont = Font.system(size: 13, weight: .semibold)
 
+    private var isSelected: Bool {
+        store.selectedBoardID == board.id
+    }
+
+    private var selectionColor: Color {
+        if !isSelected { return .clear }
+        return store.focusRegion == .sidebar
+            ? Color.accentColor.opacity(0.75)
+            : Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 3) {
@@ -41,6 +52,16 @@ struct BoardRowView: View {
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 6)
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(selectionColor)
+                .padding(.horizontal, 4)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            store.selectedBoardID = board.id
+            store.focusRegion = .sidebar
+        }
         .contextMenu {
             Button {
                 store.togglePin(board)

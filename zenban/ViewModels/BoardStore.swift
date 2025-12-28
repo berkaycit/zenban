@@ -1,5 +1,10 @@
 import SwiftUI
 
+enum FocusRegion {
+    case sidebar
+    case cards
+}
+
 @MainActor
 @Observable
 final class BoardStore {
@@ -7,6 +12,7 @@ final class BoardStore {
     var selectedBoardID: UUID?
     var selectedCardID: UUID?
     var draggedCardID: UUID?
+    var focusRegion: FocusRegion = .sidebar
 
     var onCardDeleted: ((UUID) -> Void)?
     weak var terminalManager: TerminalManager?
@@ -155,6 +161,123 @@ final class BoardStore {
                 await deleteWorktreeForCard(cardID, repositoryPath: repoPath)
             }
         }
+    }
+
+    // MARK: - Keyboard Navigation
+
+    func selectPreviousCard() {
+        guard let board = selectedBoard,
+              let card = selectedCard else {
+            selectFirstCard(in: .todo)
+            return
+        }
+        let cards = board.cards(in: card.column)
+        guard let index = cards.firstIndex(where: { $0.id == card.id }),
+              index > 0 else { return }
+        selectedCardID = cards[index - 1].id
+    }
+
+    func selectNextCard() {
+        guard let board = selectedBoard,
+              let card = selectedCard else {
+            selectFirstCard(in: .todo)
+            return
+        }
+        let cards = board.cards(in: card.column)
+        guard let index = cards.firstIndex(where: { $0.id == card.id }),
+              index < cards.count - 1 else { return }
+        selectedCardID = cards[index + 1].id
+    }
+
+    func selectCardInPreviousColumn() {
+        guard let board = selectedBoard,
+              let card = selectedCard else {
+            selectFirstCard(in: .todo)
+            return
+        }
+        let columns = Column.allCases
+        let currentCards = board.cards(in: card.column)
+        let currentIndex = currentCards.firstIndex(where: { $0.id == card.id }) ?? 0
+        guard let columnIndex = columns.firstIndex(of: card.column) else { return }
+
+        if columnIndex == 0 {
+            selectedCardID = nil
+            focusRegion = .sidebar
+            return
+        }
+
+        // Find previous non-empty column
+        for i in stride(from: columnIndex - 1, through: 0, by: -1) {
+            let targetCards = board.cards(in: columns[i])
+            if !targetCards.isEmpty {
+                let targetIndex = min(currentIndex, targetCards.count - 1)
+                selectedCardID = targetCards[targetIndex].id
+                return
+            }
+        }
+        selectedCardID = nil
+        focusRegion = .sidebar
+    }
+
+    func selectCardInNextColumn() {
+        guard let board = selectedBoard,
+              let card = selectedCard else {
+            selectFirstCard(in: .todo)
+            return
+        }
+        let columns = Column.allCases
+        let currentCards = board.cards(in: card.column)
+        let currentIndex = currentCards.firstIndex(where: { $0.id == card.id }) ?? 0
+        guard let columnIndex = columns.firstIndex(of: card.column) else { return }
+
+        // Find next non-empty column
+        for i in (columnIndex + 1)..<columns.count {
+            let targetCards = board.cards(in: columns[i])
+            if !targetCards.isEmpty {
+                let targetIndex = min(currentIndex, targetCards.count - 1)
+                selectedCardID = targetCards[targetIndex].id
+                return
+            }
+        }
+    }
+
+    func enterCardsFromSidebar() {
+        guard selectedBoard != nil else { return }
+        for column in Column.allCases {
+            if selectFirstCard(in: column) { return }
+        }
+    }
+
+    func selectPreviousBoard() {
+        let boards = sortedBoards
+        guard !boards.isEmpty else { return }
+        guard let currentID = selectedBoardID,
+              let index = boards.firstIndex(where: { $0.id == currentID }),
+              index > 0 else { return }
+        selectedBoardID = boards[index - 1].id
+    }
+
+    func selectNextBoard() {
+        let boards = sortedBoards
+        guard !boards.isEmpty else { return }
+        guard let currentID = selectedBoardID,
+              let index = boards.firstIndex(where: { $0.id == currentID }),
+              index < boards.count - 1 else {
+            if selectedBoardID == nil, let first = boards.first {
+                selectedBoardID = first.id
+            }
+            return
+        }
+        selectedBoardID = boards[index + 1].id
+    }
+
+    @discardableResult
+    private func selectFirstCard(in column: Column) -> Bool {
+        guard let board = selectedBoard,
+              let firstCard = board.cards(in: column).first else { return false }
+        selectedCardID = firstCard.id
+        focusRegion = .cards
+        return true
     }
 
     // MARK: - Private Helpers

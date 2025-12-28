@@ -5,12 +5,9 @@ struct BoardListView: View {
     @State private var isAddingBoard = false
 
     var body: some View {
-        @Bindable var store = store
-
-        List(selection: $store.selectedBoardID) {
+        List {
             ForEach(store.sortedBoards) { board in
                 BoardRowView(board: board)
-                    .tag(board.id)
                     .listRowSeparator(.visible, edges: .bottom)
                     .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
             }
@@ -38,6 +35,9 @@ struct BoardListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newBoard)) { _ in
             isAddingBoard = true
+        }
+        .onChange(of: store.selectedBoardID) {
+            store.focusRegion = .sidebar
         }
     }
 }

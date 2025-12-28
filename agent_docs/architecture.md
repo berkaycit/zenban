@@ -29,7 +29,7 @@ zenban/
 
 | Component | Purpose |
 |-----------|---------|
-| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Skips redundant column moves. Creates/deletes worktrees for cards. Auto-selects next card after deletion (priority: To Do, In Review, Done). |
+| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Tracks `focusRegion` for keyboard navigation. Skips redundant column moves. Creates/deletes worktrees for cards. Auto-selects next card after deletion. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board` | Data model with `isPinned`, optional `repositoryPath`, and `agent` selection |
 | `Agent` | Enum (Claude/Codex/Gemini) with launch commands. Board sets default, Card can override. |
@@ -87,3 +87,8 @@ For boards with a git repository, each card gets its own worktree:
 | Cmd+Shift+N | New Board |
 | Shift+A | New Card |
 | Shift+D | Delete selected card |
+| Arrow Up/Down | Navigate cards in column (when in cards) or boards (when in sidebar) |
+| Arrow Left | Previous column, or go to sidebar from first column |
+| Arrow Right | Next column, or go to cards from sidebar |
+
+`FocusRegion` enum tracks whether sidebar or cards has keyboard focus. All arrow key navigation is handled via `onKeyPress` in ContentView, with navigation logic in BoardStore. Sidebar selection uses custom `listRowBackground` for focus-aware styling.

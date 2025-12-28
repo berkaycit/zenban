@@ -39,6 +39,7 @@ struct CardView: View {
         }
         .onTapGesture {
             store.selectedCardID = card.id
+            store.focusRegion = .cards
         }
     }
 }
