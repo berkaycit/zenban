@@ -68,6 +68,7 @@ final class BoardStore {
         guard let i = boardIndex(for: boardID) else { return }
         let card = Card(title: title, orderIndex: boards[i].nextOrderIndex)
         boards[i].cards.append(card)
+        selectedCardID = card.id
         scheduleSave()
     }
 
@@ -76,12 +77,12 @@ final class BoardStore {
     func moveCard(_ cardID: UUID, to column: Column, in boardID: UUID) {
         guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID),
               boards[bi].cards[ci].column != column else { return }
-        let maxOrderIndex = boards[bi].cards
+        let minOrderIndex = boards[bi].cards
             .filter { $0.column == column }
             .map(\.orderIndex)
-            .max() ?? -1
+            .min() ?? 1
         boards[bi].cards[ci].column = column
-        boards[bi].cards[ci].orderIndex = maxOrderIndex + 1
+        boards[bi].cards[ci].orderIndex = minOrderIndex - 1
         scheduleSave()
     }
 

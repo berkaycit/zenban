@@ -47,7 +47,7 @@ State machine with 3 states: `shell` → `agentActive` → `agentIdle`
 **Flow:**
 1. User types "claude" + Enter → `agentActive`, card stays
 2. User sends message to Claude → card moves to "To Do"
-3. Claude responds, 2s idle → `agentIdle`, card moves to "In Progress"
+3. Claude responds, 2s idle → `agentIdle`, card moves to "In Review"
 4. User sends new message → back to step 2
 5. Ctrl+C exits → back to `shell`
 

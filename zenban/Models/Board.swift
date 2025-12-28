@@ -62,6 +62,6 @@ struct Board: Identifiable, Codable, Hashable {
     }
 
     var nextOrderIndex: Int {
-        (cards.map(\.orderIndex).max() ?? -1) + 1
+        (cards.map(\.orderIndex).min() ?? 1) - 1
     }
 }
