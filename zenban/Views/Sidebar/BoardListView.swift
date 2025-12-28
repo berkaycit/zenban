@@ -54,13 +54,14 @@ struct AddBoardSheet: View {
     @State private var step: BoardCreationStep = .selectType
     @State private var name = ""
     @State private var parentPath = ""
+    @State private var selectedAgent: Agent = .claude
     @State private var errorMessage: String?
     @FocusState private var isFocused: Bool
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             switch step {
             case .selectType:
                 typeSelectionView
@@ -70,14 +71,14 @@ struct AddBoardSheet: View {
                 createRepositoryView
             }
         }
-        .padding(20)
-        .frame(width: 350)
+        .padding(24)
+        .frame(width: 420)
     }
 
     private var typeSelectionView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Text("New Board")
-                .font(.headline)
+                .font(.title3).fontWeight(.semibold)
 
             Text("Select or create a repository for your project")
                 .font(.subheadline)
@@ -101,40 +102,46 @@ struct AddBoardSheet: View {
 
             Button("Cancel") { isPresented = false }
                 .keyboardShortcut(.cancelAction)
+                .controlSize(.large)
         }
     }
 
     private func optionButton(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .font(.title3)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
+                    .font(.title2)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(title).fontWeight(.medium)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            .padding(12)
+            .padding(14)
             .background(Color.secondary.opacity(0.1))
-            .cornerRadius(8)
+            .cornerRadius(10)
         }
         .buttonStyle(.plain)
     }
 
     private func nameEntryView(repositoryPath: String?) -> some View {
-        VStack(spacing: 16) {
-            Text("Board Name").font(.headline)
+        VStack(spacing: 20) {
+            Text("Board Name").font(.title3).fontWeight(.semibold)
 
             if let path = repositoryPath {
                 Text(path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
 
             TextField("Board name", text: $name)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .focused($isFocused)
                 .onSubmit { finishCreation(repositoryPath: repositoryPath) }
+                .padding(10)
+                .background(Color.secondary.opacity(0.1))
+                .cornerRadius(10)
+
+            agentPicker
 
             buttonRow(createDisabled: trimmedName.isEmpty) {
                 finishCreation(repositoryPath: repositoryPath)
@@ -144,12 +151,17 @@ struct AddBoardSheet: View {
     }
 
     private var createRepositoryView: some View {
-        VStack(spacing: 16) {
-            Text("Create Repository").font(.headline)
+        VStack(spacing: 20) {
+            Text("Create Repository").font(.title3).fontWeight(.semibold)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Repository Name").font(.caption).foregroundStyle(.secondary)
-                TextField("my-project", text: $name).textFieldStyle(.roundedBorder).focused($isFocused)
+                TextField("my-project", text: $name)
+                    .textFieldStyle(.plain)
+                    .focused($isFocused)
+                    .padding(10)
+                    .background(Color.secondary.opacity(0.1))
+                    .cornerRadius(10)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -166,14 +178,16 @@ struct AddBoardSheet: View {
                         }
                     }
                 }
-                .padding(8)
+                .padding(10)
                 .background(Color.secondary.opacity(0.1))
-                .cornerRadius(8)
+                .cornerRadius(10)
 
                 if !parentPath.isEmpty {
                     Text(parentPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
             }
+
+            agentPicker
 
             if let error = errorMessage {
                 Text(error).font(.caption).foregroundStyle(.red)
@@ -186,12 +200,35 @@ struct AddBoardSheet: View {
         .onAppear { isFocused = true }
     }
 
+    private var agentPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Agent").font(.caption).foregroundStyle(.secondary)
+            Picker("Agent", selection: $selectedAgent) {
+                ForEach(Agent.allCases) { agent in
+                    Text(agent.rawValue).tag(agent)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 10)
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(10)
+        }
+    }
+
     private func buttonRow(createDisabled: Bool, onCreate: @escaping () -> Void) -> some View {
         HStack {
             Button("Back") { resetToTypeSelection() }
+                .controlSize(.large)
             Spacer()
-            Button("Cancel") { isPresented = false }.keyboardShortcut(.cancelAction)
-            Button("Create", action: onCreate).keyboardShortcut(.defaultAction).disabled(createDisabled)
+            Button("Cancel") { isPresented = false }
+                .keyboardShortcut(.cancelAction)
+                .controlSize(.large)
+            Button("Create", action: onCreate)
+                .keyboardShortcut(.defaultAction)
+                .disabled(createDisabled)
+                .controlSize(.large)
         }
     }
 
@@ -199,12 +236,13 @@ struct AddBoardSheet: View {
         step = .selectType
         name = ""
         parentPath = ""
+        selectedAgent = .claude
         errorMessage = nil
     }
 
     private func finishCreation(repositoryPath: String?) {
         guard !trimmedName.isEmpty else { return }
-        store.createBoard(name: trimmedName, repositoryPath: repositoryPath)
+        store.createBoard(name: trimmedName, repositoryPath: repositoryPath, agent: selectedAgent)
         isPresented = false
     }
 
@@ -213,7 +251,7 @@ struct AddBoardSheet: View {
         Task {
             do {
                 let repoPath = try await GitService.createRepository(name: trimmedName, parentPath: parentPath)
-                store.createBoard(name: trimmedName, repositoryPath: repoPath)
+                store.createBoard(name: trimmedName, repositoryPath: repoPath, agent: selectedAgent)
                 isPresented = false
             } catch {
                 errorMessage = error.localizedDescription

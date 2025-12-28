@@ -21,6 +21,22 @@ enum Column: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum Agent: String, Codable, CaseIterable, Identifiable {
+    case claude = "Claude Code"
+    case codex = "Codex"
+    case gemini = "Gemini"
+
+    var id: String { rawValue }
+
+    var launchCommand: String {
+        switch self {
+        case .claude: "claude --dangerously-skip-permissions"
+        case .codex: "codex --yolo"
+        case .gemini: "gemini --yolo"
+        }
+    }
+}
+
 struct Card: Identifiable, Codable, Hashable, Transferable {
     let id: UUID
     var title: String
@@ -48,14 +64,16 @@ struct Board: Identifiable, Codable, Hashable {
     var createdAt: Date
     var isPinned: Bool
     var repositoryPath: String?
+    var agent: Agent
 
-    init(id: UUID = UUID(), name: String, cards: [Card] = [], isPinned: Bool = false, repositoryPath: String? = nil) {
+    init(id: UUID = UUID(), name: String, cards: [Card] = [], isPinned: Bool = false, repositoryPath: String? = nil, agent: Agent = .claude) {
         self.id = id
         self.name = name
         self.cards = cards
         self.createdAt = Date()
         self.isPinned = isPinned
         self.repositoryPath = repositoryPath
+        self.agent = agent
     }
 
     func cards(in column: Column) -> [Card] {

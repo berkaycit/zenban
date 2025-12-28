@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add agent selection and Reveal Folder for boards
+- **Description**: Board creation now includes agent picker (Claude Code, Codex, Gemini). Selected agent auto-launches in terminal after shell starts. Agent enum in Board.swift stores launch commands. BoardRowView context menu adds "Reveal Folder" to open board directory in Finder. UI improvements: larger popup (420px), bigger buttons, consistent input box styling.
+
 - **Summary**: Add git repository selection for board creation
 - **Description**: Board creation now offers three options: select existing directory, create new repository (mkdir + git init), or empty board. Board model has optional `repositoryPath`. TerminalManager uses board's path as terminal start directory (falls back to Documents/Desktop if path missing or deleted). New files: GitService.swift, DirectoryPicker.swift. AddBoardSheet uses multi-step flow with state machine.
 

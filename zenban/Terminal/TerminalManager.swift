@@ -16,8 +16,9 @@ final class TerminalManager {
             return existingView
         }
 
+        let board = boardStore?.board(for: boardID)
         let terminalView = createTerminalView(cardID: cardID, boardID: boardID, cardTitle: cardTitle)
-        startShell(terminalView: terminalView, directory: startDirectory(for: boardID))
+        startShell(terminalView: terminalView, directory: startDirectory(for: boardID), agentCommand: board?.agent.launchCommand)
 
         terminalViews[cardID] = terminalView
         return terminalView
@@ -54,7 +55,7 @@ final class TerminalManager {
         return terminalView
     }
 
-    private func startShell(terminalView: LocalProcessTerminalView, directory: String?) {
+    private func startShell(terminalView: LocalProcessTerminalView, directory: String?, agentCommand: String?) {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
 
         terminalView.startProcess(
@@ -64,10 +65,17 @@ final class TerminalManager {
             execName: nil,
             currentDirectory: directory
         )
+
+        if let command = agentCommand {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                terminalView.send(txt: command + "\n")
+            }
+        }
     }
 
     private func startDirectory(for boardID: UUID) -> String? {
-        if let repoPath = boardStore?.repositoryPath(for: boardID),
+        if let board = boardStore?.board(for: boardID),
+           let repoPath = board.repositoryPath,
            FileManager.default.fileExists(atPath: repoPath) {
             return repoPath
         }

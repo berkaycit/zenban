@@ -31,12 +31,13 @@ zenban/
 |-----------|---------|
 | `BoardStore` | Central state manager with `sortedBoards` (pinned first). Skips redundant column moves. |
 | `BoardStorage` | JSON persistence to Application Support |
-| `Board` | Data model with `isPinned` and optional `repositoryPath` for directory association |
+| `Board` | Data model with `isPinned`, optional `repositoryPath`, and `agent` selection |
+| `Agent` | Enum (Claude/Codex/Gemini) with launch commands for terminal auto-start |
 | `Column` | Enum with display name and accent color |
 | `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel for viewing and editing selected card |
-| `TerminalManager` | Manages terminal views per card. Uses board's `repositoryPath` as start directory. Terminates processes on card/board deletion and app quit. |
+| `TerminalManager` | Manages terminal views per card. Uses board's `repositoryPath` as start directory and auto-launches selected agent. Terminates processes on card/board deletion and app quit. |
 | `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
 | `GitService` | Creates git repositories (mkdir + git init) |
@@ -44,10 +45,12 @@ zenban/
 
 ## Board Creation
 
-Three options when creating a board:
+Three directory options:
 1. **From Existing Directory** - Select folder, terminal starts there
 2. **Create New Repository** - Create folder + `git init`
-3. **Empty** - No directory association (default behavior)
+3. **Empty** - No directory association
+
+Agent selection (Claude Code, Codex, Gemini) determines which command auto-runs when terminal opens. Context menu offers "Reveal Folder" to open board directory in Finder.
 
 ## Terminal Agent Detection
 
