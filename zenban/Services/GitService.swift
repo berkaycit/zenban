@@ -17,6 +17,8 @@ enum GitError: Error, LocalizedError {
     case ghNotInstalled
     case ghNotAuthenticated
     case branchListFailed(String)
+    case claudeNotInstalled
+    case claudeGenerationFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -52,6 +54,10 @@ enum GitError: Error, LocalizedError {
             return "GitHub CLI is not authenticated. Run 'gh auth login' first"
         case .branchListFailed(let msg):
             return "Failed to list branches: \(msg)"
+        case .claudeNotInstalled:
+            return "Claude Code CLI is not installed. Install with: npm install -g @anthropic-ai/claude-code"
+        case .claudeGenerationFailed(let msg):
+            return "AI generation failed: \(msg)"
         }
     }
 }
@@ -295,6 +301,33 @@ struct GitService {
         }
 
         return branches
+    }
+
+    // MARK: - AI Commit Message Generation
+
+    static func generateCommitMessage(worktreePath: String) async throws -> CommitMessageResult {
+        guard ClaudeService.isAvailable else {
+            throw GitError.claudeNotInstalled
+        }
+
+        let diff = try await getDiff(worktreePath: worktreePath)
+
+        guard !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw GitError.claudeGenerationFailed("No changes to analyze")
+        }
+
+        do {
+            let response = try await ClaudeService.generate(
+                prompt: PromptTemplate.commitMessage.template,
+                context: diff,
+                workingDirectory: worktreePath,
+                config: .default
+            )
+
+            return DefaultCommitMessageParser().parse(response)
+        } catch let error as AIProviderError {
+            throw GitError.claudeGenerationFailed(error.localizedDescription ?? "Unknown error")
+        }
     }
 
     // MARK: - Commit & Push Operations

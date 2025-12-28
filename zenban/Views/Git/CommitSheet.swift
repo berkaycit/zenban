@@ -71,13 +71,13 @@ struct CommitSheet: View {
 
                     Spacer()
 
-                    Button(action: generateMessage) {
+                    Button(action: generateWithAI) {
                         HStack(spacing: 4) {
                             if isGenerating {
                                 ProgressView()
                                     .controlSize(.mini)
                             }
-                            Text("Auto-generate")
+                            Text("Generate with AI")
                         }
                         .font(.caption)
                     }
@@ -133,25 +133,17 @@ struct CommitSheet: View {
 
     // MARK: - Actions
 
-    private func generateMessage() {
+    private func generateWithAI() {
         isGenerating = true
+        errorMessage = nil
 
-        Task {
-            guard let diffStats = try? await GitService.getDiffStats(worktreePath: worktreePath) else {
-                isGenerating = false
-                return
-            }
-
-            let fileCount = diffStats.count
-            let additions = diffStats.reduce(0) { $0 + $1.additions }
-            let deletions = diffStats.reduce(0) { $0 + $1.deletions }
-            let fileNames = diffStats.map { $0.path }.joined(separator: "\n- ")
-
-            if summary.isEmpty {
-                summary = "Update \(fileCount) file\(fileCount == 1 ? "" : "s") (+\(additions) -\(deletions))"
-            }
-            if !fileNames.isEmpty {
-                description = "Changed files:\n- \(fileNames)"
+        Task { @MainActor in
+            do {
+                let result = try await GitService.generateCommitMessage(worktreePath: worktreePath)
+                summary = result.summary
+                description = result.description
+            } catch {
+                errorMessage = error.localizedDescription
             }
             isGenerating = false
         }

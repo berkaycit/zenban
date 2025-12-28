@@ -4,7 +4,7 @@
 
 ```
 zenban/
-├── Models/          # Data models (Board, Card, Column, GitModels)
+├── Models/          # Data models (Board, Card, Column, GitModels, AIModels)
 ├── Storage/         # JSON persistence layer
 ├── ViewModels/      # @Observable state management
 ├── Views/
@@ -14,7 +14,7 @@ zenban/
 │   ├── Git/         # Git changes view, diff display, PR creation
 │   └── Components/  # Reusable UI components
 ├── Terminal/        # Embedded terminal per card (SwiftTerm)
-├── Services/        # App-wide services (notifications, git operations)
+├── Services/        # App-wide services (notifications, git, AI providers)
 ├── Commands/        # Menu keyboard shortcuts
 └── Extensions/      # Color theme extensions
 ```
@@ -41,7 +41,8 @@ zenban/
 | `TerminalManager` | Manages terminal views per card. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell is ready. Terminates processes on card/board deletion and app quit. |
 | `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. Detects shell readiness via output. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
-| `GitService` | Git operations: repository init, worktree CRUD, status/diff, commit/push, merge, PR creation (gh CLI) |
+| `GitService` | Git operations: repository init, worktree CRUD, status/diff, commit/push, merge, PR creation (gh CLI), AI commit message generation |
+| `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. Handles path resolution and environment setup for node/nvm. |
 | `GitChangesView` | Overlay in CardDetailView showing diff, branch picker, Commit/Merge/Create PR actions |
 | `DirectoryPicker` | NSOpenPanel wrapper for folder selection |
 
@@ -61,6 +62,10 @@ State machine: `shell` → `agentActive` → `agentIdle`. Detects "claude" in in
 ## Card Worktrees
 
 For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Created on card add, deleted on card/board delete. Terminal starts in worktree, agent launches when shell ready. "View Changes" opens GitChangesView with split-diff. Cleanup resilient: prunes stale entries, best-effort branch deletion.
+
+## AI Integration
+
+AIProvider protocol enables pluggable AI services. ClaudeService implements it for Claude Code CLI. GitService.generateCommitMessage uses ClaudeService to generate commit messages from diffs. PromptTemplates enum holds prompt strings. DefaultCommitMessageParser handles response parsing with fallback strategies.
 
 ## Keyboard Shortcuts
 

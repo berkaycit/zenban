@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add AI commit message generation with Claude CLI
+- **Description**: New AIProvider protocol enables pluggable AI services. ClaudeService implements it for Claude Code CLI with path resolution and nvm/node environment setup. GitService.generateCommitMessage uses ClaudeService to generate commit messages from diffs. PromptTemplates enum holds prompts, DefaultCommitMessageParser handles response parsing with fallback strategies. CommitSheet's "Auto-generate" replaced with "Generate with AI" button. GitChangesView improved with hasCommittedChanges state for better Merge/PR button logic.
+
 - **Summary**: Add Git changes view with diff, commit, merge, PR
 - **Description**: New Views/Git/ module for viewing and managing worktree changes. GitChangesView overlay shows branch diff with split-view (additions/deletions side by side). Supports commit with auto-generated message, merge to target branch with rollback on failure, and PR creation via gh CLI. GitModels.swift holds GitStatus, FileChange, BranchInfo, PRConfig structs. GitService expanded with branch operations, diff stats, and PR helpers.
 
