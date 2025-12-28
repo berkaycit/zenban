@@ -4,13 +4,14 @@
 
 ```
 zenban/
-├── Models/          # Data models (Board, Card, Column)
+├── Models/          # Data models (Board, Card, Column, GitModels)
 ├── Storage/         # JSON persistence layer
 ├── ViewModels/      # @Observable state management
 ├── Views/
 │   ├── Sidebar/     # Board list navigation
 │   ├── Board/       # Kanban board layout
 │   ├── Card/        # Card display and editing
+│   ├── Git/         # Git changes view, diff display, PR creation
 │   └── Components/  # Reusable UI components
 ├── Terminal/        # Embedded terminal per card (SwiftTerm)
 ├── Services/        # App-wide services (notifications, git operations)
@@ -40,7 +41,8 @@ zenban/
 | `TerminalManager` | Manages terminal views per card. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell is ready. Terminates processes on card/board deletion and app quit. |
 | `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. Detects shell readiness via output. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
-| `GitService` | Git operations: repository init, worktree create/delete |
+| `GitService` | Git operations: repository init, worktree CRUD, status/diff, commit/push, merge, PR creation (gh CLI) |
+| `GitChangesView` | Overlay in CardDetailView showing diff, branch picker, Commit/Merge/Create PR actions |
 | `DirectoryPicker` | NSOpenPanel wrapper for folder selection |
 
 ## Board Creation
@@ -54,31 +56,11 @@ Agent selection (Claude Code, Codex, Gemini) determines which command auto-runs 
 
 ## Terminal Agent Detection
 
-State machine with 3 states: `shell` → `agentActive` → `agentIdle`
-
-**Flow:**
-1. User types "claude" + Enter → `agentActive`, card stays
-2. User sends message to Claude → card moves to "To Do"
-3. Claude responds, 2s idle → `agentIdle`, card moves to "In Review"
-4. User sends new message → back to step 2
-5. Ctrl+C exits → back to `shell`
-
-**Ctrl+R Support:** Shell history search bypasses input buffer. Solution: monitor output buffer for "claude", strip ANSI codes (they split keywords), persist flag until Enter.
-
-**Key Guards:**
-- `hasBeenFocused`: prevents triggering on terminal init
-- `minActivityBytes`: ignores tiny outputs (< 10 bytes)
-- `BoardStore.moveCard`: skips if card already in target column
+State machine: `shell` → `agentActive` → `agentIdle`. Detects "claude" in input/output, 2s idle triggers card move to "In Review", new message moves to "To Do", Ctrl+C exits to shell. Strips ANSI codes for Ctrl+R support. Guards: `hasBeenFocused` (prevents init trigger), `minActivityBytes` (ignores <10 bytes).
 
 ## Card Worktrees
 
-For boards with a git repository, each card gets its own worktree:
-- Created automatically when card is added (branch: `card/<uuid>`)
-- Location: `../repo-worktrees/card/<uuid>` (sibling to main repo)
-- Deleted automatically when card or board is deleted
-- Terminal starts in worktree directory, agent launches when shell is ready
-- CardDetailView shows worktree status with context menu (Copy Path, Reveal in Finder)
-- Cleanup is resilient: prunes stale entries, handles missing directories, best-effort branch deletion
+For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Created on card add, deleted on card/board delete. Terminal starts in worktree, agent launches when shell ready. "View Changes" opens GitChangesView with split-diff. Cleanup resilient: prunes stale entries, best-effort branch deletion.
 
 ## Keyboard Shortcuts
 

@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add Git changes view with diff, commit, merge, PR
+- **Description**: New Views/Git/ module for viewing and managing worktree changes. GitChangesView overlay shows branch diff with split-view (additions/deletions side by side). Supports commit with auto-generated message, merge to target branch with rollback on failure, and PR creation via gh CLI. GitModels.swift holds GitStatus, FileChange, BranchInfo, PRConfig structs. GitService expanded with branch operations, diff stats, and PR helpers.
+
 - **Summary**: Add keyboard navigation for boards, cards, and terminal
 - **Description**: Full keyboard navigation without mouse. Shift+Arrow up/down navigates cards in column or boards in sidebar. Shift+Arrow left/right moves between columns, with left from first column going to sidebar and right from sidebar entering cards. Enter focuses terminal if not already focused. Uses NSEvent local monitor for app-wide key capture. FocusRegion enum tracks focus area. Sidebar selection uses custom listRowBackground for focus-aware styling.
 

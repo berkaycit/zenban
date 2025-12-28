@@ -9,27 +9,44 @@ struct CardDetailView: View {
     @State private var editedTitle = ""
     @State private var isEditing = false
     @State private var showTerminal = true
+    @State private var showGitChanges = false
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            cardInfoSection
-                .frame(height: showTerminal && terminalManager.isTerminalAvailable ? 240 : nil)
-                .frame(maxHeight: showTerminal && terminalManager.isTerminalAvailable ? 240 : .infinity)
+        ZStack {
+            // Normal card detail content
+            VStack(alignment: .leading, spacing: 0) {
+                cardInfoSection
+                    .frame(height: showTerminal && terminalManager.isTerminalAvailable ? 240 : nil)
+                    .frame(maxHeight: showTerminal && terminalManager.isTerminalAvailable ? 240 : .infinity)
 
-            if terminalManager.isTerminalAvailable {
-                Divider()
-                terminalSection
+                if terminalManager.isTerminalAvailable {
+                    Divider()
+                    terminalSection
+                }
+            }
+
+            // Git changes overlay
+            if showGitChanges {
+                GitChangesView(
+                    card: card,
+                    boardID: boardID,
+                    onDismiss: { showGitChanges = false }
+                )
+                .zIndex(1)
             }
         }
-        .frame(maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .background(Color.cardBackground)
+        .animation(.easeOut(duration: 0.15), value: showGitChanges)
         .onAppear {
             editedTitle = card.title
         }
         .onChange(of: card.id) {
             editedTitle = card.title
             isEditing = false
+            showGitChanges = false
         }
     }
 
@@ -195,6 +212,22 @@ struct CardDetailView: View {
                         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
                     }
                 }
+            }
+
+            if card.worktreePath != nil {
+                Button(action: { showGitChanges = true }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.branch")
+                        Text("View Changes")
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.accentColor.opacity(0.1))
+                    .foregroundStyle(Color.accentColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
             }
         }
     }
