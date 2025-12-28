@@ -11,6 +11,7 @@ struct GitChangesView: View {
     @State private var totalDeletions = 0
     @State private var currentBranch = ""
     @State private var hasUncommittedChanges = false
+    @State private var hasCommittedChanges = false
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showCommit = false
@@ -170,7 +171,7 @@ struct GitChangesView: View {
         VStack {
             Spacer()
             ProgressView()
-                .scaleEffect(0.8)
+                .controlSize(.regular)
             Text("Loading changes...")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -249,51 +250,56 @@ struct GitChangesView: View {
             Spacer()
 
             Button(action: { showCommit = true }) {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle")
+                        .frame(width: 16, height: 16)
                     Text("Commit")
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
                 .background(hasUncommittedChanges ? Color.accentColor : Color.accentColor.opacity(0.5))
                 .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
             .disabled(isMerging || !hasUncommittedChanges)
 
             Button(action: merge) {
-                HStack(spacing: 4) {
-                    if isMerging {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                    } else {
-                        Image(systemName: "arrow.triangle.merge")
+                HStack(spacing: 6) {
+                    Group {
+                        if isMerging {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.triangle.merge")
+                        }
                     }
+                    .frame(width: 16, height: 16)
                     Text("Merge")
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(branchChanges.isEmpty ? Color.green.opacity(0.5) : Color.green)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(hasCommittedChanges ? Color.green : Color.green.opacity(0.5))
                 .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
-            .disabled(isMerging || branchChanges.isEmpty)
+            .disabled(isMerging || !hasCommittedChanges)
 
             Button(action: { showCreatePR = true }) {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: "plus.circle")
+                        .frame(width: 16, height: 16)
                     Text("Create PR")
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(branchChanges.isEmpty ? Color.purple.opacity(0.5) : Color.purple)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(hasCommittedChanges ? Color.purple : Color.purple.opacity(0.5))
                 .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
-            .disabled(isMerging || branchChanges.isEmpty)
+            .disabled(isMerging || !hasCommittedChanges)
         }
         .padding(16)
     }
@@ -316,21 +322,32 @@ struct GitChangesView: View {
             do {
                 currentBranch = try await GitService.getCurrentBranch(worktreePath: worktreePath)
 
-                branchChanges = try await GitService.getBranchChangedFiles(
+                let committedChanges = try await GitService.getBranchChangedFiles(
                     worktreePath: worktreePath,
                     targetBranch: selectedTargetBranch
                 )
-
+                hasCommittedChanges = !committedChanges.isEmpty
                 hasUncommittedChanges = await GitService.hasUncommittedChanges(worktreePath: worktreePath)
 
-                // If no committed branch diff but there are uncommitted changes, show uncommitted
-                if branchChanges.isEmpty && hasUncommittedChanges {
+                // Show committed changes, or uncommitted if no commits yet
+                if hasCommittedChanges {
+                    branchChanges = committedChanges
+                } else if hasUncommittedChanges {
                     let status = try await GitService.getStatus(worktreePath: worktreePath)
                     branchChanges = status.filesChanged
+                } else {
+                    branchChanges = []
                 }
 
                 totalAdditions = branchChanges.reduce(0) { $0 + $1.additions }
                 totalDeletions = branchChanges.reduce(0) { $0 + $1.deletions }
+
+                // Expand all files by default and load their diffs
+                expandedFiles = Set(branchChanges.map { $0.path })
+                for file in branchChanges {
+                    loadDiffForFile(file.path)
+                }
+
                 isLoading = false
             } catch {
                 errorMessage = error.localizedDescription

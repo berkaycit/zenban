@@ -24,7 +24,7 @@ struct DiffContentView: View {
                     // Left side - old (deletions)
                     VStack(spacing: 0) {
                         ForEach(Array(hunk.leftLines.enumerated()), id: \.offset) { _, line in
-                            SplitDiffLineView(line: line, side: .left)
+                            SplitDiffLineView(line: line)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -34,7 +34,7 @@ struct DiffContentView: View {
                     // Right side - new (additions)
                     VStack(spacing: 0) {
                         ForEach(Array(hunk.rightLines.enumerated()), id: \.offset) { _, line in
-                            SplitDiffLineView(line: line, side: .right)
+                            SplitDiffLineView(line: line)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -144,13 +144,8 @@ private struct SplitLine {
 
 // MARK: - Split Line View
 
-private enum DiffSide {
-    case left, right
-}
-
 private struct SplitDiffLineView: View {
     let line: SplitLine
-    let side: DiffSide
 
     var body: some View {
         HStack(spacing: 0) {

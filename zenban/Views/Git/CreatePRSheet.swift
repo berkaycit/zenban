@@ -89,7 +89,7 @@ struct CreatePRSheet: View {
                         HStack(spacing: 4) {
                             if isGeneratingDescription {
                                 ProgressView()
-                                    .scaleEffect(0.5)
+                                    .controlSize(.mini)
                             }
                             Text("Auto-generate")
                         }
@@ -154,7 +154,7 @@ struct CreatePRSheet: View {
                     HStack(spacing: 4) {
                         if isCreating {
                             ProgressView()
-                                .scaleEffect(0.6)
+                                .controlSize(.small)
                         }
                         Text("Create PR")
                     }

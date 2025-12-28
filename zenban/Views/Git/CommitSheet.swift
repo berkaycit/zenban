@@ -75,7 +75,7 @@ struct CommitSheet: View {
                         HStack(spacing: 4) {
                             if isGenerating {
                                 ProgressView()
-                                    .scaleEffect(0.5)
+                                    .controlSize(.mini)
                             }
                             Text("Auto-generate")
                         }
@@ -115,7 +115,7 @@ struct CommitSheet: View {
                     HStack(spacing: 4) {
                         if isCommitting {
                             ProgressView()
-                                .scaleEffect(0.6)
+                                .controlSize(.small)
                         }
                         Text("Commit")
                     }

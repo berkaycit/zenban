@@ -16,7 +16,7 @@ struct DiffFileRow: View {
                 } else {
                     HStack {
                         ProgressView()
-                            .scaleEffect(0.6)
+                            .controlSize(.small)
                         Text("Loading diff...")
                             .font(.caption)
                             .foregroundStyle(.secondary)
