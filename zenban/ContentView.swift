@@ -53,36 +53,6 @@ struct ContentView: View {
             store.selectedCardID = nil
             store.draggedCardID = nil
         }
-        .focusable()
-        .onKeyPress(.upArrow) {
-            if store.focusRegion == .sidebar {
-                store.selectPreviousBoard()
-            } else {
-                store.selectPreviousCard()
-            }
-            return .handled
-        }
-        .onKeyPress(.downArrow) {
-            if store.focusRegion == .sidebar {
-                store.selectNextBoard()
-            } else {
-                store.selectNextCard()
-            }
-            return .handled
-        }
-        .onKeyPress(.leftArrow) {
-            guard store.focusRegion == .cards else { return .ignored }
-            store.selectCardInPreviousColumn()
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            if store.focusRegion == .sidebar {
-                store.enterCardsFromSidebar()
-            } else {
-                store.selectCardInNextColumn()
-            }
-            return .handled
-        }
         .frame(minWidth: 1500, minHeight: 600)
     }
 }

@@ -7,8 +7,8 @@ Each item should follow this format:
 
 ## List
 
-- **Summary**: Add arrow key navigation for boards and cards
-- **Description**: Full keyboard navigation without mouse. Arrow up/down navigates cards in column or boards in sidebar. Arrow left/right moves between columns, with left from first column going to sidebar and right from sidebar entering cards. FocusRegion enum tracks focus area. Sidebar selection uses custom listRowBackground for focus-aware styling (accent when focused, gray when unfocused). Column navigation preserves row position.
+- **Summary**: Add keyboard navigation for boards, cards, and terminal
+- **Description**: Full keyboard navigation without mouse. Shift+Arrow up/down navigates cards in column or boards in sidebar. Shift+Arrow left/right moves between columns, with left from first column going to sidebar and right from sidebar entering cards. Enter focuses terminal if not already focused. Uses NSEvent local monitor for app-wide key capture. FocusRegion enum tracks focus area. Sidebar selection uses custom listRowBackground for focus-aware styling.
 
 - **Summary**: Make worktree cleanup robust and resilient
 - **Description**: Board deletion now cleans up worktrees for all cards. Worktree operations use best-effort cleanup: prune stale entries, remove worktree registration, delete branch, remove directory. Handles edge cases like manually deleted worktrees, leftover branches from failed deletions. Refactored GitService with WorktreePaths struct and shared pruneAndCleanup helper. BoardStore marked @MainActor for thread safety.

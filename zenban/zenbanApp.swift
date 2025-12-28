@@ -8,6 +8,20 @@
 import SwiftUI
 import AppKit
 
+private enum ArrowKey {
+    case up, down, left, right
+
+    init?(keyCode: UInt16) {
+        switch keyCode {
+        case 126: self = .up
+        case 125: self = .down
+        case 123: self = .left
+        case 124: self = .right
+        default: return nil
+        }
+    }
+}
+
 @main
 struct zenbanApp: App {
     @State private var store = BoardStore()
@@ -20,6 +34,49 @@ struct zenbanApp: App {
             queue: .main
         ) { [terminalManager] _ in
             terminalManager.terminateAllSessions()
+        }
+
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
+            // Enter to focus terminal (only if terminal doesn't have focus)
+            if event.keyCode == 36,
+               !event.modifierFlags.contains(.shift),
+               let cardID = store.selectedCardID,
+               !terminalManager.isTerminalFocused(for: cardID) {
+                terminalManager.focusTerminal(for: cardID)
+                return nil
+            }
+
+            guard event.modifierFlags.contains(.shift) else { return event }
+
+            // Shift+Arrow for navigation
+            guard let key = ArrowKey(keyCode: event.keyCode) else {
+                return event
+            }
+
+            switch key {
+            case .up:
+                if store.focusRegion == .sidebar {
+                    store.selectPreviousBoard()
+                } else {
+                    store.selectPreviousCard()
+                }
+            case .down:
+                if store.focusRegion == .sidebar {
+                    store.selectNextBoard()
+                } else {
+                    store.selectNextCard()
+                }
+            case .left:
+                guard store.focusRegion == .cards else { return event }
+                store.selectCardInPreviousColumn()
+            case .right:
+                if store.focusRegion == .sidebar {
+                    store.enterCardsFromSidebar()
+                } else {
+                    store.selectCardInNextColumn()
+                }
+            }
+            return nil
         }
     }
 

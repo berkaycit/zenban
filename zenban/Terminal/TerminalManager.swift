@@ -89,6 +89,16 @@ final class TerminalManager {
         agentLaunchedForCard.removeAll()
     }
 
+    func focusTerminal(for cardID: UUID) {
+        guard let terminalView = terminalViews[cardID] else { return }
+        terminalView.window?.makeFirstResponder(terminalView)
+    }
+
+    func isTerminalFocused(for cardID: UUID) -> Bool {
+        guard let terminalView = terminalViews[cardID] else { return false }
+        return terminalView.window?.firstResponder === terminalView
+    }
+
     // MARK: - Private Helpers
 
     private func createTerminalView(cardID: UUID, boardID: UUID, cardTitle: String) -> ZenbanTerminalView {

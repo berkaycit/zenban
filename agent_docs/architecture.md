@@ -87,8 +87,9 @@ For boards with a git repository, each card gets its own worktree:
 | Cmd+Shift+N | New Board |
 | Shift+A | New Card |
 | Shift+D | Delete selected card |
-| Arrow Up/Down | Navigate cards in column (when in cards) or boards (when in sidebar) |
-| Arrow Left | Previous column, or go to sidebar from first column |
-| Arrow Right | Next column, or go to cards from sidebar |
+| Shift+Arrow Up/Down | Navigate cards in column (when in cards) or boards (when in sidebar) |
+| Shift+Arrow Left | Previous column, or go to sidebar from first column |
+| Shift+Arrow Right | Next column, or go to cards from sidebar |
+| Enter | Focus terminal (if not already focused) |
 
-`FocusRegion` enum tracks whether sidebar or cards has keyboard focus. All arrow key navigation is handled via `onKeyPress` in ContentView, with navigation logic in BoardStore. Sidebar selection uses custom `listRowBackground` for focus-aware styling.
+`FocusRegion` enum tracks whether sidebar or cards has keyboard focus. Keyboard navigation uses NSEvent local monitor in zenbanApp for app-wide capture. Sidebar selection uses custom `listRowBackground` for focus-aware styling.
