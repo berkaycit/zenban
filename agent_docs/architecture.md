@@ -39,8 +39,9 @@ zenban/
 | `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel with card editing, column move, and agent picker (switches terminal) |
-| `TerminalManager` | Manages terminal views per card. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell is ready. Terminates processes on card/board deletion and app quit. |
+| `TerminalManager` | Manages terminal views per card. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell is ready. Terminates processes on card/board deletion and app quit. Applies styling from TerminalConfiguration. |
 | `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. Detects shell readiness via output. |
+| `TerminalConfiguration` | Static styling config: font (SF Mono 14pt), colors (foreground, cursor, selection), ANSI palette (One Dark inspired). Background via TerminalContainerView. To customize: modify static properties, use installColors() for ANSI updates. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
 | `GitService` | Git operations: repository init, worktree CRUD, status/diff, commit/push, merge, PR creation (gh CLI), AI commit message generation |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |

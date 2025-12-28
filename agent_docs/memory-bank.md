@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Redesign terminal with modern styling
+- **Description**: Updated terminal appearance for better readability. TerminalConfiguration.swift now uses static properties for all styling: SF Mono 14pt font, soft white foreground (#D9D9DE), teal cursor (#5FC9E3), selection highlight (#335980). Custom ANSI color palette with One Dark inspired colors - muted normal colors and distinct bright variants for bold text. Background color kept at original (#2A2A27) via TerminalContainerView default. To change colors dynamically, modify TerminalConfiguration static properties and call installColors() for ANSI palette updates.
+
 - **Summary**: Add dev server preview with WebView
 - **Description**: New dev server feature for cards with worktrees. DevServerManager handles process lifecycle, setup commands (npm install), and port detection from output. PackageJsonParser auto-detects commands from lock files. DevServerCommandSheet configures setup/dev commands (saved per board). DevServerView shows output during startup, then displays WebView once port is detected. ProcessEnvironment extracted from ClaudeService as shared PATH builder for node/nvm support.
 

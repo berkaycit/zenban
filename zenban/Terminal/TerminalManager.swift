@@ -102,7 +102,6 @@ final class TerminalManager {
     // MARK: - Private Helpers
 
     private func createTerminalView(cardID: UUID, boardID: UUID, cardTitle: String) -> ZenbanTerminalView {
-        let config = TerminalConfiguration()
         let frame = NSRect(x: 0, y: 0, width: 600, height: 400)
 
         let terminalView = ZenbanTerminalView(frame: frame)
@@ -110,9 +109,17 @@ final class TerminalManager {
         terminalView.boardID = boardID
         terminalView.cardTitle = cardTitle
 
-        terminalView.font = config.font
-        terminalView.nativeBackgroundColor = config.backgroundColor
-        terminalView.nativeForegroundColor = config.foregroundColor
+        // Font
+        terminalView.font = TerminalConfiguration.font
+
+        // Colors
+        terminalView.nativeBackgroundColor = TerminalConfiguration.backgroundColor
+        terminalView.nativeForegroundColor = TerminalConfiguration.foregroundColor
+        terminalView.caretColor = TerminalConfiguration.cursorColor
+        terminalView.selectedTextBackgroundColor = TerminalConfiguration.selectionColor
+
+        // ANSI color palette
+        terminalView.installColors(TerminalConfiguration.ansiColors)
 
         return terminalView
     }
