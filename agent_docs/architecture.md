@@ -12,6 +12,7 @@ zenban/
 │   ├── Board/       # Kanban board layout
 │   ├── Card/        # Card display and editing
 │   ├── Git/         # Git changes view, diff display, PR creation
+│   ├── DevServer/   # Dev server preview with WebView
 │   └── Components/  # Reusable UI components
 ├── Terminal/        # Embedded terminal per card (SwiftTerm)
 ├── Services/        # App-wide services (notifications, git, AI providers)
@@ -42,7 +43,9 @@ zenban/
 | `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. Detects shell readiness via output. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
 | `GitService` | Git operations: repository init, worktree CRUD, status/diff, commit/push, merge, PR creation (gh CLI), AI commit message generation |
-| `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. Handles path resolution and environment setup for node/nvm. |
+| `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
+| `ProcessEnvironment` | Shared utility for building process environment with PATH setup (node/nvm/homebrew). Used by ClaudeService and DevServerManager. |
+| `DevServerManager` | Manages dev server processes for cards. Handles setup (npm install), port detection, and WebView preview. Single server at a time with proper cleanup. |
 | `GitChangesView` | Overlay in CardDetailView showing diff, branch picker, Commit/Merge/Create PR actions |
 | `DirectoryPicker` | NSOpenPanel wrapper for folder selection |
 
@@ -65,7 +68,11 @@ For boards with git repo, each card gets worktree (branch: `card/<uuid>`, locati
 
 ## AI Integration
 
-AIProvider protocol enables pluggable AI services. ClaudeService implements it for Claude Code CLI. GitService.generateCommitMessage uses ClaudeService to generate commit messages from diffs. PromptTemplates enum holds prompt strings. DefaultCommitMessageParser handles response parsing with fallback strategies.
+AIProvider protocol enables pluggable AI services. ClaudeService implements it for Claude Code CLI. GitService.generateCommitMessage uses ClaudeService to generate commit messages from diffs. PromptTemplate enum holds prompt strings. DefaultCommitMessageParser handles response parsing with fallback strategies.
+
+## Dev Server Preview
+
+Board stores DevServerConfig (setup command, dev command). CardDetailView shows "Start Dev Server" button for cards with worktree. First run prompts for commands (auto-detected from package.json/lock files), subsequent runs use saved config. DevServerManager runs one server at a time, auto-detects port from output, shows WebView overlay. Cleanup on dismiss, card delete, and app quit.
 
 ## Keyboard Shortcuts
 

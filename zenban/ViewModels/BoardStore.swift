@@ -87,6 +87,18 @@ final class BoardStore {
         scheduleSave()
     }
 
+    func updateDevServerConfig(_ boardID: UUID, config: DevServerConfig) {
+        guard let index = boardIndex(for: boardID) else { return }
+        boards[index].devServerConfig = config
+        scheduleSave()
+    }
+
+    func clearDevServerConfig(_ boardID: UUID) {
+        guard let index = boardIndex(for: boardID) else { return }
+        boards[index].devServerConfig = nil
+        scheduleSave()
+    }
+
     // MARK: - Card Operations
 
     func addCard(title: String, to boardID: UUID) {

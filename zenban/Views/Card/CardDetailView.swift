@@ -10,6 +10,10 @@ struct CardDetailView: View {
     @State private var isEditing = false
     @State private var showTerminal = true
     @State private var showGitChanges = false
+    @State private var showDevServer = false
+    @State private var showDevServerCommand = false
+    @State private var devServerSetupCommand: String?
+    @State private var devServerDevCommand = ""
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -35,11 +39,23 @@ struct CardDetailView: View {
                 )
                 .zIndex(1)
             }
+
+            // Dev server overlay
+            if showDevServer {
+                DevServerView(
+                    card: card,
+                    setupCommand: devServerSetupCommand,
+                    devCommand: devServerDevCommand,
+                    onDismiss: { showDevServer = false }
+                )
+                .zIndex(2)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .background(Color.cardBackground)
         .animation(.easeOut(duration: 0.15), value: showGitChanges)
+        .animation(.easeOut(duration: 0.15), value: showDevServer)
         .onAppear {
             editedTitle = card.title
         }
@@ -47,6 +63,22 @@ struct CardDetailView: View {
             editedTitle = card.title
             isEditing = false
             showGitChanges = false
+            showDevServer = false
+        }
+        .sheet(isPresented: $showDevServerCommand) {
+            if let worktreePath = card.worktreePath {
+                DevServerCommandSheet(
+                    worktreePath: worktreePath,
+                    boardID: boardID,
+                    isPresented: $showDevServerCommand,
+                    onStart: { setup, dev in
+                        devServerSetupCommand = setup
+                        devServerDevCommand = dev
+                        showDevServerCommand = false
+                        showDevServer = true
+                    }
+                )
+            }
         }
     }
 
@@ -215,19 +247,42 @@ struct CardDetailView: View {
             }
 
             if card.worktreePath != nil {
-                Button(action: { showGitChanges = true }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.branch")
-                        Text("View Changes")
+                HStack(spacing: 8) {
+                    Button(action: { showGitChanges = true }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.branch")
+                            Text("View Changes")
+                        }
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.accentColor.opacity(0.1))
+                        .foregroundStyle(Color.accentColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
-                    .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.accentColor.opacity(0.1))
-                    .foregroundStyle(Color.accentColor)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .buttonStyle(.plain)
+
+                    Button(action: startDevServer) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.circle")
+                            Text("Start Dev Server")
+                        }
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.green.opacity(0.1))
+                        .foregroundStyle(Color.green)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        if store.board(for: boardID)?.devServerConfig != nil {
+                            Button("Reconfigure Dev Server") {
+                                showDevServerCommand = true
+                            }
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -294,5 +349,18 @@ struct CardDetailView: View {
 
     private func deleteCard() {
         store.deleteCard(card.id, from: boardID)
+    }
+
+    private func startDevServer() {
+        // Check if config exists for this board
+        if let config = store.board(for: boardID)?.devServerConfig {
+            // Use saved config (always pass setupCommand, DevServerView checks per worktree)
+            devServerSetupCommand = config.setupCommand
+            devServerDevCommand = config.devCommand
+            showDevServer = true
+        } else {
+            // Show configuration sheet
+            showDevServerCommand = true
+        }
     }
 }

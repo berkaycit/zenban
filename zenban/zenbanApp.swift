@@ -26,14 +26,16 @@ private enum ArrowKey {
 struct zenbanApp: App {
     @State private var store = BoardStore()
     @State private var terminalManager = TerminalManager()
+    @State private var devServerManager = DevServerManager()
 
     init() {
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
-        ) { [terminalManager] _ in
+        ) { [terminalManager, devServerManager] _ in
             terminalManager.terminateAllSessions()
+            devServerManager.stopAllServers()
         }
 
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
@@ -85,6 +87,7 @@ struct zenbanApp: App {
             ContentView()
                 .environment(store)
                 .environment(terminalManager)
+                .environment(devServerManager)
                 .onAppear {
                     setupCardDeletionHandler()
                     setupNotifications()
@@ -98,10 +101,11 @@ struct zenbanApp: App {
     private func setupCardDeletionHandler() {
         terminalManager.boardStore = store
         store.terminalManager = terminalManager
-        store.onCardDeleted = { [terminalManager] cardID in
+        store.onCardDeleted = { [terminalManager, devServerManager] cardID in
             Task {
                 await terminalManager.killSessionForCard(cardID)
             }
+            devServerManager.stopServer(for: cardID)
         }
     }
 

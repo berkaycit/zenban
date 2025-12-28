@@ -37,6 +37,18 @@ enum Agent: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+struct DevServerConfig: Codable, Hashable {
+    var setupCommand: String?
+    var devCommand: String
+    var skipSetup: Bool
+
+    init(setupCommand: String?, devCommand: String, skipSetup: Bool = false) {
+        self.setupCommand = setupCommand
+        self.devCommand = devCommand
+        self.skipSetup = skipSetup
+    }
+}
+
 struct Card: Identifiable, Codable, Hashable, Transferable {
     let id: UUID
     var title: String
@@ -69,8 +81,9 @@ struct Board: Identifiable, Codable, Hashable {
     var isPinned: Bool
     var repositoryPath: String?
     var agent: Agent
+    var devServerConfig: DevServerConfig?
 
-    init(id: UUID = UUID(), name: String, cards: [Card] = [], isPinned: Bool = false, repositoryPath: String? = nil, agent: Agent = .claude) {
+    init(id: UUID = UUID(), name: String, cards: [Card] = [], isPinned: Bool = false, repositoryPath: String? = nil, agent: Agent = .claude, devServerConfig: DevServerConfig? = nil) {
         self.id = id
         self.name = name
         self.cards = cards
@@ -78,6 +91,7 @@ struct Board: Identifiable, Codable, Hashable {
         self.isPinned = isPinned
         self.repositoryPath = repositoryPath
         self.agent = agent
+        self.devServerConfig = devServerConfig
     }
 
     func cards(in column: Column) -> [Card] {

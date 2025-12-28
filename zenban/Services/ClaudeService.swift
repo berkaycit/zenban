@@ -34,51 +34,6 @@ struct ClaudeService: AIProvider {
             .first { FileManager.default.fileExists(atPath: $0) }
     }
 
-    /// Build PATH environment variable that includes common locations for node, homebrew, etc.
-    private static func buildEnvironment() -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
-
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let commonPaths = [
-            "/opt/homebrew/bin",           // Apple Silicon homebrew
-            "/usr/local/bin",              // Intel homebrew / standard
-            "/usr/bin",
-            "/bin",
-            "/usr/sbin",
-            "/sbin",
-            "\(home)/.local/bin",          // pip/npm local installs
-            "\(home)/.npm-global/bin",     // npm global
-            "/opt/local/bin",              // MacPorts
-        ]
-
-        // Get current PATH if available
-        let currentPath = env["PATH"] ?? ""
-
-        // Find actual nvm node path if exists
-        var nvmNodePath: String?
-        let nvmDir = "\(home)/.nvm/versions/node"
-        if let versions = try? FileManager.default.contentsOfDirectory(atPath: nvmDir) {
-            if let latestVersion = versions.sorted().last {
-                let binPath = "\(nvmDir)/\(latestVersion)/bin"
-                if FileManager.default.fileExists(atPath: binPath) {
-                    nvmNodePath = binPath
-                }
-            }
-        }
-
-        var allPaths = commonPaths
-        if let nvmPath = nvmNodePath {
-            allPaths.insert(nvmPath, at: 0)
-        }
-
-        // Combine with current PATH, avoiding duplicates
-        let pathSet = Set(currentPath.split(separator: ":").map(String.init))
-        let newPaths = allPaths.filter { !pathSet.contains($0) }
-
-        env["PATH"] = (newPaths + [currentPath]).joined(separator: ":")
-        return env
-    }
-
     // MARK: - CLI Execution
 
     private static func runCLI(
@@ -97,7 +52,7 @@ struct ClaudeService: AIProvider {
                 process.executableURL = URL(fileURLWithPath: path)
                 process.arguments = ["-p", prompt, "--output-format", "text", "--allowedTools", ""]
                 process.currentDirectoryURL = URL(fileURLWithPath: directory)
-                process.environment = buildEnvironment()
+                process.environment = ProcessEnvironment.buildWithNodeSupport()
 
                 let inputPipe = Pipe()
                 let outputPipe = Pipe()

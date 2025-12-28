@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add dev server preview with WebView
+- **Description**: New dev server feature for cards with worktrees. DevServerManager handles process lifecycle, setup commands (npm install), and port detection from output. PackageJsonParser auto-detects commands from lock files. DevServerCommandSheet configures setup/dev commands (saved per board). DevServerView shows output during startup, then displays WebView once port is detected. ProcessEnvironment extracted from ClaudeService as shared PATH builder for node/nvm support.
+
 - **Summary**: Add AI commit message generation with Claude CLI
 - **Description**: New AIProvider protocol enables pluggable AI services. ClaudeService implements it for Claude Code CLI with path resolution and nvm/node environment setup. GitService.generateCommitMessage uses ClaudeService to generate commit messages from diffs. PromptTemplates enum holds prompts, DefaultCommitMessageParser handles response parsing with fallback strategies. CommitSheet's "Auto-generate" replaced with "Generate with AI" button. GitChangesView improved with hasCommittedChanges state for better Merge/PR button logic.
 
