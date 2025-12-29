@@ -22,6 +22,11 @@ struct GitChangesView: View {
     @State private var fileDiffs: [String: String] = [:]
     @State private var isMerging = false
 
+    // Task handles for cancellation
+    @State private var loadChangesTask: Task<Void, any Error>?
+    @State private var loadBranchesTask: Task<Void, any Error>?
+    @State private var loadDiffTasks: [String: Task<Void, any Error>] = [:]
+
     private var repositoryPath: String? {
         store.board(for: boardID)?.repositoryPath
     }
@@ -43,6 +48,14 @@ struct GitChangesView: View {
         .onAppear {
             loadBranches()
             loadChanges()
+        }
+        .onDisappear {
+            loadChangesTask?.cancel()
+            loadBranchesTask?.cancel()
+            for task in loadDiffTasks.values {
+                task.cancel()
+            }
+            loadDiffTasks.removeAll()
         }
         .sheet(isPresented: $showCommit) {
             if let worktreePath = card.worktreePath {
@@ -228,13 +241,18 @@ struct GitChangesView: View {
                                 set: { expanded in
                                     if expanded {
                                         expandedFiles.insert(file.path)
-                                        loadDiffForFile(file.path)
                                     } else {
                                         expandedFiles.remove(file.path)
                                     }
                                 }
                             ),
-                            diffContent: fileDiffs[file.path]
+                            diffContent: fileDiffs[file.path],
+                            onNeedsDiff: {
+                                // Only load if not already loaded or loading
+                                if fileDiffs[file.path] == nil && loadDiffTasks[file.path] == nil {
+                                    loadDiffForFile(file.path)
+                                }
+                            }
                         )
                     }
                 }
@@ -313,15 +331,24 @@ struct GitChangesView: View {
             return
         }
 
+        // Cancel existing tasks
+        loadChangesTask?.cancel()
+        for task in loadDiffTasks.values {
+            task.cancel()
+        }
+        loadDiffTasks.removeAll()
+
         isLoading = true
         errorMessage = nil
         fileDiffs = [:]
         expandedFiles = []
 
-        Task {
+        loadChangesTask = Task {
             do {
+                try Task.checkCancellation()
                 currentBranch = try await GitService.getCurrentBranch(worktreePath: worktreePath)
 
+                try Task.checkCancellation()
                 let committedChanges = try await GitService.getBranchChangedFiles(
                     worktreePath: worktreePath,
                     targetBranch: selectedTargetBranch
@@ -329,6 +356,7 @@ struct GitChangesView: View {
                 hasCommittedChanges = !committedChanges.isEmpty
                 hasUncommittedChanges = await GitService.hasUncommittedChanges(worktreePath: worktreePath)
 
+                try Task.checkCancellation()
                 // Show committed changes, or uncommitted if no commits yet
                 if hasCommittedChanges {
                     branchChanges = committedChanges
@@ -342,13 +370,12 @@ struct GitChangesView: View {
                 totalAdditions = branchChanges.reduce(0) { $0 + $1.additions }
                 totalDeletions = branchChanges.reduce(0) { $0 + $1.deletions }
 
-                // Expand all files by default and load their diffs
-                expandedFiles = Set(branchChanges.map { $0.path })
-                for file in branchChanges {
-                    loadDiffForFile(file.path)
-                }
+                // Files start collapsed - user expands what they need
+                // expandedFiles already cleared at start of loadChanges()
 
                 isLoading = false
+            } catch is CancellationError {
+                // Task was cancelled, do nothing
             } catch {
                 errorMessage = error.localizedDescription
                 isLoading = false
@@ -360,32 +387,40 @@ struct GitChangesView: View {
         guard let repoPath = repositoryPath,
               let worktreePath = card.worktreePath else { return }
 
-        Task {
-            guard let branches = try? await GitService.listBranches(repositoryPath: repoPath) else { return }
-            let currentWorktreeBranch = try? await GitService.getCurrentBranch(worktreePath: worktreePath)
+        loadBranchesTask?.cancel()
 
-            // Filter out the worktree's branch
-            availableBranches = branches.map { branch in
-                BranchInfo(
-                    name: branch.name,
-                    isCurrent: branch.name == currentWorktreeBranch,
-                    isRemote: branch.isRemote
-                )
-            }
+        loadBranchesTask = Task {
+            do {
+                try Task.checkCancellation()
+                guard let branches = try? await GitService.listBranches(repositoryPath: repoPath) else { return }
+                let currentWorktreeBranch = try? await GitService.getCurrentBranch(worktreePath: worktreePath)
 
-            let targetOptions = availableBranches.filter { !$0.isCurrent }
-            let previousBranch = selectedTargetBranch
+                try Task.checkCancellation()
+                // Filter out the worktree's branch
+                availableBranches = branches.map { branch in
+                    BranchInfo(
+                        name: branch.name,
+                        isCurrent: branch.name == currentWorktreeBranch,
+                        isRemote: branch.isRemote
+                    )
+                }
 
-            // Try to find main or master
-            if let main = targetOptions.first(where: { $0.name == "main" || $0.name == "master" }) {
-                selectedTargetBranch = main.name
-            } else if let first = targetOptions.first {
-                selectedTargetBranch = first.name
-            }
+                let targetOptions = availableBranches.filter { !$0.isCurrent }
+                let previousBranch = selectedTargetBranch
 
-            // Reload changes if branch changed
-            if selectedTargetBranch != previousBranch {
-                loadChanges()
+                // Try to find main or master
+                if let main = targetOptions.first(where: { $0.name == "main" || $0.name == "master" }) {
+                    selectedTargetBranch = main.name
+                } else if let first = targetOptions.first {
+                    selectedTargetBranch = first.name
+                }
+
+                // Reload changes if branch changed
+                if selectedTargetBranch != previousBranch {
+                    loadChanges()
+                }
+            } catch is CancellationError {
+                // Cancelled
             }
         }
     }
@@ -393,7 +428,10 @@ struct GitChangesView: View {
     private func loadDiffForFile(_ path: String) {
         guard let worktreePath = card.worktreePath else { return }
 
-        Task {
+        // Cancel existing task for this file if any
+        loadDiffTasks[path]?.cancel()
+
+        loadDiffTasks[path] = Task {
             // Try branch diff first, fall back to uncommitted diff
             var diff = (try? await GitService.getBranchFileDiff(
                 worktreePath: worktreePath,
@@ -406,7 +444,12 @@ struct GitChangesView: View {
                 diff = (try? await GitService.getDiff(worktreePath: worktreePath, file: path)) ?? ""
             }
 
+            guard !Task.isCancelled else {
+                loadDiffTasks.removeValue(forKey: path)
+                return
+            }
             fileDiffs[path] = diff
+            loadDiffTasks.removeValue(forKey: path)
         }
     }
 

@@ -245,11 +245,10 @@ struct DevServerView: View {
         // Observe version for throttled updates
         let _ = devServerManager.outputVersion[card.id]
         let output = devServerManager.output(for: card.id)
-        let displayText = limitedConsoleOutput(output)
 
         return ScrollView {
             ScrollViewReader { proxy in
-                Text(displayText)
+                Text(output.isEmpty ? "Waiting for output..." : output)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(output.isEmpty ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -265,32 +264,6 @@ struct DevServerView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func limitedConsoleOutput(_ output: String) -> String {
-        guard !output.isEmpty else { return "Waiting for output..." }
-
-        let maxLines = 300
-
-        // Scan from end to find maxLines newlines - O(k) instead of O(n)
-        var newlineCount = 0
-        var cutIndex = output.endIndex
-
-        for i in output.indices.reversed() {
-            if output[i] == "\n" {
-                newlineCount += 1
-                if newlineCount >= maxLines {
-                    cutIndex = output.index(after: i)
-                    break
-                }
-            }
-        }
-
-        if newlineCount < maxLines {
-            return output
-        }
-
-        return "[...truncated...]\n" + String(output[cutIndex...])
     }
 
     private func errorView(message: String) -> some View {

@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add throttled console output and on-demand diff loading
+- **Description**: DevServerManager now limits output buffer to 100KB with throttled UI updates (150ms interval) to prevent performance issues with verbose servers. DevServerView adds toggleable console panel for viewing server output. GitChangesView loads diffs on-demand when files are expanded instead of preloading all. DiffContentView parses diffs asynchronously with 300-line limit and "show more" button. Port detection uses pre-compiled regex and scans only last 2KB of output.
+
 - **Summary**: Add dev server settings sheet and UI improvements
 - **Description**: New DevServerSettingsSheet accessible from sidebar toolbar for editing board dev server config (setup command, dev command, skip setup). DevServerView error states now offer Reconfigure option. CardDetailView redesigned with compacted 160px info section, segmented pill controls for column/agent selection, and icon-only quick actions. Refactored repeated board lookups into computed properties.
 

@@ -46,9 +46,10 @@ zenban/
 | `GitService` | Git operations: repository init, worktree CRUD, status/diff, commit/push, merge, PR creation (gh CLI), AI commit message generation |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `ProcessEnvironment` | Shared utility for building process environment with PATH setup (node/nvm/homebrew). Used by ClaudeService and DevServerManager. |
-| `DevServerManager` | Manages dev server processes for cards. Handles setup (npm install), port detection, and WebView preview. Single server at a time with proper cleanup. |
+| `DevServerManager` | Manages dev server processes for cards. Handles setup (npm install), port detection, and WebView preview. Single server at a time with proper cleanup. Output buffer limited to 100KB with throttled UI updates (150ms). |
 | `DevServerSettingsSheet` | Sidebar-accessible sheet for editing board dev server config (setup command, dev command, skip setup toggle). |
-| `GitChangesView` | Overlay in CardDetailView showing diff, branch picker, Commit/Merge/Create PR actions |
+| `GitChangesView` | Overlay in CardDetailView showing diff, branch picker, Commit/Merge/Create PR actions. Loads diffs on-demand when files are expanded. |
+| `DiffContentView` | Split-view diff renderer with async parsing and line limiting (300 lines visible by default). |
 | `DirectoryPicker` | NSOpenPanel wrapper for folder selection |
 
 ## Board Creation
@@ -74,7 +75,7 @@ AIProvider protocol enables pluggable AI services. ClaudeService implements it f
 
 ## Dev Server Preview
 
-Board stores DevServerConfig (setup command, dev command). CardDetailView shows "Start Dev Server" button for cards with worktree. First run prompts for commands (auto-detected from package.json/lock files), subsequent runs use saved config. DevServerManager runs one server at a time, auto-detects port from output, shows WebView overlay. Cleanup on dismiss, card delete, and app quit. Toolbar settings button opens DevServerSettingsSheet for manual config editing. Error states offer Reconfigure option to fix misconfigured commands.
+Board stores DevServerConfig (setup command, dev command). CardDetailView shows "Start Dev Server" button for cards with worktree. First run prompts for commands (auto-detected from package.json/lock files), subsequent runs use saved config. DevServerManager runs one server at a time, auto-detects port from output, shows WebView overlay with toggleable console panel. Cleanup on dismiss, card delete, and app quit. Toolbar settings button opens DevServerSettingsSheet for manual config editing. Error states offer Reconfigure option to fix misconfigured commands.
 
 ## Keyboard Shortcuts
 

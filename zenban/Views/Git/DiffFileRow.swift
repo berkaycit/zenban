@@ -4,6 +4,7 @@ struct DiffFileRow: View {
     let file: FileChange
     @Binding var isExpanded: Bool
     let diffContent: String?
+    var onNeedsDiff: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -22,6 +23,9 @@ struct DiffFileRow: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(12)
+                    .onAppear {
+                        onNeedsDiff?()
+                    }
                 }
             }
         }

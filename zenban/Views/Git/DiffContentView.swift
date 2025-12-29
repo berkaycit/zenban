@@ -3,53 +3,73 @@ import SwiftUI
 struct DiffContentView: View {
     let diffText: String
 
-    private var parsedHunks: [DiffHunk] {
-        parseDiff(diffText)
+    private static let lineLimit = 300
+
+    @State private var allRows: [DiffRow] = []
+    @State private var parseTask: Task<Void, Never>?
+    @State private var showAllLines = false
+
+    private var visibleRows: [DiffRow] {
+        if showAllLines || allRows.count <= Self.lineLimit {
+            return allRows
+        }
+        return Array(allRows.prefix(Self.lineLimit))
+    }
+
+    private var hiddenLineCount: Int {
+        max(0, allRows.count - Self.lineLimit)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(Array(parsedHunks.enumerated()), id: \.offset) { _, hunk in
-                // Hunk header
-                Text(hunk.header)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.secondary.opacity(0.1))
+            ForEach(visibleRows) { row in
+                DiffRowView(row: row)
+            }
 
-                // Split view for this hunk
-                HStack(spacing: 0) {
-                    // Left side - old (deletions)
-                    VStack(spacing: 0) {
-                        ForEach(Array(hunk.leftLines.enumerated()), id: \.offset) { _, line in
-                            SplitDiffLineView(line: line)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    Divider()
-
-                    // Right side - new (additions)
-                    VStack(spacing: 0) {
-                        ForEach(Array(hunk.rightLines.enumerated()), id: \.offset) { _, line in
-                            SplitDiffLineView(line: line)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
+            if !showAllLines && hiddenLineCount > 0 {
+                Button {
+                    showAllLines = true
+                } label: {
+                    Text("Show \(hiddenLineCount) more lines...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.secondary.opacity(0.1))
                 }
+                .buttonStyle(.plain)
             }
         }
         .font(.system(size: 13, design: .monospaced))
         .background(Color.secondary.opacity(0.03))
+        .onAppear {
+            startParsing()
+        }
+        .onDisappear {
+            parseTask?.cancel()
+        }
+        .onChange(of: diffText) { _, _ in
+            showAllLines = false
+            startParsing()
+        }
+    }
+
+    private func startParsing() {
+        parseTask?.cancel()
+        parseTask = Task.detached(priority: .userInitiated) {
+            let result = Self.parseDiff(diffText)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                allRows = result
+            }
+        }
     }
 
     // MARK: - Parsing
 
-    private func parseDiff(_ text: String) -> [DiffHunk] {
-        var hunks: [DiffHunk] = []
-        var currentHunk: DiffHunk?
+    private static func parseDiff(_ text: String) -> [DiffRow] {
+        var rows: [DiffRow] = []
+        var rowId = 0
         var leftLineNum = 0
         var rightLineNum = 0
 
@@ -57,54 +77,55 @@ struct DiffContentView: View {
             let line = String(rawLine)
 
             if line.hasPrefix("@@") {
-                // Save previous hunk
-                if let hunk = currentHunk {
-                    hunks.append(hunk)
-                }
-
-                // Parse line numbers from hunk header
                 let (oldStart, newStart) = parseHunkHeader(line)
                 leftLineNum = oldStart
                 rightLineNum = newStart
-                currentHunk = DiffHunk(header: line, leftLines: [], rightLines: [])
+                rows.append(DiffRow(id: rowId, type: .header(line)))
+                rowId += 1
             } else if line.hasPrefix("diff ") || line.hasPrefix("index ") ||
                       line.hasPrefix("---") || line.hasPrefix("+++") {
                 continue
-            } else if var hunk = currentHunk {
-                if line.hasPrefix("+") {
-                    // Addition - only on right side
-                    let content = String(line.dropFirst())
-                    hunk.rightLines.append(SplitLine(lineNumber: rightLineNum, content: content, type: .addition))
-                    hunk.leftLines.append(SplitLine(lineNumber: nil, content: "", type: .empty))
-                    rightLineNum += 1
-                } else if line.hasPrefix("-") {
-                    // Deletion - only on left side
-                    let content = String(line.dropFirst())
-                    hunk.leftLines.append(SplitLine(lineNumber: leftLineNum, content: content, type: .deletion))
-                    hunk.rightLines.append(SplitLine(lineNumber: nil, content: "", type: .empty))
-                    leftLineNum += 1
-                } else {
-                    // Context line - both sides
-                    let content = line.hasPrefix(" ") ? String(line.dropFirst()) : line
-                    hunk.leftLines.append(SplitLine(lineNumber: leftLineNum, content: content, type: .context))
-                    hunk.rightLines.append(SplitLine(lineNumber: rightLineNum, content: content, type: .context))
-                    leftLineNum += 1
-                    rightLineNum += 1
-                }
-                currentHunk = hunk
+            } else if line.hasPrefix("+") {
+                let content = String(line.dropFirst())
+                rows.append(DiffRow(
+                    id: rowId,
+                    type: .line(
+                        left: DiffCell(lineNumber: nil, content: "", cellType: .empty),
+                        right: DiffCell(lineNumber: rightLineNum, content: content, cellType: .addition)
+                    )
+                ))
+                rightLineNum += 1
+                rowId += 1
+            } else if line.hasPrefix("-") {
+                let content = String(line.dropFirst())
+                rows.append(DiffRow(
+                    id: rowId,
+                    type: .line(
+                        left: DiffCell(lineNumber: leftLineNum, content: content, cellType: .deletion),
+                        right: DiffCell(lineNumber: nil, content: "", cellType: .empty)
+                    )
+                ))
+                leftLineNum += 1
+                rowId += 1
+            } else if leftLineNum > 0 || rightLineNum > 0 {
+                let content = line.hasPrefix(" ") ? String(line.dropFirst()) : line
+                rows.append(DiffRow(
+                    id: rowId,
+                    type: .line(
+                        left: DiffCell(lineNumber: leftLineNum, content: content, cellType: .context),
+                        right: DiffCell(lineNumber: rightLineNum, content: content, cellType: .context)
+                    )
+                ))
+                leftLineNum += 1
+                rightLineNum += 1
+                rowId += 1
             }
         }
 
-        // Save last hunk
-        if let hunk = currentHunk {
-            hunks.append(hunk)
-        }
-
-        return hunks
+        return rows
     }
 
-    private func parseHunkHeader(_ header: String) -> (oldStart: Int, newStart: Int) {
-        // Parse @@ -1,3 +1,4 @@ format
+    private static func parseHunkHeader(_ header: String) -> (oldStart: Int, newStart: Int) {
         var oldStart = 1
         var newStart = 1
 
@@ -123,18 +144,22 @@ struct DiffContentView: View {
 
 // MARK: - Models
 
-private struct DiffHunk {
-    let header: String
-    var leftLines: [SplitLine]
-    var rightLines: [SplitLine]
+private struct DiffRow: Identifiable {
+    let id: Int
+    let type: RowType
+
+    enum RowType {
+        case header(String)
+        case line(left: DiffCell, right: DiffCell)
+    }
 }
 
-private struct SplitLine {
+private struct DiffCell {
     let lineNumber: Int?
     let content: String
-    let type: LineType
+    let cellType: CellType
 
-    enum LineType {
+    enum CellType {
         case addition
         case deletion
         case context
@@ -142,21 +167,43 @@ private struct SplitLine {
     }
 }
 
-// MARK: - Split Line View
+// MARK: - Row View
 
-private struct SplitDiffLineView: View {
-    let line: SplitLine
+private struct DiffRowView: View {
+    let row: DiffRow
+
+    var body: some View {
+        switch row.type {
+        case .header(let text):
+            Text(text)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.secondary.opacity(0.1))
+
+        case .line(let left, let right):
+            HStack(spacing: 0) {
+                DiffCellView(cell: left)
+                Divider()
+                DiffCellView(cell: right)
+            }
+        }
+    }
+}
+
+private struct DiffCellView: View {
+    let cell: DiffCell
 
     var body: some View {
         HStack(spacing: 0) {
-            // Line number
-            Text(lineNumberText)
+            Text(cell.lineNumber.map { "\($0)" } ?? "")
                 .foregroundStyle(.tertiary)
                 .frame(width: 32, alignment: .trailing)
                 .padding(.trailing, 6)
 
-            // Content - no wrapping
-            Text(line.content.isEmpty ? " " : line.content)
+            Text(cell.content.isEmpty ? " " : cell.content)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -164,38 +211,24 @@ private struct SplitDiffLineView: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .frame(minHeight: 22)
+        .frame(maxWidth: .infinity, minHeight: 22)
         .background(backgroundColor)
     }
 
-    private var lineNumberText: String {
-        if let num = line.lineNumber {
-            return "\(num)"
-        }
-        return ""
-    }
-
     private var backgroundColor: Color {
-        switch line.type {
-        case .addition:
-            return Color.green.opacity(0.15)
-        case .deletion:
-            return Color.red.opacity(0.15)
-        case .context, .empty:
-            return Color.clear
+        switch cell.cellType {
+        case .addition: return Color.green.opacity(0.15)
+        case .deletion: return Color.red.opacity(0.15)
+        case .context, .empty: return Color.clear
         }
     }
 
     private var textColor: Color {
-        switch line.type {
-        case .addition:
-            return .green
-        case .deletion:
-            return .red
-        case .context:
-            return .primary
-        case .empty:
-            return .clear
+        switch cell.cellType {
+        case .addition: return .green
+        case .deletion: return .red
+        case .context: return .primary
+        case .empty: return .clear
         }
     }
 }
