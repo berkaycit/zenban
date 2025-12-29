@@ -10,15 +10,15 @@ struct DevServerSettingsSheet: View {
     @State private var devCommand = ""
     @State private var skipSetup = false
 
-    var body: some View {
-        let board = store.board(for: boardID)
+    private var board: Board? { store.board(for: boardID) }
 
+    var body: some View {
         VStack(spacing: 0) {
             headerSection
             Divider()
-            contentSection(board: board)
+            contentSection
             Divider()
-            footerSection(board: board)
+            footerSection
         }
         .frame(width: 400)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -45,10 +45,10 @@ struct DevServerSettingsSheet: View {
 
     // MARK: - Content
 
-    private func contentSection(board: Board?) -> some View {
+    private var contentSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             if board?.repositoryPath != nil {
-                devServerSection(hasConfig: board?.devServerConfig != nil)
+                devServerSection
             } else {
                 Text("No repository linked to this board.")
                     .font(.subheadline)
@@ -60,7 +60,7 @@ struct DevServerSettingsSheet: View {
         .padding(16)
     }
 
-    private func devServerSection(hasConfig: Bool) -> some View {
+    private var devServerSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Dev Server Configuration")
                 .font(.subheadline)
@@ -93,7 +93,7 @@ struct DevServerSettingsSheet: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            if !hasConfig {
+            if board?.devServerConfig == nil {
                 Label("Not configured yet. Settings will be saved when you click Save.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -103,7 +103,7 @@ struct DevServerSettingsSheet: View {
 
     // MARK: - Footer
 
-    private func footerSection(board: Board?) -> some View {
+    private var footerSection: some View {
         HStack {
             if board?.devServerConfig != nil {
                 Button("Clear") {

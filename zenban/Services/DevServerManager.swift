@@ -14,14 +14,63 @@ final class DevServerManager {
     }
 
     private(set) var serverStates: [UUID: ServerState] = [:]
+    private(set) var outputVersion: [UUID: Int] = [:]
     private var processes: [UUID: Process] = [:]
     private var outputPipes: [UUID: Pipe] = [:]
     private var outputBuffers: [UUID: String] = [:]
+    private var pendingUIUpdates: [UUID: Bool] = [:]
+
+    /// Maximum output buffer size (100KB)
+    private let maxOutputBufferSize = 100 * 1024
+    /// UI update throttle interval
+    private let uiUpdateInterval: TimeInterval = 0.15
 
     // MARK: - Public API
 
     func state(for cardID: UUID) -> ServerState {
         serverStates[cardID] ?? .idle
+    }
+
+    func output(for cardID: UUID) -> String {
+        outputBuffers[cardID] ?? ""
+    }
+
+    /// Append output to buffer with size limit and throttled UI updates
+    private func appendOutput(_ str: String, for cardID: UUID) {
+        let current = outputBuffers[cardID] ?? ""
+        var newOutput = current + str
+
+        // Only truncate when exceeding limit
+        if newOutput.count > maxOutputBufferSize {
+            let startIndex = newOutput.index(newOutput.endIndex, offsetBy: -maxOutputBufferSize)
+            // Find next newline to avoid cutting mid-line
+            if let newlineIndex = newOutput[startIndex...].firstIndex(of: "\n") {
+                newOutput = "[...truncated...]\n" + String(newOutput[newOutput.index(after: newlineIndex)...])
+            } else {
+                newOutput = "[...truncated...]\n" + String(newOutput[startIndex...])
+            }
+        }
+
+        outputBuffers[cardID] = newOutput
+        scheduleUIUpdate(for: cardID)
+    }
+
+    /// Throttled UI update via version increment
+    private func scheduleUIUpdate(for cardID: UUID) {
+        guard pendingUIUpdates[cardID] != true else { return }
+        pendingUIUpdates[cardID] = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + uiUpdateInterval) { [weak self] in
+            guard let self else { return }
+            self.pendingUIUpdates[cardID] = false
+            self.outputVersion[cardID, default: 0] += 1
+        }
+    }
+
+    /// Force immediate UI update
+    private func flushOutput(for cardID: UUID) {
+        pendingUIUpdates[cardID] = false
+        outputVersion[cardID, default: 0] += 1
     }
 
     /// Run setup command (npm install etc.) and wait for completion
@@ -80,6 +129,8 @@ final class DevServerManager {
 
         serverStates[cardID] = .idle
         outputBuffers[cardID] = nil
+        outputVersion[cardID] = nil
+        pendingUIUpdates[cardID] = nil
     }
 
     /// Stop all running servers
@@ -97,6 +148,8 @@ final class DevServerManager {
         }
         processes.removeAll()
         outputBuffers.removeAll()
+        outputVersion.removeAll()
+        pendingUIUpdates.removeAll()
     }
 
     /// Kill process and all its child processes
@@ -169,9 +222,8 @@ final class DevServerManager {
                           let self else { return }
 
                     DispatchQueue.main.async {
-                        let currentOutput = self.outputBuffers[cardID] ?? ""
-                        let newOutput = currentOutput + str
-                        self.outputBuffers[cardID] = newOutput
+                        self.appendOutput(str, for: cardID)
+                        let newOutput = self.outputBuffers[cardID] ?? ""
                         self.serverStates[cardID] = stateBuilder(newOutput)
                     }
                 }
@@ -201,6 +253,8 @@ final class DevServerManager {
                 DispatchQueue.main.sync {
                     self.outputPipes[cardID] = nil
                     self.processes[cardID] = nil
+                    // Flush final output to UI
+                    self.flushOutput(for: cardID)
                 }
 
                 if result == .timedOut {
@@ -273,9 +327,8 @@ final class DevServerManager {
                           let self else { return }
 
                     DispatchQueue.main.async {
-                        let currentOutput = self.outputBuffers[cardID] ?? ""
-                        let newOutput = currentOutput + str
-                        self.outputBuffers[cardID] = newOutput
+                        self.appendOutput(str, for: cardID)
+                        let newOutput = self.outputBuffers[cardID] ?? ""
 
                         if !state.portDetected && !state.isResumed {
                             self.serverStates[cardID] = .detectingPort(output: newOutput)
@@ -297,6 +350,8 @@ final class DevServerManager {
                         // Clean up pipe handler
                         outputPipe.fileHandleForReading.readabilityHandler = nil
                         self.outputPipes[cardID] = nil
+                        // Flush final output to UI
+                        self.flushOutput(for: cardID)
 
                         if !state.portDetected && !state.isResumed {
                             state.isResumed = true
@@ -348,22 +403,35 @@ final class DevServerManager {
 
     // MARK: - Port Detection
 
-    private static let portPatterns = [
-        #"(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)"#,
-        #"Local:\s+https?://[^:]+:(\d+)"#,
-        #"ready.*(?:localhost|127\.0\.0\.1):(\d+)"#,
-        #"https?://(?:localhost|127\.0\.0\.1):(\d+)"#,
-        #"http://\[?::1\]?:(\d+)"#,
-        #"listening on.*:(\d+)"#,
-        #"started at.*:(\d+)"#
-    ]
+    private static let compiledPortPatterns: [NSRegularExpression] = {
+        let patterns = [
+            #"(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)"#,
+            #"Local:\s+https?://[^:]+:(\d+)"#,
+            #"ready.*(?:localhost|127\.0\.0\.1):(\d+)"#,
+            #"https?://(?:localhost|127\.0\.0\.1):(\d+)"#,
+            #"http://\[?::1\]?:(\d+)"#,
+            #"listening on.*:(\d+)"#,
+            #"started at.*:(\d+)"#
+        ]
+        return patterns.compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
+    }()
 
+    /// Parse port from recent output only (last 2KB is enough for port detection)
     private static func parsePortFromOutput(_ output: String) -> Int? {
-        for pattern in portPatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-               let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
-               let portRange = Range(match.range(at: 1), in: output),
-               let port = Int(output[portRange]),
+        // Only scan last 2KB - ports appear near when server starts
+        let scanLimit = 2048
+        let searchRange: String
+        if output.count > scanLimit {
+            let startIdx = output.index(output.endIndex, offsetBy: -scanLimit)
+            searchRange = String(output[startIdx...])
+        } else {
+            searchRange = output
+        }
+
+        for regex in compiledPortPatterns {
+            if let match = regex.firstMatch(in: searchRange, range: NSRange(searchRange.startIndex..., in: searchRange)),
+               let portRange = Range(match.range(at: 1), in: searchRange),
+               let port = Int(searchRange[portRange]),
                port > 0 && port < 65536 {
                 return port
             }

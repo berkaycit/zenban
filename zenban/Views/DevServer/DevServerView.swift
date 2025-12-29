@@ -14,8 +14,10 @@ struct DevServerView: View {
     @State private var reloadTrigger = 0
     @State private var webViewError: String?
     @State private var retryCount = 0
+    @State private var showConsole = true
 
     private let maxRetries = 5
+    private let consoleHeight: CGFloat = 180
 
     var body: some View {
         VStack(spacing: 0) {
@@ -69,6 +71,13 @@ struct DevServerView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isWebViewLoading)
+
+                Button(action: { withAnimation(.easeOut(duration: 0.15)) { showConsole.toggle() } }) {
+                    Image(systemName: "terminal")
+                        .foregroundStyle(showConsole ? .primary : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Toggle Console")
             }
         }
         .padding(16)
@@ -148,48 +157,140 @@ struct DevServerView: View {
 
     @ViewBuilder
     private func webViewSection(url: URL) -> some View {
-        ZStack {
-            ReloadableWebView(
-                url: url,
-                isLoading: $isWebViewLoading,
-                reloadTrigger: $reloadTrigger,
-                onError: { error in
-                    handleWebViewError(error)
-                }
-            )
+        VStack(spacing: 0) {
+            ZStack {
+                ReloadableWebView(
+                    url: url,
+                    isLoading: $isWebViewLoading,
+                    reloadTrigger: $reloadTrigger,
+                    onError: { error in
+                        handleWebViewError(error)
+                    }
+                )
 
-            if let error = webViewError {
-                VStack(spacing: 12) {
-                    Image(systemName: "wifi.exclamationmark")
-                        .font(.largeTitle)
-                        .foregroundStyle(.orange)
-                    Text("Connection Error")
-                        .font(.headline)
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-
-                    if retryCount < maxRetries {
-                        Text("Retrying... (\(retryCount + 1)/\(maxRetries))")
+                if let error = webViewError {
+                    VStack(spacing: 12) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.largeTitle)
+                            .foregroundStyle(.orange)
+                        Text("Connection Error")
+                            .font(.headline)
+                        Text(error)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    } else {
-                        retryReconfigureButtons {
-                            retryCount = 0
-                            webViewError = nil
-                            reloadTrigger += 1
+                            .multilineTextAlignment(.center)
+
+                        if retryCount < maxRetries {
+                            Text("Retrying... (\(retryCount + 1)/\(maxRetries))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            retryReconfigureButtons {
+                                retryCount = 0
+                                webViewError = nil
+                                reloadTrigger += 1
+                            }
                         }
                     }
+                    .padding(32)
+                    .background(Color.cardBackground.opacity(0.95))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .padding(32)
-                .background(Color.cardBackground.opacity(0.95))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if showConsole {
+                Divider()
+                consoleSection
             }
         }
         .onAppear {
             serverURL = url
         }
+    }
+
+    private var consoleSection: some View {
+        VStack(spacing: 0) {
+            consoleHeader
+            consoleContent
+        }
+        .frame(height: consoleHeight)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+    }
+
+    private var consoleHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "terminal")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Text("Console")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button(action: { withAnimation(.easeOut(duration: 0.15)) { showConsole = false } }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.08))
+    }
+
+    private var consoleContent: some View {
+        // Observe version for throttled updates
+        let _ = devServerManager.outputVersion[card.id]
+        let output = devServerManager.output(for: card.id)
+        let displayText = limitedConsoleOutput(output)
+
+        return ScrollView {
+            ScrollViewReader { proxy in
+                Text(displayText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(output.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .id("console-bottom")
+                    .onAppear {
+                        proxy.scrollTo("console-bottom", anchor: .bottom)
+                    }
+                    .onChange(of: devServerManager.outputVersion[card.id]) {
+                        proxy.scrollTo("console-bottom", anchor: .bottom)
+                    }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func limitedConsoleOutput(_ output: String) -> String {
+        guard !output.isEmpty else { return "Waiting for output..." }
+
+        let maxLines = 300
+
+        // Scan from end to find maxLines newlines - O(k) instead of O(n)
+        var newlineCount = 0
+        var cutIndex = output.endIndex
+
+        for i in output.indices.reversed() {
+            if output[i] == "\n" {
+                newlineCount += 1
+                if newlineCount >= maxLines {
+                    cutIndex = output.index(after: i)
+                    break
+                }
+            }
+        }
+
+        if newlineCount < maxLines {
+            return output
+        }
+
+        return "[...truncated...]\n" + String(output[cutIndex...])
     }
 
     private func errorView(message: String) -> some View {
