@@ -301,4 +301,10 @@ final class ZenbanTerminalView: LocalProcessTerminalView {
     private func triggerAgentResumed() {
         withCardContext { NotificationService.shared.triggerAgentResumed(cardID: $0, boardID: $1) }
     }
+
+    // MARK: - TerminalViewDelegate Override
+
+    override func requestOpenLink(source: TerminalView, link: String, params: [String:String]) {
+        // Do nothing - prevent dev server links from opening in external browser
+    }
 }

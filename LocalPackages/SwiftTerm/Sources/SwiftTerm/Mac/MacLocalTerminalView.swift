@@ -149,6 +149,18 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
     open func rangeChanged(source: TerminalView, startY: Int, endY: Int) {
         //
     }
+
+    /// Implementation of the TerminalViewDelegate method - opens link in default browser.
+    /// Subclasses can override to customize behavior.
+    open func requestOpenLink(source: TerminalView, link: String, params: [String:String]) {
+        if let fixedup = link.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            if let url = NSURLComponents(string: fixedup) {
+                if let nested = url.url {
+                    NSWorkspace.shared.open(nested)
+                }
+            }
+        }
+    }
     
     /**
      * Launches a child process inside a pseudo-terminal.

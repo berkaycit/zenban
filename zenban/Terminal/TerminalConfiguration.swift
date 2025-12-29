@@ -38,7 +38,7 @@ struct TerminalConfiguration {
     // Modern, softer ANSI colors for better readability
     static let ansiColors: [SwiftTerm.Color] = [
         // Dark colors (0-7)
-        color(0x28, 0x28, 0x2C),  // Black - softer
+        color(0x67, 0x67, 0x67),  // Black - lighter for dark backgrounds
         color(0xE0, 0x6C, 0x75),  // Red - muted rose
         color(0x98, 0xC3, 0x79),  // Green - soft sage
         color(0xE5, 0xC0, 0x7B),  // Yellow - warm amber

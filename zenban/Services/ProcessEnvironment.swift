@@ -43,6 +43,10 @@ enum ProcessEnvironment {
         let newPaths = allPaths.filter { !pathSet.contains($0) }
 
         env["PATH"] = (newPaths + [currentPath]).joined(separator: ":")
+
+        // Prevent dev servers from opening browser (we have in-app preview)
+        env["BROWSER"] = "none"
+
         return env
     }
 }
