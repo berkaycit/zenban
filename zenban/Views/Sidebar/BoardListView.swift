@@ -3,6 +3,7 @@ import SwiftUI
 struct BoardListView: View {
     @Environment(BoardStore.self) private var store
     @State private var isAddingBoard = false
+    @State private var isShowingSettings = false
 
     var body: some View {
         List {
@@ -28,10 +29,22 @@ struct BoardListView: View {
                 }
                 .controlSize(.large)
                 .help("New Task")
+
+                Button(action: { isShowingSettings = true }) {
+                    Image(systemName: "gearshape")
+                }
+                .controlSize(.large)
+                .help("Dev Server Settings")
+                .disabled(store.selectedBoard == nil)
             }
         }
         .sheet(isPresented: $isAddingBoard) {
             AddBoardSheet(isPresented: $isAddingBoard)
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            if let boardID = store.selectedBoardID {
+                DevServerSettingsSheet(boardID: boardID, isPresented: $isShowingSettings)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .newBoard)) { _ in
             isAddingBoard = true

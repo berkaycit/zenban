@@ -1,0 +1,151 @@
+import SwiftUI
+
+/// Sheet for editing board-level dev server configuration
+struct DevServerSettingsSheet: View {
+    let boardID: UUID
+    @Binding var isPresented: Bool
+
+    @Environment(BoardStore.self) private var store
+    @State private var setupCommand = ""
+    @State private var devCommand = ""
+    @State private var skipSetup = false
+
+    var body: some View {
+        let board = store.board(for: boardID)
+
+        VStack(spacing: 0) {
+            headerSection
+            Divider()
+            contentSection(board: board)
+            Divider()
+            footerSection(board: board)
+        }
+        .frame(width: 400)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            loadConfig()
+        }
+    }
+
+    // MARK: - Header
+
+    private var headerSection: some View {
+        HStack {
+            Text("Dev Server Settings")
+                .font(.headline)
+            Spacer()
+            Button(action: { isPresented = false }) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+    }
+
+    // MARK: - Content
+
+    private func contentSection(board: Board?) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if board?.repositoryPath != nil {
+                devServerSection(hasConfig: board?.devServerConfig != nil)
+            } else {
+                Text("No repository linked to this board.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 32)
+            }
+        }
+        .padding(16)
+    }
+
+    private func devServerSection(hasConfig: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Dev Server Configuration")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Setup Command")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                TextField("npm install", text: $setupCommand)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(skipSetup)
+
+                Toggle(isOn: $skipSetup) {
+                    Text("Skip setup")
+                        .font(.caption)
+                }
+                .toggleStyle(.checkbox)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Dev Command")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                TextField("npm run dev", text: $devCommand)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            if !hasConfig {
+                Label("Not configured yet. Settings will be saved when you click Save.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Footer
+
+    private func footerSection(board: Board?) -> some View {
+        HStack {
+            if board?.devServerConfig != nil {
+                Button("Clear") {
+                    store.clearDevServerConfig(boardID)
+                    isPresented = false
+                }
+                .foregroundStyle(.red)
+            }
+
+            Spacer()
+
+            Button("Cancel") {
+                isPresented = false
+            }
+            .keyboardShortcut(.cancelAction)
+
+            Button("Save") {
+                saveConfig()
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(board?.repositoryPath == nil)
+        }
+        .padding(16)
+    }
+
+    // MARK: - Actions
+
+    private func loadConfig() {
+        if let config = store.board(for: boardID)?.devServerConfig {
+            setupCommand = config.setupCommand ?? ""
+            devCommand = config.devCommand
+            skipSetup = config.skipSetup
+        }
+    }
+
+    private func saveConfig() {
+        let config = DevServerConfig(
+            setupCommand: setupCommand.isEmpty ? nil : setupCommand,
+            devCommand: devCommand.isEmpty ? "npm run dev" : devCommand,
+            skipSetup: skipSetup
+        )
+        store.updateDevServerConfig(boardID, config: config)
+        isPresented = false
+    }
+}

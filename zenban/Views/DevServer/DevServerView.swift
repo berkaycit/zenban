@@ -6,6 +6,7 @@ struct DevServerView: View {
     let setupCommand: String?
     let devCommand: String
     let onDismiss: () -> Void
+    var onReconfigure: (() -> Void)?
 
     @Environment(DevServerManager.self) private var devServerManager
     @State private var serverURL: URL?
@@ -174,7 +175,7 @@ struct DevServerView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        Button("Retry") {
+                        retryReconfigureButtons {
                             retryCount = 0
                             webViewError = nil
                             reloadTrigger += 1
@@ -214,9 +215,7 @@ struct DevServerView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.horizontal, 32)
 
-            Button("Retry") {
-                startServer()
-            }
+            retryReconfigureButtons(onRetry: startServer)
 
             Button("Close") {
                 onDismiss()
@@ -226,6 +225,22 @@ struct DevServerView: View {
             Spacer()
         }
         .padding(16)
+    }
+
+    // MARK: - Components
+
+    private func retryReconfigureButtons(onRetry: @escaping () -> Void) -> some View {
+        HStack(spacing: 12) {
+            Button("Retry", action: onRetry)
+
+            if let reconfigure = onReconfigure {
+                Button("Reconfigure") {
+                    onDismiss()
+                    reconfigure()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
     }
 
     // MARK: - Actions

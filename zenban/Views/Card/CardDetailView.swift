@@ -46,7 +46,8 @@ struct CardDetailView: View {
                     card: card,
                     setupCommand: devServerSetupCommand,
                     devCommand: devServerDevCommand,
-                    onDismiss: { showDevServer = false }
+                    onDismiss: { showDevServer = false },
+                    onReconfigure: { showDevServerCommand = true }
                 )
                 .zIndex(2)
             }
@@ -90,6 +91,9 @@ struct CardDetailView: View {
         }
     }
 
+    private var board: Board? { store.board(for: boardID) }
+    private var hasRepository: Bool { board?.repositoryPath != nil }
+
     private var cardInfoContent: some View {
         VStack(alignment: .leading, spacing: 24) {
             // Header: Title + Actions
@@ -132,7 +136,7 @@ struct CardDetailView: View {
 
                 // Quick actions
                 HStack(spacing: 12) {
-                    if store.board(for: boardID)?.repositoryPath != nil && card.worktreePath != nil {
+                    if hasRepository && card.worktreePath != nil {
                         Button(action: { showGitChanges = true }) {
                             Image(systemName: "arrow.triangle.branch")
                                 .font(.system(size: 15))
@@ -149,7 +153,7 @@ struct CardDetailView: View {
                         .foregroundStyle(.secondary)
                         .help("Dev Server")
                         .contextMenu {
-                            if store.board(for: boardID)?.devServerConfig != nil {
+                            if board?.devServerConfig != nil {
                                 Button("Reconfigure") { showDevServerCommand = true }
                             }
                         }
@@ -172,53 +176,45 @@ struct CardDetailView: View {
             // Status & Controls
             HStack(spacing: 24) {
                 // Column pills
-                HStack(spacing: 2) {
-                    ForEach(Column.allCases) { column in
-                        Button(action: { moveToColumn(column) }) {
-                            Text(column.rawValue)
-                                .font(.callout)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(card.column == column ? column.accentColor : Color.clear)
-                                .foregroundStyle(card.column == column ? .white : .secondary)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(card.column == column)
-                    }
-                }
-                .padding(4)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                segmentedPills(Column.allCases, selected: card.column, color: { $0.accentColor }) { moveToColumn($0) }
 
                 // Agent pills
-                HStack(spacing: 2) {
-                    ForEach(Agent.allCases) { agent in
-                        Button(action: { switchAgent(to: agent) }) {
-                            Text(agent.rawValue)
-                                .font(.callout)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(currentAgent == agent ? Color.accentColor : Color.clear)
-                                .foregroundStyle(currentAgent == agent ? .white : .secondary)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(currentAgent == agent)
-                    }
-                }
-                .padding(4)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                segmentedPills(Agent.allCases, selected: currentAgent, color: { _ in Color.accentColor }) { switchAgent(to: $0) }
 
                 Spacer()
 
                 // Worktree indicator
-                if store.board(for: boardID)?.repositoryPath != nil {
+                if hasRepository {
                     worktreeIndicator
                 }
             }
         }
+    }
+
+    private func segmentedPills<T: Identifiable & RawRepresentable>(
+        _ items: [T],
+        selected: T,
+        color: @escaping (T) -> Color,
+        action: @escaping (T) -> Void
+    ) -> some View where T.RawValue == String, T: Equatable {
+        HStack(spacing: 2) {
+            ForEach(items) { item in
+                Button(action: { action(item) }) {
+                    Text(item.rawValue)
+                        .font(.callout)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(selected == item ? color(item) : Color.clear)
+                        .foregroundStyle(selected == item ? .white : .secondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .disabled(selected == item)
+            }
+        }
+        .padding(4)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder
@@ -252,7 +248,7 @@ struct CardDetailView: View {
     }
 
     private var currentAgent: Agent {
-        card.agent ?? store.board(for: boardID)?.agent ?? .claude
+        card.agent ?? board?.agent ?? .claude
     }
 
     private func switchAgent(to agent: Agent) {
@@ -320,14 +316,11 @@ struct CardDetailView: View {
     }
 
     private func startDevServer() {
-        // Check if config exists for this board
-        if let config = store.board(for: boardID)?.devServerConfig {
-            // Use saved config (always pass setupCommand, DevServerView checks per worktree)
+        if let config = board?.devServerConfig {
             devServerSetupCommand = config.setupCommand
             devServerDevCommand = config.devCommand
             showDevServer = true
         } else {
-            // Show configuration sheet
             showDevServerCommand = true
         }
     }

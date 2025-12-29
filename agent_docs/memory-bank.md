@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add dev server settings sheet and UI improvements
+- **Description**: New DevServerSettingsSheet accessible from sidebar toolbar for editing board dev server config (setup command, dev command, skip setup). DevServerView error states now offer Reconfigure option. CardDetailView redesigned with compacted 160px info section, segmented pill controls for column/agent selection, and icon-only quick actions. Refactored repeated board lookups into computed properties.
+
 - **Summary**: Redesign terminal with modern styling
 - **Description**: Updated terminal appearance for better readability. TerminalConfiguration.swift now uses static properties for all styling: SF Mono 14pt font, soft white foreground (#D9D9DE), teal cursor (#5FC9E3), selection highlight (#335980). Custom ANSI color palette with One Dark inspired colors - muted normal colors and distinct bright variants for bold text. Background color kept at original (#2A2A27) via TerminalContainerView default. To change colors dynamically, modify TerminalConfiguration static properties and call installColors() for ANSI palette updates.
 

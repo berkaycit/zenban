@@ -47,6 +47,7 @@ zenban/
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `ProcessEnvironment` | Shared utility for building process environment with PATH setup (node/nvm/homebrew). Used by ClaudeService and DevServerManager. |
 | `DevServerManager` | Manages dev server processes for cards. Handles setup (npm install), port detection, and WebView preview. Single server at a time with proper cleanup. |
+| `DevServerSettingsSheet` | Sidebar-accessible sheet for editing board dev server config (setup command, dev command, skip setup toggle). |
 | `GitChangesView` | Overlay in CardDetailView showing diff, branch picker, Commit/Merge/Create PR actions |
 | `DirectoryPicker` | NSOpenPanel wrapper for folder selection |
 
@@ -73,7 +74,7 @@ AIProvider protocol enables pluggable AI services. ClaudeService implements it f
 
 ## Dev Server Preview
 
-Board stores DevServerConfig (setup command, dev command). CardDetailView shows "Start Dev Server" button for cards with worktree. First run prompts for commands (auto-detected from package.json/lock files), subsequent runs use saved config. DevServerManager runs one server at a time, auto-detects port from output, shows WebView overlay. Cleanup on dismiss, card delete, and app quit.
+Board stores DevServerConfig (setup command, dev command). CardDetailView shows "Start Dev Server" button for cards with worktree. First run prompts for commands (auto-detected from package.json/lock files), subsequent runs use saved config. DevServerManager runs one server at a time, auto-detects port from output, shows WebView overlay. Cleanup on dismiss, card delete, and app quit. Toolbar settings button opens DevServerSettingsSheet for manual config editing. Error states offer Reconfigure option to fix misconfigured commands.
 
 ## Keyboard Shortcuts
 
