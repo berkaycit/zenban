@@ -31,7 +31,7 @@ zenban/
 
 | Component | Purpose |
 |-----------|---------|
-| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Tracks `focusRegion` for keyboard navigation. Skips redundant column moves. Creates/deletes worktrees for cards. Auto-selects next card after deletion. |
+| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Tracks `focusRegion` for keyboard navigation and `devServerState` FSM (idle/configuring/running/reconfiguring). Skips redundant column moves. Creates/deletes worktrees for cards. Auto-selects next card after deletion. Stops dev server on card/board delete. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board` | Data model with `isPinned`, optional `repositoryPath`, and `agent` selection |
 | `Agent` | Enum (Claude/Codex/Gemini) with launch commands. Board sets default, Card can override. |
@@ -75,7 +75,7 @@ AIProvider protocol enables pluggable AI services. ClaudeService implements it f
 
 ## Dev Server Preview
 
-Board stores DevServerConfig (setup command, dev command). CardDetailView shows "Start Dev Server" button for cards with worktree. First run prompts for commands (auto-detected from package.json/lock files), subsequent runs use saved config. DevServerManager runs one server at a time, auto-detects port from output, shows WebView overlay with toggleable console panel. Cleanup on dismiss, card delete, and app quit. Toolbar settings button opens DevServerSettingsSheet for manual config editing. Error states offer Reconfigure option to fix misconfigured commands.
+Board stores DevServerConfig (setup command, dev command). CardDetailView shows "Start Dev Server" button for cards with worktree. First run prompts for commands (auto-detected from package.json/lock files), subsequent runs use saved config. DevServerManager runs one server at a time, auto-detects port from output, shows WebView in board area with toggleable console panel. ProcessEnvironment sets BROWSER=none to suppress external browser launch. ZenbanTerminalView overrides link handling to prevent dev server URLs opening externally. Cleanup on dismiss, card delete, and app quit. Toolbar settings button opens DevServerSettingsSheet for manual config editing. Error states offer Reconfigure option.
 
 ## Keyboard Shortcuts
 

@@ -10,15 +10,10 @@ struct CardDetailView: View {
     @State private var isEditing = false
     @State private var showTerminal = true
     @State private var showGitChanges = false
-    @State private var showDevServer = false
-    @State private var showDevServerCommand = false
-    @State private var devServerSetupCommand: String?
-    @State private var devServerDevCommand = ""
     @FocusState private var isFocused: Bool
 
     var body: some View {
         ZStack {
-            // Normal card detail content
             VStack(alignment: .leading, spacing: 0) {
                 cardInfoSection
                     .frame(height: showTerminal && terminalManager.isTerminalAvailable ? 160 : nil)
@@ -39,24 +34,11 @@ struct CardDetailView: View {
                 )
                 .zIndex(1)
             }
-
-            // Dev server overlay
-            if showDevServer {
-                DevServerView(
-                    card: card,
-                    setupCommand: devServerSetupCommand,
-                    devCommand: devServerDevCommand,
-                    onDismiss: { showDevServer = false },
-                    onReconfigure: { showDevServerCommand = true }
-                )
-                .zIndex(2)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .background(Color.cardBackground)
         .animation(.easeOut(duration: 0.15), value: showGitChanges)
-        .animation(.easeOut(duration: 0.15), value: showDevServer)
         .onAppear {
             editedTitle = card.title
         }
@@ -64,22 +46,6 @@ struct CardDetailView: View {
             editedTitle = card.title
             isEditing = false
             showGitChanges = false
-            showDevServer = false
-        }
-        .sheet(isPresented: $showDevServerCommand) {
-            if let worktreePath = card.worktreePath {
-                DevServerCommandSheet(
-                    worktreePath: worktreePath,
-                    boardID: boardID,
-                    isPresented: $showDevServerCommand,
-                    onStart: { setup, dev in
-                        devServerSetupCommand = setup
-                        devServerDevCommand = dev
-                        showDevServerCommand = false
-                        showDevServer = true
-                    }
-                )
-            }
         }
     }
 
@@ -154,7 +120,7 @@ struct CardDetailView: View {
                         .help("Dev Server")
                         .contextMenu {
                             if board?.devServerConfig != nil {
-                                Button("Reconfigure") { showDevServerCommand = true }
+                                Button("Reconfigure") { store.configureDevServer(for: card) }
                             }
                         }
                     }
@@ -317,11 +283,11 @@ struct CardDetailView: View {
 
     private func startDevServer() {
         if let config = board?.devServerConfig {
-            devServerSetupCommand = config.setupCommand
-            devServerDevCommand = config.devCommand
-            showDevServer = true
+            // Config exists, go directly to running
+            store.startDevServerDirect(card: card, setup: config.setupCommand, dev: config.devCommand)
         } else {
-            showDevServerCommand = true
+            // No config, show configuration sheet
+            store.configureDevServer(for: card)
         }
     }
 }

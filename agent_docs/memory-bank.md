@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Centralize dev server state with FSM in BoardStore
+- **Description**: DevServerState enum (idle/configuring/running/reconfiguring) moved to BoardStore for centralized state management. DevServerView relocated from CardDetailView overlay to ContentView, replacing board area when active. Browser suppression added via BROWSER=none in ProcessEnvironment and link handling override in ZenbanTerminalView. Terminal ANSI black color adjusted from #282828 to #676767 for visibility on dark backgrounds.
+
 - **Summary**: Add throttled console output and on-demand diff loading
 - **Description**: DevServerManager now limits output buffer to 100KB with throttled UI updates (150ms interval) to prevent performance issues with verbose servers. DevServerView adds toggleable console panel for viewing server output. GitChangesView loads diffs on-demand when files are expanded instead of preloading all. DiffContentView parses diffs asynchronously with 300-line limit and "show more" button. Port detection uses pre-compiled regex and scans only last 2KB of output.
 

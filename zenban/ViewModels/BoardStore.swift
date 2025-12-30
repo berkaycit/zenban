@@ -5,6 +5,13 @@ enum FocusRegion {
     case cards
 }
 
+enum DevServerState: Equatable {
+    case idle
+    case configuring(cardID: UUID)
+    case running(cardID: UUID, setup: String?, dev: String)
+    case reconfiguring(cardID: UUID, setup: String?, dev: String)
+}
+
 @MainActor
 @Observable
 final class BoardStore {
@@ -13,6 +20,9 @@ final class BoardStore {
     var selectedCardID: UUID?
     var draggedCardID: UUID?
     var focusRegion: FocusRegion = .sidebar
+
+    // Dev server state (FSM)
+    var devServerState: DevServerState = .idle
 
     var onCardDeleted: ((UUID) -> Void)?
     weak var terminalManager: TerminalManager?
@@ -30,6 +40,117 @@ final class BoardStore {
     var selectedCard: Card? {
         guard let cardID = selectedCardID else { return nil }
         return selectedBoard?.cards.first { $0.id == cardID }
+    }
+
+    // MARK: - Dev Server Computed Properties
+
+    var showDevServer: Bool {
+        switch devServerState {
+        case .running, .reconfiguring: true
+        case .idle, .configuring: false
+        }
+    }
+
+    var showDevServerConfig: Bool {
+        get {
+            switch devServerState {
+            case .configuring, .reconfiguring: true
+            case .idle, .running: false
+            }
+        }
+        set {
+            // Sheet dismissed via swipe/cancel
+            if !newValue {
+                switch devServerState {
+                case .configuring:
+                    devServerState = .idle
+                case .reconfiguring(let cardID, let setup, let dev):
+                    devServerState = .running(cardID: cardID, setup: setup, dev: dev)
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    var devServerCard: Card? {
+        switch devServerState {
+        case .configuring(let cardID), .running(let cardID, _, _), .reconfiguring(let cardID, _, _):
+            // Always get fresh card from board
+            selectedBoard?.cards.first { $0.id == cardID }
+        case .idle:
+            nil
+        }
+    }
+
+    var devServerSetupCommand: String? {
+        switch devServerState {
+        case .running(_, let setup, _), .reconfiguring(_, let setup, _):
+            setup
+        case .idle, .configuring:
+            nil
+        }
+    }
+
+    var devServerDevCommand: String {
+        switch devServerState {
+        case .running(_, _, let dev), .reconfiguring(_, _, let dev):
+            dev
+        case .idle, .configuring:
+            ""
+        }
+    }
+
+    // MARK: - Dev Server Transitions
+
+    func configureDevServer(for card: Card) {
+        devServerState = .configuring(cardID: card.id)
+    }
+
+    func startDevServer(setup: String?, dev: String) {
+        switch devServerState {
+        case .configuring(let cardID):
+            devServerState = .running(cardID: cardID, setup: setup, dev: dev)
+        default:
+            break
+        }
+    }
+
+    func startDevServerDirect(card: Card, setup: String?, dev: String) {
+        devServerState = .running(cardID: card.id, setup: setup, dev: dev)
+    }
+
+    func stopDevServer() {
+        devServerState = .idle
+    }
+
+    func openReconfigure() {
+        switch devServerState {
+        case .running(let cardID, let setup, let dev):
+            devServerState = .reconfiguring(cardID: cardID, setup: setup, dev: dev)
+        default:
+            break
+        }
+    }
+
+    func restartDevServer(setup: String?, dev: String) {
+        guard case .reconfiguring(let cardID, _, _) = devServerState else { return }
+        // Close view to trigger onDisappear (stops process), then restart
+        devServerState = .idle
+        Task { @MainActor in
+            devServerState = .running(cardID: cardID, setup: setup, dev: dev)
+        }
+    }
+
+    func confirmDevServerConfig(setup: String?, dev: String) {
+        switch devServerState {
+        case .configuring:
+            startDevServer(setup: setup, dev: dev)
+        case .reconfiguring:
+            restartDevServer(setup: setup, dev: dev)
+        default:
+            break
+        }
     }
 
     init() {
@@ -52,6 +173,12 @@ final class BoardStore {
 
     func deleteBoard(_ board: Board) {
         let repoPath = board.repositoryPath
+
+        // Stop dev server if running for any card in this board
+        if let devCard = devServerCard,
+           board.cards.contains(where: { $0.id == devCard.id }) {
+            stopDevServer()
+        }
 
         for card in board.cards {
             onCardDeleted?(card.id)
@@ -153,6 +280,11 @@ final class BoardStore {
         let card = boards[i].cards.first { $0.id == cardID }
         let repoPath = boards[i].repositoryPath
         let wasSelected = selectedCardID == cardID
+
+        // Stop dev server if this card's server is running
+        if devServerCard?.id == cardID {
+            stopDevServer()
+        }
 
         boards[i].cards.removeAll { $0.id == cardID }
         if draggedCardID == cardID { draggedCardID = nil }

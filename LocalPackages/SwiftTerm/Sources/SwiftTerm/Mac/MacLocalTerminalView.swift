@@ -153,13 +153,9 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
     /// Implementation of the TerminalViewDelegate method - opens link in default browser.
     /// Subclasses can override to customize behavior.
     open func requestOpenLink(source: TerminalView, link: String, params: [String:String]) {
-        if let fixedup = link.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            if let url = NSURLComponents(string: fixedup) {
-                if let nested = url.url {
-                    NSWorkspace.shared.open(nested)
-                }
-            }
-        }
+        guard let encoded = link.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: encoded) else { return }
+        NSWorkspace.shared.open(url)
     }
     
     /**

@@ -41,12 +41,6 @@ struct DevServerView: View {
 
     private var headerSection: some View {
         HStack(spacing: 12) {
-            Button(action: onDismiss) {
-                Image(systemName: "chevron.left")
-                    .font(.body.weight(.medium))
-            }
-            .buttonStyle(.plain)
-
             if let url = serverURL {
                 Text(url.absoluteString)
                     .font(.caption.monospaced())
@@ -79,6 +73,14 @@ struct DevServerView: View {
                 .buttonStyle(.plain)
                 .help("Toggle Console")
             }
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Close Preview")
         }
         .padding(16)
     }
