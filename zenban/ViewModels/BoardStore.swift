@@ -128,6 +128,8 @@ final class BoardStore {
             // Close view to trigger onDisappear (stops process), then restart
             devServerState = .idle
             Task { @MainActor in
+                // Only restart if still idle (no other action changed state)
+                guard devServerState == .idle else { return }
                 devServerState = .running(cardID: cardID, setup: setup, dev: dev)
             }
         default:
