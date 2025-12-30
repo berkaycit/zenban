@@ -107,15 +107,6 @@ final class BoardStore {
         devServerState = .configuring(cardID: card.id)
     }
 
-    func startDevServer(setup: String?, dev: String) {
-        switch devServerState {
-        case .configuring(let cardID):
-            devServerState = .running(cardID: cardID, setup: setup, dev: dev)
-        default:
-            break
-        }
-    }
-
     func startDevServerDirect(card: Card, setup: String?, dev: String) {
         devServerState = .running(cardID: card.id, setup: setup, dev: dev)
     }
@@ -125,29 +116,20 @@ final class BoardStore {
     }
 
     func openReconfigure() {
-        switch devServerState {
-        case .running(let cardID, let setup, let dev):
-            devServerState = .reconfiguring(cardID: cardID, setup: setup, dev: dev)
-        default:
-            break
-        }
-    }
-
-    func restartDevServer(setup: String?, dev: String) {
-        guard case .reconfiguring(let cardID, _, _) = devServerState else { return }
-        // Close view to trigger onDisappear (stops process), then restart
-        devServerState = .idle
-        Task { @MainActor in
-            devServerState = .running(cardID: cardID, setup: setup, dev: dev)
-        }
+        guard case .running(let cardID, let setup, let dev) = devServerState else { return }
+        devServerState = .reconfiguring(cardID: cardID, setup: setup, dev: dev)
     }
 
     func confirmDevServerConfig(setup: String?, dev: String) {
         switch devServerState {
-        case .configuring:
-            startDevServer(setup: setup, dev: dev)
-        case .reconfiguring:
-            restartDevServer(setup: setup, dev: dev)
+        case .configuring(let cardID):
+            devServerState = .running(cardID: cardID, setup: setup, dev: dev)
+        case .reconfiguring(let cardID, _, _):
+            // Close view to trigger onDisappear (stops process), then restart
+            devServerState = .idle
+            Task { @MainActor in
+                devServerState = .running(cardID: cardID, setup: setup, dev: dev)
+            }
         default:
             break
         }
@@ -281,19 +263,20 @@ final class BoardStore {
         let repoPath = boards[i].repositoryPath
         let wasSelected = selectedCardID == cardID
 
-        // Stop dev server if this card's server is running
-        if devServerCard?.id == cardID {
-            stopDevServer()
+        // Capture column and index before deletion for selection logic
+        let deletedColumn = card?.column
+        let deletedIndex = deletedColumn.flatMap { col in
+            boards[i].cards(in: col).firstIndex { $0.id == cardID }
         }
+
+        if devServerCard?.id == cardID { stopDevServer() }
 
         boards[i].cards.removeAll { $0.id == cardID }
         if draggedCardID == cardID { draggedCardID = nil }
         onCardDeleted?(cardID)
 
         if wasSelected {
-            selectedCardID = boards[i].cards(in: .todo).first?.id
-                ?? boards[i].cards(in: .inProgress).first?.id
-                ?? boards[i].cards(in: .done).first?.id
+            selectNextCardAfterDeletion(boardIndex: i, column: deletedColumn, deletedIndex: deletedIndex)
         }
 
         scheduleSave()
@@ -425,6 +408,24 @@ final class BoardStore {
     }
 
     // MARK: - Private Helpers
+
+    private func selectNextCardAfterDeletion(boardIndex i: Int, column: Column?, deletedIndex: Int?) {
+        guard let column, let index = deletedIndex else {
+            selectedCardID = nil
+            return
+        }
+        let cards = boards[i].cards(in: column)
+        if index < cards.count {
+            selectedCardID = cards[index].id
+        } else if let last = cards.last {
+            selectedCardID = last.id
+        } else {
+            // Column empty, select last card from any column
+            selectedCardID = boards[i].cards(in: .todo).last?.id
+                ?? boards[i].cards(in: .inProgress).last?.id
+                ?? boards[i].cards(in: .done).last?.id
+        }
+    }
 
     private func boardIndex(for id: UUID) -> Int? {
         boards.firstIndex { $0.id == id }
