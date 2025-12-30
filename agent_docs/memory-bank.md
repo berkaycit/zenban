@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Move GitChangesView to board area with toggle
+- **Description**: GitChangesView relocated from CardDetailView overlay to ContentView board area (like DevServerView). New Cmd+Shift+X keyboard shortcut toggles the view. BoardStore tracks gitChangesCardID state with toggleGitChanges/stopGitChanges methods. New stopOverlays() method consolidates cleanup of dev server and git changes on board switch or card/board deletion.
+
 - **Summary**: Add delete confirmation dialog and update shortcuts
 - **Description**: New DeleteConfirmationView with arrow-key navigation for confirming card deletion. Keyboard shortcuts changed from Shift to Cmd+Shift (A for new card, D for delete, S for toggle dev server). BoardStore gains showDeleteConfirmation state and request/confirm/cancel methods. zenbanApp event monitor updated to skip when dialog is visible.
 

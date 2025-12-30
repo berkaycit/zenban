@@ -31,7 +31,7 @@ zenban/
 
 | Component | Purpose |
 |-----------|---------|
-| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Tracks `focusRegion` for keyboard navigation and `devServerState` FSM (idle/configuring/running/reconfiguring). Skips redundant column moves. Creates/deletes worktrees for cards. Auto-selects next card after deletion. Stops dev server on card/board delete. |
+| `BoardStore` | Central state manager with `sortedBoards` (pinned first). Tracks `focusRegion` for keyboard navigation, `devServerState` FSM, and `gitChangesCardID`. Skips redundant column moves. Creates/deletes worktrees for cards. Auto-selects next card after deletion. `stopOverlays()` unified cleanup for dev server and git changes on card/board delete. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board` | Data model with `isPinned`, optional `repositoryPath`, and `agent` selection |
 | `Agent` | Enum (Claude/Codex/Gemini) with launch commands. Board sets default, Card can override. |
@@ -48,7 +48,7 @@ zenban/
 | `ProcessEnvironment` | Shared utility for building process environment with PATH setup (node/nvm/homebrew). Used by ClaudeService and DevServerManager. |
 | `DevServerManager` | Manages dev server processes for cards. Handles setup (npm install), port detection, and WebView preview. Single server at a time with proper cleanup. Output buffer limited to 100KB with throttled UI updates (150ms). |
 | `DevServerSettingsSheet` | Sidebar-accessible sheet for editing board dev server config (setup command, dev command, skip setup toggle). |
-| `GitChangesView` | Overlay in CardDetailView showing diff, branch picker, Commit/Merge/Create PR actions. Loads diffs on-demand when files are expanded. |
+| `GitChangesView` | Board-area view (toggled via Cmd+Shift+X or button) showing diff, branch picker, Commit/Merge/Create PR actions. Loads diffs on-demand when files are expanded. |
 | `DiffContentView` | Split-view diff renderer with async parsing and line limiting (300 lines visible by default). |
 | `DirectoryPicker` | NSOpenPanel wrapper for folder selection |
 
@@ -85,6 +85,7 @@ Board stores DevServerConfig (setup command, dev command). CardDetailView shows 
 | Cmd+Shift+A | New Card |
 | Cmd+Shift+D | Delete selected card (with confirmation) |
 | Cmd+Shift+S | Toggle Dev Server |
+| Cmd+Shift+X | Toggle Git Changes |
 | Shift+Arrow Up/Down | Navigate cards in column (when in cards) or boards (when in sidebar) |
 | Shift+Arrow Left | Previous column, or go to sidebar from first column |
 | Shift+Arrow Right | Next column, or go to cards from sidebar |

@@ -22,7 +22,7 @@ struct ContentView: View {
 
             // Content + Detail
             HSplitView {
-                // Board content or Dev server
+                // Board content, Dev server, or Git changes
                 NavigationStack {
                     if store.showDevServer, let card = store.devServerCard {
                         DevServerView(
@@ -31,6 +31,13 @@ struct ContentView: View {
                             devCommand: store.devServerDevCommand,
                             onDismiss: store.stopDevServer,
                             onReconfigure: store.openReconfigure
+                        )
+                        .id(card.id)
+                    } else if store.showGitChanges, let card = store.gitChangesCard, let board = store.selectedBoard {
+                        GitChangesView(
+                            card: card,
+                            boardID: board.id,
+                            onDismiss: store.stopGitChanges
                         )
                         .id(card.id)
                     } else if let board = store.selectedBoard {
@@ -63,7 +70,7 @@ struct ContentView: View {
         .onChange(of: store.selectedBoardID) {
             store.selectedCardID = nil
             store.draggedCardID = nil
-            store.stopDevServer()
+            store.stopOverlays()
         }
         .frame(minWidth: 1500, minHeight: 600)
         .sheet(isPresented: $store.showDevServerConfig) {

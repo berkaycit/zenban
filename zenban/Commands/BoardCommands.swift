@@ -29,6 +29,12 @@ struct BoardCommands: Commands {
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
+
+            Button("Toggle Git Changes") {
+                store.toggleGitChanges()
+            }
+            .keyboardShortcut("x", modifiers: [.command, .shift])
+            .disabled(store.selectedCardID == nil)
         }
     }
 }

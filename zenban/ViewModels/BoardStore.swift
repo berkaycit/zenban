@@ -25,6 +25,9 @@ final class BoardStore {
     // Dev server state (FSM)
     var devServerState: DevServerState = .idle
 
+    // Git changes state
+    private(set) var gitChangesCardID: UUID?
+
     var onCardDeleted: ((UUID) -> Void)?
     weak var terminalManager: TerminalManager?
 
@@ -155,6 +158,41 @@ final class BoardStore {
         }
     }
 
+    // MARK: - Git Changes Computed Properties
+
+    var showGitChanges: Bool {
+        gitChangesCardID != nil
+    }
+
+    var gitChangesCard: Card? {
+        guard let cardID = gitChangesCardID else { return nil }
+        return selectedBoard?.cards.first { $0.id == cardID }
+    }
+
+    // MARK: - Git Changes Transitions
+
+    func toggleGitChanges() {
+        guard let card = selectedCard else { return }
+
+        // Stop if showing for this card
+        if gitChangesCardID == card.id {
+            stopGitChanges()
+            return
+        }
+
+        // Show git changes for selected card
+        gitChangesCardID = card.id
+    }
+
+    func stopGitChanges() {
+        gitChangesCardID = nil
+    }
+
+    func stopOverlays() {
+        stopDevServer()
+        stopGitChanges()
+    }
+
     init() {
         boards = BoardStorage.load()
         selectedBoardID = boards.first?.id
@@ -175,12 +213,11 @@ final class BoardStore {
 
     func deleteBoard(_ board: Board) {
         let repoPath = board.repositoryPath
+        let cardIDs = Set(board.cards.map(\.id))
 
-        // Stop dev server if running for any card in this board
-        if let devCard = devServerCard,
-           board.cards.contains(where: { $0.id == devCard.id }) {
-            stopDevServer()
-        }
+        // Stop overlays if showing for any card in this board
+        if let id = devServerCard?.id, cardIDs.contains(id) { stopDevServer() }
+        if let id = gitChangesCard?.id, cardIDs.contains(id) { stopGitChanges() }
 
         for card in board.cards {
             onCardDeleted?(card.id)
@@ -301,6 +338,7 @@ final class BoardStore {
         }
 
         if devServerCard?.id == cardID { stopDevServer() }
+        if gitChangesCard?.id == cardID { stopGitChanges() }
 
         boards[i].cards.removeAll { $0.id == cardID }
         if draggedCardID == cardID { draggedCardID = nil }

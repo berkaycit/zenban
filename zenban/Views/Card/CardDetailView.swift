@@ -9,43 +9,28 @@ struct CardDetailView: View {
     @State private var editedTitle = ""
     @State private var isEditing = false
     @State private var showTerminal = true
-    @State private var showGitChanges = false
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        ZStack {
-            VStack(alignment: .leading, spacing: 0) {
-                cardInfoSection
-                    .frame(maxHeight: showTerminal && terminalManager.isTerminalAvailable ? 160 : .infinity)
+        VStack(alignment: .leading, spacing: 0) {
+            cardInfoSection
+                .frame(maxHeight: showTerminal && terminalManager.isTerminalAvailable ? 160 : .infinity)
 
-                if terminalManager.isTerminalAvailable {
-                    Divider()
-                    terminalSection
-                }
-            }
-            .animation(.easeOut(duration: 0.15), value: showTerminal)
-
-            // Git changes overlay
-            if showGitChanges {
-                GitChangesView(
-                    card: card,
-                    boardID: boardID,
-                    onDismiss: { showGitChanges = false }
-                )
-                .zIndex(1)
+            if terminalManager.isTerminalAvailable {
+                Divider()
+                terminalSection
             }
         }
+        .animation(.easeOut(duration: 0.15), value: showTerminal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .background(Color.cardBackground)
-        .animation(.easeOut(duration: 0.15), value: showGitChanges)
         .onAppear {
             editedTitle = card.title
         }
         .onChange(of: card.id) {
             editedTitle = card.title
             isEditing = false
-            showGitChanges = false
         }
     }
 
@@ -103,7 +88,7 @@ struct CardDetailView: View {
                 // Quick actions
                 HStack(spacing: 12) {
                     if hasRepository && card.worktreePath != nil {
-                        Button(action: { showGitChanges = true }) {
+                        Button(action: { store.toggleGitChanges() }) {
                             Image(systemName: "arrow.triangle.branch")
                                 .font(.system(size: 15))
                         }
