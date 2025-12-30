@@ -16,7 +16,6 @@ struct CardDetailView: View {
         ZStack {
             VStack(alignment: .leading, spacing: 0) {
                 cardInfoSection
-                    .frame(height: showTerminal && terminalManager.isTerminalAvailable ? 160 : nil)
                     .frame(maxHeight: showTerminal && terminalManager.isTerminalAvailable ? 160 : .infinity)
 
                 if terminalManager.isTerminalAvailable {
@@ -24,6 +23,7 @@ struct CardDetailView: View {
                     terminalSection
                 }
             }
+            .animation(.easeOut(duration: 0.15), value: showTerminal)
 
             // Git changes overlay
             if showGitChanges {
