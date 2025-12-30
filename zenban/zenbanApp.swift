@@ -39,6 +39,15 @@ struct zenbanApp: App {
         }
 
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
+            // Skip if inside a sheet or text field has focus
+            if NSApp.keyWindow?.sheetParent != nil {
+                return event
+            }
+            if let firstResponder = NSApp.keyWindow?.firstResponder,
+               firstResponder is NSTextView {
+                return event
+            }
+
             // Enter to focus terminal (only if terminal doesn't have focus)
             if event.keyCode == 36,
                !event.modifierFlags.contains(.shift),
