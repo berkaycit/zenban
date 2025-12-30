@@ -115,6 +115,29 @@ final class BoardStore {
         devServerState = .idle
     }
 
+    func toggleDevServer() {
+        guard let card = selectedCard, let board = selectedBoard else { return }
+
+        // If dev server is running for this card, stop it
+        if case .running(let runningCardID, _, _) = devServerState,
+           runningCardID == card.id {
+            stopDevServer()
+            return
+        }
+        if case .reconfiguring(let runningCardID, _, _) = devServerState,
+           runningCardID == card.id {
+            stopDevServer()
+            return
+        }
+
+        // Start dev server for selected card
+        if let config = board.devServerConfig {
+            startDevServerDirect(card: card, setup: config.setupCommand, dev: config.devCommand)
+        } else {
+            configureDevServer(for: card)
+        }
+    }
+
     func openReconfigure() {
         guard case .running(let cardID, let setup, let dev) = devServerState else { return }
         devServerState = .reconfiguring(cardID: cardID, setup: setup, dev: dev)

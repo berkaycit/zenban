@@ -23,6 +23,12 @@ struct BoardCommands: Commands {
             }
             .keyboardShortcut("d", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
+
+            Button("Toggle Dev Server") {
+                store.toggleDevServer()
+            }
+            .keyboardShortcut("s", modifiers: [.command, .shift])
+            .disabled(store.selectedCardID == nil)
         }
     }
 }
