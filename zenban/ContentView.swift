@@ -23,7 +23,7 @@ struct ContentView: View {
             // Content + Detail
             HSplitView {
                 // Board content or Dev server
-                Group {
+                NavigationStack {
                     if store.showDevServer, let card = store.devServerCard {
                         DevServerView(
                             card: card,
@@ -33,18 +33,14 @@ struct ContentView: View {
                             onReconfigure: store.openReconfigure
                         )
                         .id(card.id)
+                    } else if let board = store.selectedBoard {
+                        BoardView(board: board)
                     } else {
-                        NavigationStack {
-                            if let board = store.selectedBoard {
-                                BoardView(board: board)
-                            } else {
-                                EmptyStateView(
-                                    icon: "square.stack.3d.up",
-                                    title: "No Board Selected",
-                                    subtitle: "Select a board from the sidebar or create a new one"
-                                )
-                            }
-                        }
+                        EmptyStateView(
+                            icon: "square.stack.3d.up",
+                            title: "No Board Selected",
+                            subtitle: "Select a board from the sidebar or create a new one"
+                        )
                     }
                 }
                 .frame(minWidth: 900, maxWidth: 950)
