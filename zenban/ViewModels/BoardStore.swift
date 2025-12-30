@@ -20,6 +20,7 @@ final class BoardStore {
     var selectedCardID: UUID?
     var draggedCardID: UUID?
     var focusRegion: FocusRegion = .sidebar
+    var showDeleteConfirmation = false
 
     // Dev server state (FSM)
     var devServerState: DevServerState = .idle
@@ -118,14 +119,8 @@ final class BoardStore {
     func toggleDevServer() {
         guard let card = selectedCard, let board = selectedBoard else { return }
 
-        // If dev server is running for this card, stop it
-        if case .running(let runningCardID, _, _) = devServerState,
-           runningCardID == card.id {
-            stopDevServer()
-            return
-        }
-        if case .reconfiguring(let runningCardID, _, _) = devServerState,
-           runningCardID == card.id {
+        // Stop if running for this card
+        if devServerCard?.id == card.id {
             stopDevServer()
             return
         }
@@ -277,9 +272,19 @@ final class BoardStore {
         scheduleSave()
     }
 
-    func deleteSelectedCard() {
+    func requestDeleteSelectedCard() {
+        guard selectedBoardID != nil, selectedCardID != nil else { return }
+        showDeleteConfirmation = true
+    }
+
+    func confirmDeleteSelectedCard() {
         guard let boardID = selectedBoardID, let cardID = selectedCardID else { return }
+        showDeleteConfirmation = false
         deleteCard(cardID, from: boardID)
+    }
+
+    func cancelDeleteSelectedCard() {
+        showDeleteConfirmation = false
     }
 
     func deleteCard(_ cardID: UUID, from boardID: UUID) {

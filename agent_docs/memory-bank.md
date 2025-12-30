@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add delete confirmation dialog and update shortcuts
+- **Description**: New DeleteConfirmationView with arrow-key navigation for confirming card deletion. Keyboard shortcuts changed from Shift to Cmd+Shift (A for new card, D for delete, S for toggle dev server). BoardStore gains showDeleteConfirmation state and request/confirm/cancel methods. zenbanApp event monitor updated to skip when dialog is visible.
+
 - **Summary**: Centralize dev server state with FSM in BoardStore
 - **Description**: DevServerState enum (idle/configuring/running/reconfiguring) moved to BoardStore for centralized state management. DevServerView relocated from CardDetailView overlay to ContentView, replacing board area when active. Browser suppression added via BROWSER=none in ProcessEnvironment and link handling override in ZenbanTerminalView. Terminal ANSI black color adjusted from #282828 to #676767 for visibility on dark backgrounds.
 

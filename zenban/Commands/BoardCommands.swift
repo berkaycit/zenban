@@ -19,7 +19,7 @@ struct BoardCommands: Commands {
 
         CommandGroup(after: .pasteboard) {
             Button("Delete Card") {
-                store.deleteSelectedCard()
+                store.requestDeleteSelectedCard()
             }
             .keyboardShortcut("d", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)

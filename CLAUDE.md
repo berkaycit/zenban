@@ -72,4 +72,8 @@ The project uses Swift 6 concurrency features:
 - Ensure your changes are easy to verify
 - After each change, do NOT run npm run build
 - If doing any Firebase related work, use the Firebase MCP
-- Don’t use emojis
+- Don't use emojis
+
+## Gotchas
+
+- **Keyboard event monitor**: `zenbanApp.swift` has a global NSEvent monitor that captures Enter (for terminal focus) and Shift+Arrow (for navigation). When adding overlays/dialogs with their own keyboard handling, add a skip condition to the monitor (e.g., `if store.showDeleteConfirmation { return event }`).

@@ -39,8 +39,11 @@ struct zenbanApp: App {
         }
 
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
-            // Skip if inside a sheet or text field has focus
+            // Skip if inside a sheet, dialog, or text field
             if NSApp.keyWindow?.sheetParent != nil {
+                return event
+            }
+            if store.showDeleteConfirmation {
                 return event
             }
             if let firstResponder = NSApp.keyWindow?.firstResponder,

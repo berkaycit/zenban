@@ -82,6 +82,21 @@ struct ContentView: View {
                 )
             }
         }
+        .overlay {
+            if store.showDeleteConfirmation, let card = store.selectedCard {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture { store.cancelDeleteSelectedCard() }
+
+                    DeleteConfirmationView(
+                        cardTitle: card.title,
+                        onDelete: store.confirmDeleteSelectedCard,
+                        onCancel: store.cancelDeleteSelectedCard
+                    )
+                }
+            }
+        }
     }
 }
 
