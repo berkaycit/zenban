@@ -13,7 +13,7 @@ struct BoardCommands: Commands {
             Button("New Card") {
                 NotificationCenter.default.post(name: .newCard, object: nil)
             }
-            .keyboardShortcut("a", modifiers: .shift)
+            .keyboardShortcut("a", modifiers: [.command, .shift])
             .disabled(store.selectedBoard == nil)
         }
 
@@ -21,7 +21,7 @@ struct BoardCommands: Commands {
             Button("Delete Card") {
                 store.deleteSelectedCard()
             }
-            .keyboardShortcut("d", modifiers: .shift)
+            .keyboardShortcut("d", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
         }
     }
