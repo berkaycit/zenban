@@ -217,6 +217,7 @@ final class BoardStore {
         let card = Card(title: title, orderIndex: boards[i].nextOrderIndex)
         boards[i].cards.append(card)
         selectedCardID = card.id
+        focusRegion = .cards
         scheduleSave()
 
         if let repoPath = boards[i].repositoryPath,
