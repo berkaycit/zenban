@@ -22,77 +22,81 @@ private enum ArrowKey {
     }
 }
 
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var store: BoardStore?
+    var terminalManager: TerminalManager?
+    var devServerManager: DevServerManager?
+    private var eventMonitor: Any?
+
+    func setupEventMonitor() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleKeyDown(event) ?? event
+        }
+    }
+
+    private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        guard let store, let terminalManager else { return event }
+
+        if NSApp.keyWindow?.sheetParent != nil { return event }
+        if store.showDeleteConfirmation { return event }
+        if let firstResponder = NSApp.keyWindow?.firstResponder,
+           firstResponder is NSTextView {
+            return event
+        }
+
+        // Enter to focus terminal
+        if event.keyCode == 36,
+           !event.modifierFlags.contains(.shift),
+           let cardID = store.selectedCardID,
+           !terminalManager.isTerminalFocused(for: cardID) {
+            terminalManager.focusTerminal(for: cardID)
+            return nil
+        }
+
+        guard event.modifierFlags.contains(.shift),
+              let key = ArrowKey(keyCode: event.keyCode) else {
+            return event
+        }
+
+        switch key {
+        case .up:
+            if store.focusRegion == .sidebar {
+                store.selectPreviousBoard()
+            } else {
+                store.selectPreviousCard()
+            }
+        case .down:
+            if store.focusRegion == .sidebar {
+                store.selectNextBoard()
+            } else {
+                store.selectNextCard()
+            }
+        case .left:
+            guard store.focusRegion == .cards else { return event }
+            store.selectCardInPreviousColumn()
+        case .right:
+            if store.focusRegion == .sidebar {
+                store.enterCardsFromSidebar()
+            } else {
+                store.selectCardInNextColumn()
+            }
+        }
+        return nil
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        terminalManager?.terminateAllSessions()
+        devServerManager?.stopAllServers()
+    }
+}
+
 @main
 struct zenbanApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = BoardStore()
     @State private var terminalManager = TerminalManager()
     @State private var devServerManager = DevServerManager()
-
-    init() {
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { [terminalManager, devServerManager] _ in
-            terminalManager.terminateAllSessions()
-            devServerManager.stopAllServers()
-        }
-
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
-            // Skip if inside a sheet, dialog, or text field
-            if NSApp.keyWindow?.sheetParent != nil {
-                return event
-            }
-            if store.showDeleteConfirmation {
-                return event
-            }
-            if let firstResponder = NSApp.keyWindow?.firstResponder,
-               firstResponder is NSTextView {
-                return event
-            }
-
-            // Enter to focus terminal (only if terminal doesn't have focus)
-            if event.keyCode == 36,
-               !event.modifierFlags.contains(.shift),
-               let cardID = store.selectedCardID,
-               !terminalManager.isTerminalFocused(for: cardID) {
-                terminalManager.focusTerminal(for: cardID)
-                return nil
-            }
-
-            guard event.modifierFlags.contains(.shift) else { return event }
-
-            // Shift+Arrow for navigation
-            guard let key = ArrowKey(keyCode: event.keyCode) else {
-                return event
-            }
-
-            switch key {
-            case .up:
-                if store.focusRegion == .sidebar {
-                    store.selectPreviousBoard()
-                } else {
-                    store.selectPreviousCard()
-                }
-            case .down:
-                if store.focusRegion == .sidebar {
-                    store.selectNextBoard()
-                } else {
-                    store.selectNextCard()
-                }
-            case .left:
-                guard store.focusRegion == .cards else { return event }
-                store.selectCardInPreviousColumn()
-            case .right:
-                if store.focusRegion == .sidebar {
-                    store.enterCardsFromSidebar()
-                } else {
-                    store.selectCardInNextColumn()
-                }
-            }
-            return nil
-        }
-    }
 
     var body: some Scene {
         WindowGroup {
@@ -101,6 +105,10 @@ struct zenbanApp: App {
                 .environment(terminalManager)
                 .environment(devServerManager)
                 .onAppear {
+                    appDelegate.store = store
+                    appDelegate.terminalManager = terminalManager
+                    appDelegate.devServerManager = devServerManager
+                    appDelegate.setupEventMonitor()
                     setupCardDeletionHandler()
                     setupNotifications()
                 }

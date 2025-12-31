@@ -239,7 +239,44 @@ public class LocalProcess {
 
     public func terminate()
     {
+        guard running, shellPid > 0 else { return }
+        running = false
+
+        // Cancel DispatchIO to stop reading
+        io?.close(flags: .stop)
+        io = nil
+
+        // Cancel process monitor
+        #if os(macOS)
+        childMonitor?.cancel()
+        childMonitor = nil
+        #endif
+
+        // Kill the entire process group (negative PID) to ensure all child processes are terminated
+        kill(-shellPid, SIGTERM)
         kill(shellPid, SIGTERM)
+
+        // Brief synchronous wait for graceful termination (50ms)
+        var status: Int32 = 0
+        var waited: pid_t = 0
+        for _ in 0..<5 {
+            waited = waitpid(shellPid, &status, WNOHANG)
+            if waited != 0 { break }
+            usleep(10_000) // 10ms
+        }
+
+        // Force kill if still running
+        if waited == 0 {
+            kill(-shellPid, SIGKILL)
+            kill(shellPid, SIGKILL)
+            waitpid(shellPid, &status, 0) // blocking wait
+        }
+
+        // Close file descriptor
+        if childfd >= 0 {
+            close(childfd)
+            childfd = -1
+        }
     }
     
     var loggingDir: String? = nil
