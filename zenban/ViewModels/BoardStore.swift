@@ -216,10 +216,8 @@ final class BoardStore {
         let cardIDs = Set(board.cards.map(\.id))
 
         // Stop overlays if showing for any card in this board
-        if devServerCard.map({ cardIDs.contains($0.id) }) == true ||
-           gitChangesCard.map({ cardIDs.contains($0.id) }) == true {
-            stopOverlays()
-        }
+        if let id = devServerCard?.id, cardIDs.contains(id) { stopDevServer() }
+        if let id = gitChangesCard?.id, cardIDs.contains(id) { stopGitChanges() }
 
         for card in board.cards {
             onCardDeleted?(card.id)

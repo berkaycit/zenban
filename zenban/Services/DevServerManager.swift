@@ -152,26 +152,21 @@ final class DevServerManager {
         pendingUIUpdates.removeAll()
     }
 
-    /// Kill process and all its child processes (synchronous)
+    /// Kill process and all its child processes
     private func killProcessTree(_ process: Process) {
         guard process.isRunning else { return }
-        let pid = process.processIdentifier
 
-        // SIGTERM for graceful shutdown
-        kill(-pid, SIGTERM)
+        // First try SIGTERM for graceful shutdown
         process.terminate()
 
-        // Brief synchronous wait (50ms polling)
-        for _ in 0..<5 {
-            if !process.isRunning { return }
-            usleep(10_000)
-        }
-
-        // Force kill if still running
-        if process.isRunning {
-            kill(-pid, SIGKILL)
-            kill(pid, SIGKILL)
-            process.waitUntilExit()
+        // Give it a moment to clean up
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+            if process.isRunning {
+                // If still running, force kill the process group
+                let pid = process.processIdentifier
+                // Kill entire process group (negative pid)
+                kill(-pid, SIGKILL)
+            }
         }
     }
 
