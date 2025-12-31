@@ -109,6 +109,9 @@ final class TerminalManager {
         terminalView.boardID = boardID
         terminalView.cardTitle = cardTitle
 
+        // Allow Option key to produce special characters (e.g., @ on Turkish keyboard)
+        terminalView.optionAsMetaKey = false
+
         // Font
         terminalView.font = TerminalConfiguration.font
 
