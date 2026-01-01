@@ -43,7 +43,28 @@ enum GitError: Error, LocalizedError {
         case .pushFailed(let msg):
             return "Failed to push: \(msg)"
         case .mergeFailed(let msg):
-            return "Failed to merge: \(msg)"
+            // Parse conflict files from git output
+            let conflictFiles = msg.components(separatedBy: "\n")
+                .filter { $0.contains("CONFLICT") }
+                .compactMap { line -> String? in
+                    // Extract filename from "CONFLICT (content): Merge conflict in <file>"
+                    if let range = line.range(of: "Merge conflict in ") {
+                        return String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                    }
+                    // Extract filename from "CONFLICT (modify/delete): <file> deleted in ..."
+                    if let colonRange = line.range(of: "):") {
+                        let afterColon = line[colonRange.upperBound...].trimmingCharacters(in: .whitespaces)
+                        return afterColon.components(separatedBy: " ").first
+                    }
+                    return nil
+                }
+
+            if conflictFiles.isEmpty {
+                return "Failed to merge: \(msg)"
+            } else {
+                let fileList = conflictFiles.map { "  - \($0)" }.joined(separator: "\n")
+                return "Merge conflict in:\n\(fileList)"
+            }
         case .mergeSucceededPushFailed(let msg):
             return "Merge completed locally but push failed: \(msg)"
         case .prCreationFailed(let msg):
@@ -150,12 +171,21 @@ struct GitService {
                     try process.run()
                     process.waitUntilExit()
 
+                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                    let stdout = String(data: outputData, encoding: .utf8) ?? ""
+                    let stderr = String(data: errorData, encoding: .utf8) ?? ""
+
+                    print("[runProcess] Command: \(executable) \(args.joined(separator: " "))")
+                    print("[runProcess] Exit status: \(process.terminationStatus)")
+                    if !stdout.isEmpty { print("[runProcess] stdout: \(stdout)") }
+                    if !stderr.isEmpty { print("[runProcess] stderr: \(stderr)") }
+
                     if process.terminationStatus == 0 {
-                        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                        continuation.resume(returning: String(data: outputData, encoding: .utf8) ?? "")
+                        continuation.resume(returning: stdout)
                     } else {
-                        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                        let errorMsg = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                        // Use stderr if available, otherwise use stdout (git sometimes writes errors to stdout)
+                        let errorMsg = stderr.isEmpty ? (stdout.isEmpty ? "Unknown error (exit code: \(process.terminationStatus))" : stdout) : stderr
                         continuation.resume(throwing: errorMapper(errorMsg))
                     }
                 } catch {
@@ -358,14 +388,25 @@ struct GitService {
     // MARK: - Merge Operations
 
     static func merge(worktreePath: String, targetBranch: String, repositoryPath: String) async throws {
+        print("[GitService.merge] Starting merge...")
+        print("[GitService.merge] worktreePath: \(worktreePath)")
+        print("[GitService.merge] targetBranch: \(targetBranch)")
+        print("[GitService.merge] repositoryPath: \(repositoryPath)")
+
         let worktreeBranch = try await getCurrentBranch(worktreePath: worktreePath)
         let originalRepoBranch = try await getCurrentBranch(worktreePath: repositoryPath)
+        print("[GitService.merge] worktreeBranch: \(worktreeBranch)")
+        print("[GitService.merge] originalRepoBranch: \(originalRepoBranch)")
 
         // Checkout and merge with rollback on failure
         do {
+            print("[GitService.merge] Checking out target branch: \(targetBranch)")
             try await runGit(["checkout", targetBranch], in: repositoryPath, errorMapper: { .mergeFailed($0) })
+            print("[GitService.merge] Checkout successful, now merging \(worktreeBranch)...")
             try await runGit(["merge", worktreeBranch], in: repositoryPath, errorMapper: { .mergeFailed($0) })
+            print("[GitService.merge] Merge successful")
         } catch {
+            print("[GitService.merge] Merge failed with error: \(error)")
             // Abort merge if in progress and restore original branch
             try? await runGit(["merge", "--abort"], in: repositoryPath, errorMapper: { _ in .mergeFailed("") })
             try? await runGit(["checkout", originalRepoBranch], in: repositoryPath, errorMapper: { _ in .mergeFailed("") })
@@ -374,8 +415,11 @@ struct GitService {
 
         // Push separately - merge succeeded, push might fail
         do {
+            print("[GitService.merge] Pushing to remote...")
             try await runGit(["push"], in: repositoryPath, errorMapper: { .pushFailed($0) })
+            print("[GitService.merge] Push successful")
         } catch {
+            print("[GitService.merge] Push failed with error: \(error)")
             throw GitError.mergeSucceededPushFailed(error.localizedDescription)
         }
     }

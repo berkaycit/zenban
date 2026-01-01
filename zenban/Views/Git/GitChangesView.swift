@@ -469,7 +469,12 @@ struct GitChangesView: View {
                 )
                 isMerging = false
                 loadChanges()
+            } catch let gitError as GitError {
+                print("[GitChangesView] Merge failed with GitError: \(gitError)")
+                errorMessage = gitError.errorDescription ?? "Unknown error"
+                isMerging = false
             } catch {
+                print("[GitChangesView] Merge failed with error: \(error)")
                 errorMessage = error.localizedDescription
                 isMerging = false
             }
