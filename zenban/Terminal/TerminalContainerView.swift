@@ -1,12 +1,12 @@
 import SwiftUI
-import SwiftTerm
+import GhosttySwift
 import AppKit
 
 struct TerminalContainerView: NSViewRepresentable {
     let cardID: UUID
     let boardID: UUID
     let cardTitle: String
-    var backgroundColor: SwiftUI.Color = SwiftUI.Color(red: 0.165, green: 0.165, blue: 0.153)
+    var backgroundColor: SwiftUI.Color = SwiftUI.Color(red: 0.1, green: 0.1, blue: 0.12)
     @Environment(TerminalManager.self) private var terminalManager
 
     func makeCoordinator() -> Coordinator {
@@ -29,7 +29,7 @@ struct TerminalContainerView: NSViewRepresentable {
         nsView.layer?.backgroundColor = NSColor(backgroundColor).cgColor
         if let terminal = context.coordinator.terminalView {
             terminal.frame = nsView.bounds
-            terminal.nativeBackgroundColor = NSColor(backgroundColor)
+            terminal.layer?.backgroundColor = NSColor(backgroundColor).cgColor
         }
     }
 
@@ -45,7 +45,7 @@ struct TerminalContainerView: NSViewRepresentable {
 
             try Task.checkCancellation()
 
-            terminal.nativeBackgroundColor = NSColor(backgroundColor)
+            terminal.layer?.backgroundColor = NSColor(backgroundColor).cgColor
             terminal.frame = hostView.bounds
             terminal.autoresizingMask = [.width, .height]
 
@@ -61,6 +61,6 @@ struct TerminalContainerView: NSViewRepresentable {
 
     final class Coordinator {
         var loadTask: Task<Void, Never>?
-        var terminalView: ZenbanTerminalView?
+        var terminalView: GhosttyTerminalView?
     }
 }

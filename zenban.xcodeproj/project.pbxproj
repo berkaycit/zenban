@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		23B6DBB02EFEEA8800D5AB34 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 23B6DAD12EFDA93700D5AB34 /* SwiftTerm */; };
+		23C7EAA02F000000GHOSTTY /* GhosttyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 23C7EAA12F000001GHOSTTY /* GhosttyKit */; };
+		23C7EAA52F000005GSWIFT /* GhosttySwift in Frameworks */ = {isa = PBXBuildFile; productRef = 23C7EAA42F000004GSWIFT /* GhosttySwift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,6 +72,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				23B6DBB02EFEEA8800D5AB34 /* SwiftTerm in Frameworks */,
+				23C7EAA02F000000GHOSTTY /* GhosttyKit in Frameworks */,
+				23C7EAA52F000005GSWIFT /* GhosttySwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -131,6 +135,8 @@
 			name = zenban;
 			packageProductDependencies = (
 				23B6DAD12EFDA93700D5AB34 /* SwiftTerm */,
+				23C7EAA12F000001GHOSTTY /* GhosttyKit */,
+				23C7EAA42F000004GSWIFT /* GhosttySwift */,
 			);
 			productName = zenban;
 			productReference = 23B6DAA62EFDA93600D5AB34 /* zenban.app */;
@@ -216,6 +222,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				23B6DAD02EFDA93700D5AB34 /* XCLocalSwiftPackageReference "LocalPackages/SwiftTerm" */,
+				23C7EAA22F000002GHOSTTY /* XCLocalSwiftPackageReference "LocalPackages/GhosttyKit" */,
+				23C7EAA32F000003GSWIFT /* XCLocalSwiftPackageReference "LocalPackages/GhosttySwift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23B6DAA72EFDA93600D5AB34 /* Products */;
@@ -433,6 +441,24 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					Carbon,
+					"-framework",
+					Metal,
+					"-framework",
+					MetalKit,
+					"-framework",
+					CoreText,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					IOKit,
+					"-framework",
+					UniformTypeIdentifiers,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenban;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -468,6 +494,24 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					Carbon,
+					"-framework",
+					Metal,
+					"-framework",
+					MetalKit,
+					"-framework",
+					CoreText,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					IOKit,
+					"-framework",
+					UniformTypeIdentifiers,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenban;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -607,12 +651,28 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = LocalPackages/SwiftTerm;
 		};
+		23C7EAA22F000002GHOSTTY /* XCLocalSwiftPackageReference "LocalPackages/GhosttyKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LocalPackages/GhosttyKit;
+		};
+		23C7EAA32F000003GSWIFT /* XCLocalSwiftPackageReference "LocalPackages/GhosttySwift" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LocalPackages/GhosttySwift;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		23B6DAD12EFDA93700D5AB34 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SwiftTerm;
+		};
+		23C7EAA12F000001GHOSTTY /* GhosttyKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GhosttyKit;
+		};
+		23C7EAA42F000004GSWIFT /* GhosttySwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GhosttySwift;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
