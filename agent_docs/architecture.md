@@ -14,7 +14,7 @@ zenban/
 │   ├── Git/         # Git changes view, diff display, PR creation
 │   ├── DevServer/   # Dev server preview with WebView
 │   └── Components/  # Reusable UI components
-├── Terminal/        # Embedded terminal per card (SwiftTerm)
+├── Terminal/        # Embedded terminal per card (Ghostty)
 ├── Services/        # App-wide services (notifications, git, AI providers)
 ├── Commands/        # Menu keyboard shortcuts
 └── Extensions/      # Color theme extensions
@@ -39,9 +39,9 @@ zenban/
 | `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel with card editing, column move, and agent picker (switches terminal) |
-| `TerminalManager` | Manages terminal views per card. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell is ready. Terminates processes on card/board deletion and app quit. Applies styling from TerminalConfiguration. |
-| `ZenbanTerminalView` | Terminal with state machine for Claude detection. Strips ANSI codes for Ctrl+R support. Auto-moves cards between columns. Detects shell readiness via output. |
-| `TerminalConfiguration` | Static styling config: font (SF Mono 14pt), colors (foreground, cursor, selection), ANSI palette (One Dark inspired). Background via TerminalContainerView. To customize: modify static properties, use installColors() for ANSI updates. |
+| `TerminalManager` | Manages GhosttyTerminalView instances per card. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell is ready via OSC 133 signals or fallback timer. Terminates processes on card/board deletion and app quit. |
+| `GhosttyTerminalView` | Ghostty-based terminal with state machine (shell/agentActive/agentIdle). Uses OSC 133 shell integration for command completion detection. Ctrl+C detection for agent exit. Callbacks for task completion and agent resume. |
+| `GhosttyApp` | Singleton managing Ghostty application context. Routes surface actions to terminal views. Handles clipboard operations. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
 | `GitService` | Git operations: repository init, worktree CRUD, status/diff, commit/push, merge, PR creation (gh CLI), AI commit message generation |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
@@ -63,7 +63,7 @@ Agent selection (Claude Code, Codex, Gemini) determines which command auto-runs 
 
 ## Terminal Agent Detection
 
-State machine: `shell` → `agentActive` → `agentIdle`. Detects "claude" in input/output, 2s idle triggers card move to "In Review", new message moves to "To Do", Ctrl+C exits to shell. Strips ANSI codes for Ctrl+R support. Guards: `hasBeenFocused` (prevents init trigger), `minActivityBytes` (ignores <10 bytes).
+State machine in GhosttyTerminalView: `shell` → `agentActive` → `agentIdle`. TerminalManager notifies agent launch, OSC 133 D signal (command finished) triggers idle state, Ctrl+C exits to shell. Task completion triggers notification. Guard: `hasBeenFocused` prevents false positives on init. Shell readiness detected via OSC 133 signals with 2s fallback timer.
 
 ## Card Worktrees
 
@@ -75,7 +75,7 @@ AIProvider protocol enables pluggable AI services. ClaudeService implements it f
 
 ## Dev Server Preview
 
-Board stores DevServerConfig (setup command, dev command). CardDetailView shows "Start Dev Server" button for cards with worktree. First run prompts for commands (auto-detected from package.json/lock files), subsequent runs use saved config. DevServerManager runs one server at a time, auto-detects port from output, shows WebView in board area with toggleable console panel. ProcessEnvironment sets BROWSER=none to suppress external browser launch. ZenbanTerminalView overrides link handling to prevent dev server URLs opening externally. Cleanup on dismiss, card delete, and app quit. Toolbar settings button opens DevServerSettingsSheet for manual config editing. Error states offer Reconfigure option.
+Board stores DevServerConfig (setup command, dev command). CardDetailView shows "Start Dev Server" button for cards with worktree. First run prompts for commands (auto-detected from package.json/lock files), subsequent runs use saved config. DevServerManager runs one server at a time, auto-detects port from output, shows WebView in board area with toggleable console panel. ProcessEnvironment sets BROWSER=none to suppress external browser launch. Cleanup on dismiss, card delete, and app quit. Toolbar settings button opens DevServerSettingsSheet for manual config editing. Error states offer Reconfigure option.
 
 ## Keyboard Shortcuts
 

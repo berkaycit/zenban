@@ -14,6 +14,9 @@ public class GhosttyTerminalView: NSView {
     public var boardID: UUID?
     public var cardTitle: String = ""
 
+    /// Working directory for the terminal
+    private var workingDirectory: String?
+
     /// The underlying Ghostty surface
     private var surface: ghostty_surface_t?
 
@@ -26,26 +29,69 @@ public class GhosttyTerminalView: NSView {
     /// Marked text for input methods
     private var markedText = NSMutableAttributedString()
 
+    /// Whether terminal has been focused (prevents false positives on init)
+    private var hasBeenFocused = false
+
+    // MARK: - State Machine
+
+    /// Terminal state for agent lifecycle tracking
+    public enum TerminalState: Equatable {
+        case shell           // Normal shell, agent not running
+        case agentActive     // Agent is running
+        case agentIdle       // Agent task completed, awaiting review
+    }
+
+    /// Events that trigger state transitions
+    public enum TerminalEvent {
+        case agentLaunched     // TerminalManager notified agent launch
+        case commandFinished   // OSC 133 D received
+        case newMessageSent    // User input while idle
+        case agentExited       // Ctrl+C pressed
+    }
+
+    /// Current terminal state
+    private var state: TerminalState = .shell
+
+    /// Callback when agent task completes
+    public var onTaskCompleted: ((UUID, UUID) -> Void)?
+
+    /// Callback when agent resumes from idle
+    public var onAgentResumed: ((UUID, UUID) -> Void)?
+
     // MARK: - Initialization
 
     public override init(frame frameRect: NSRect) {
         self.id = UUID()
         super.init(frame: frameRect)
-        setupView()
+        commonInit()
     }
 
     public required init?(coder: NSCoder) {
         self.id = UUID()
         super.init(coder: coder)
-        setupView()
+        commonInit()
     }
 
-    private func setupView() {
+    /// Creates a terminal view with an optional working directory
+    public init(frame frameRect: NSRect, workingDirectory: String?) {
+        self.id = UUID()
+        self.workingDirectory = workingDirectory
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    private func commonInit() {
         wantsLayer = true
         layer?.backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0).cgColor
 
-        // Initialize surface
         createSurface()
+
+        // Fallback: Mark shell as ready after a delay if shell integration doesn't respond
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self, !self.isShellReady else { return }
+            Ghostty.logger.info("Shell readiness fallback triggered")
+            self.handleShellReady()
+        }
     }
 
     deinit {
@@ -77,8 +123,19 @@ public class GhosttyTerminalView: NSView {
         // Set scale factor
         surfaceConfig.scale_factor = Double(NSScreen.main?.backingScaleFactor ?? 2.0)
 
-        // Create the surface
-        let surface = ghostty_surface_new(app, &surfaceConfig)
+        // Set working directory if provided
+        if let workingDirectory = workingDirectory {
+            workingDirectory.withCString { cString in
+                surfaceConfig.working_directory = cString
+                createSurfaceWithConfig(app: app, config: &surfaceConfig)
+            }
+        } else {
+            createSurfaceWithConfig(app: app, config: &surfaceConfig)
+        }
+    }
+
+    private func createSurfaceWithConfig(app: ghostty_app_t, config: inout ghostty_surface_config_s) {
+        let surface = ghostty_surface_new(app, &config)
         if surface == nil {
             Ghostty.logger.error("Failed to create ghostty surface")
             return
@@ -94,8 +151,11 @@ public class GhosttyTerminalView: NSView {
 
     public override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
-        if result, let surface = surface {
-            ghostty_surface_set_focus(surface, true)
+        if result {
+            hasBeenFocused = true
+            if let surface = surface {
+                ghostty_surface_set_focus(surface, true)
+            }
         }
         return result
     }
@@ -237,6 +297,12 @@ public class GhosttyTerminalView: NSView {
     /// Send text to the terminal
     public func send(text: String) {
         guard let surface = surface else { return }
+
+        // Check for Ctrl+C to detect agent exit
+        if text.contains("\u{03}") {
+            transition(event: .agentExited)
+        }
+
         text.withCString { cString in
             ghostty_surface_text(surface, cString, UInt(text.utf8.count))
         }
@@ -255,6 +321,85 @@ public class GhosttyTerminalView: NSView {
     public func terminate() {
         guard let surface = surface else { return }
         ghostty_surface_request_close(surface)
+    }
+
+    // MARK: - Signal Handlers (called from GhosttyApp)
+
+    /// Called when shell integration reports command finished (OSC 133 D)
+    public func handleCommandFinished() {
+        guard state == .agentActive else { return }
+        transition(event: .commandFinished)
+    }
+
+    /// Called when shell is ready (first action received from shell integration)
+    public func handleShellReady() {
+        guard !isShellReady else { return }
+        isShellReady = true
+        executePendingCommandIfNeeded()
+    }
+
+    // MARK: - Agent Notification (called from TerminalManager)
+
+    /// Called by TerminalManager when an agent is launched
+    public func notifyAgentLaunched() {
+        transition(event: .agentLaunched)
+    }
+
+    /// Called by TerminalManager when user sends new message to idle agent
+    public func notifyNewMessageSent() {
+        transition(event: .newMessageSent)
+    }
+
+    // MARK: - State Machine
+
+    private func transition(event: TerminalEvent) {
+        let newState: TerminalState? = switch (state, event) {
+        case (.shell, .agentLaunched): .agentActive
+        case (.agentActive, .commandFinished): .agentIdle
+        case (.agentActive, .agentExited): .shell
+        case (.agentIdle, .newMessageSent): .agentActive
+        case (.agentIdle, .agentExited): .shell
+        default: nil
+        }
+
+        if let newState = newState, newState != state {
+            let oldState = state
+            state = newState
+            handleStateChange(from: oldState, to: newState)
+        }
+    }
+
+    private func handleStateChange(from oldState: TerminalState, to newState: TerminalState) {
+        switch (oldState, newState) {
+        case (.agentActive, .agentIdle):
+            triggerTaskCompleted()
+        case (.agentIdle, .agentActive):
+            triggerAgentResumed()
+        default:
+            break
+        }
+    }
+
+    // MARK: - Notification Integration
+
+    private func triggerTaskCompleted() {
+        guard hasBeenFocused else { return }
+        guard let cardID = cardID, let boardID = boardID else { return }
+        onTaskCompleted?(cardID, boardID)
+    }
+
+    private func triggerAgentResumed() {
+        guard let cardID = cardID, let boardID = boardID else { return }
+        onAgentResumed?(cardID, boardID)
+    }
+
+    private func executePendingCommandIfNeeded() {
+        guard let command = pendingCommand else { return }
+        pendingCommand = nil
+        // Small delay to ensure shell is ready to receive input
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.send(text: command)
+        }
     }
 }
 

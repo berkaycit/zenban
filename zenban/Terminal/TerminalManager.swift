@@ -1,5 +1,4 @@
 import Foundation
-import SwiftTerm
 import GhosttySwift
 import AppKit
 
@@ -8,6 +7,7 @@ final class TerminalManager {
 
     private var terminalViews: [UUID: GhosttyTerminalView] = [:]
     private var agentLaunchedForCard: Set<UUID> = []
+    private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
     weak var boardStore: BoardStore?
 
     var isTerminalAvailable: Bool { GhosttyApp.shared.isReady }
@@ -27,23 +27,34 @@ final class TerminalManager {
         let card = board?.cards.first { $0.id == cardID }
         let agent = card?.agent ?? board?.agent
 
-        let terminalView = createTerminalView(cardID: cardID, boardID: boardID, cardTitle: cardTitle)
+        // Determine initial working directory: worktree path > repository path > none
+        let workingDirectory = card?.worktreePath ?? board?.repositoryPath
+        let terminalView = createTerminalView(cardID: cardID, boardID: boardID, cardTitle: cardTitle, workingDirectory: workingDirectory)
 
-        // For boards with repo, agent is launched via worktreeReady (not here)
-        let boardHasRepo = board?.repositoryPath != nil
-        let agentToLaunch = boardHasRepo ? nil : agent
+        // For git repos, agent is launched via worktreeReady (after worktree is created)
+        // For non-git repos or empty boards, launch agent directly
+        let isGitRepo = board?.repositoryPath.map { GitService.isGitRepository(path: $0) } ?? false
+        let agentToLaunch = isGitRepo ? nil : agent
 
         // Note: Ghostty handles shell startup internally via surface creation
         // We just need to send the agent command when ready
         if let agentCommand = agentToLaunch?.launchCommand {
             terminalView.sendWhenReady(agentCommand + "\n")
+            terminalView.notifyAgentLaunched()
             agentLaunchedForCard.insert(cardID)
         }
 
         terminalViews[cardID] = terminalView
 
-        // For existing cards that already have worktreePath, launch agent now
-        if let worktreePath = card?.worktreePath, let agent = agent {
+        // Check if there's a pending worktree ready call (only for git repos)
+        if let pending = pendingWorktreeReady[cardID] {
+            worktreeReady(cardID: cardID, worktreePath: pending.worktreePath, agent: pending.agent)
+        }
+        // For existing cards that already have worktreePath but agent not yet launched
+        else if isGitRepo,
+                let worktreePath = card?.worktreePath,
+                let agent = agent,
+                !agentLaunchedForCard.contains(cardID) {
             worktreeReady(cardID: cardID, worktreePath: worktreePath, agent: agent)
         }
 
@@ -55,6 +66,7 @@ final class TerminalManager {
             terminalView.terminate()
         }
         agentLaunchedForCard.remove(cardID)
+        pendingWorktreeReady.removeValue(forKey: cardID)
     }
 
     func switchAgent(for cardID: UUID, to agent: Agent) {
@@ -74,18 +86,26 @@ final class TerminalManager {
         // Launch new agent
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             terminalView.send(text: agent.launchCommand + "\n")
+            terminalView.notifyAgentLaunched()
         }
     }
 
     func worktreeReady(cardID: UUID, worktreePath: String, agent: Agent) {
-        guard let terminalView = terminalViews[cardID],
-              !agentLaunchedForCard.contains(cardID) else { return }
+        // Prevent duplicate agent launches
+        guard !agentLaunchedForCard.contains(cardID) else { return }
+
+        // If terminal doesn't exist yet, store for later
+        guard let terminalView = terminalViews[cardID] else {
+            pendingWorktreeReady[cardID] = (worktreePath, agent)
+            return
+        }
 
         agentLaunchedForCard.insert(cardID)
+        pendingWorktreeReady.removeValue(forKey: cardID)
 
-        // Send command when shell is ready (detected via terminal output)
         let command = "cd \"\(worktreePath)\" && \(agent.launchCommand)\n"
         terminalView.sendWhenReady(command)
+        terminalView.notifyAgentLaunched()
     }
 
     func terminateAllSessions() {
@@ -94,6 +114,7 @@ final class TerminalManager {
         }
         terminalViews.removeAll()
         agentLaunchedForCard.removeAll()
+        pendingWorktreeReady.removeAll()
     }
 
     func focusTerminal(for cardID: UUID) {
@@ -108,13 +129,22 @@ final class TerminalManager {
 
     // MARK: - Private Helpers
 
-    private func createTerminalView(cardID: UUID, boardID: UUID, cardTitle: String) -> GhosttyTerminalView {
+    private func createTerminalView(cardID: UUID, boardID: UUID, cardTitle: String, workingDirectory: String?) -> GhosttyTerminalView {
         let frame = NSRect(x: 0, y: 0, width: 600, height: 400)
 
-        let terminalView = GhosttyTerminalView(frame: frame)
+        let terminalView = GhosttyTerminalView(frame: frame, workingDirectory: workingDirectory)
         terminalView.cardID = cardID
         terminalView.boardID = boardID
         terminalView.cardTitle = cardTitle
+
+        // Wire up task completion callbacks to NotificationService
+        terminalView.onTaskCompleted = { cardID, boardID in
+            NotificationService.shared.triggerTaskCompleted(cardID: cardID, boardID: boardID)
+        }
+
+        terminalView.onAgentResumed = { cardID, boardID in
+            NotificationService.shared.triggerAgentResumed(cardID: cardID, boardID: boardID)
+        }
 
         return terminalView
     }

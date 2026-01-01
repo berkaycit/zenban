@@ -45,8 +45,29 @@ public final class GhosttyApp: @unchecked Sendable {
         }
 
         runtimeConfig.action_cb = { appPtr, target, action in
-            // Minimal action handling - return false to indicate not handled
-            return false
+            // Route surface-targeted actions to the appropriate GhosttyTerminalView
+            guard target.tag == GHOSTTY_TARGET_SURFACE,
+                  let surface = target.target.surface,
+                  let userdata = ghostty_surface_userdata(surface) else {
+                return false
+            }
+
+            let view = Unmanaged<GhosttyTerminalView>.fromOpaque(userdata).takeUnretainedValue()
+
+            // Notify shell ready on any action (shell integration is active)
+            DispatchQueue.main.async {
+                view.handleShellReady()
+            }
+
+            switch action.tag {
+            case GHOSTTY_ACTION_COMMAND_FINISHED:
+                DispatchQueue.main.async {
+                    view.handleCommandFinished()
+                }
+                return true
+            default:
+                return false
+            }
         }
 
         runtimeConfig.read_clipboard_cb = { userdata, location, state in
