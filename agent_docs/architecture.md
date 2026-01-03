@@ -41,7 +41,7 @@ zenban/
 | `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel with card editing, column move, and agent picker (switches terminal) |
-| `TerminalManager` | Manages GhosttyTerminalView instances per card. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell is ready via OSC 133 signals or fallback timer. Terminates processes on card/board deletion and app quit. |
+| `TerminalManager` | Manages GhosttyTerminalView instances per card with LRU eviction (max 50). Hibernates terminals when card is deselected (tmux preserves session). Uses card's worktree or board's repo as start directory. Auto-launches agent when shell ready. |
 | `GhosttyTerminalView` | Ghostty-based terminal with state machine (shell/agentActive/agentIdle). Uses OSC 133 shell integration for command completion detection. Ctrl+C detection for agent exit. Callbacks for task completion and agent resume. |
 | `GhosttyApp` | Singleton managing Ghostty application context. Routes surface actions to terminal views. Handles clipboard operations. Reloads config when terminal settings change. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |

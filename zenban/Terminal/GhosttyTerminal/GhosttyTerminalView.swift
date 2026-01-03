@@ -75,7 +75,7 @@ class GhosttyTerminalView: NSView {
         case agentExited
     }
 
-    private var state: TerminalState = .shell
+    private(set) var state: TerminalState = .shell
 
     /// Cell size in points for row-to-pixel conversion (used by scroll view)
     var cellSize: NSSize = .zero

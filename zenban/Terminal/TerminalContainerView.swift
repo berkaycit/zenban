@@ -17,6 +17,10 @@ struct TerminalContainerView: NSViewRepresentable {
         hostView.wantsLayer = true
         hostView.layer?.backgroundColor = NSColor(backgroundColor).cgColor
 
+        // Store references for hibernation in dismantleNSView
+        context.coordinator.terminalManager = terminalManager
+        context.coordinator.cardID = cardID
+
         context.coordinator.loadTask = Task { @MainActor in
             await loadTerminal(into: hostView, coordinator: context.coordinator, backgroundColor: backgroundColor)
         }
@@ -37,6 +41,17 @@ struct TerminalContainerView: NSViewRepresentable {
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
         coordinator.loadTask?.cancel()
         coordinator.loadTask = nil
+
+        // Hibernate terminal to save memory
+        // Tmux keeps the process running in background
+        if let cardID = coordinator.cardID,
+           let terminalManager = coordinator.terminalManager {
+            terminalManager.hibernateTerminal(for: cardID)
+        }
+
+        // Clear references
+        coordinator.terminalView = nil
+        coordinator.scrollView = nil
     }
 
     @MainActor
@@ -77,5 +92,7 @@ struct TerminalContainerView: NSViewRepresentable {
         var loadTask: Task<Void, Never>?
         var terminalView: GhosttyTerminalView?
         var scrollView: TerminalScrollView?
+        weak var terminalManager: TerminalManager?
+        var cardID: UUID?
     }
 }

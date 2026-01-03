@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add terminal hibernation and LRU eviction
+- **Description**: TerminalManager now hibernates terminals when cards are deselected to save memory (tmux preserves sessions in background). LRU cache limits active terminals to 50, evicting least recently used. TerminalContainerView triggers hibernation in dismantleNSView. Scroll views are cached separately for faster restoration. Delayed cleanup prevents dangling pointer crashes during Ghostty surface teardown.
+
 - **Summary**: Migrate terminal from SwiftTerm to Ghostty
 - **Description**: Replaced SwiftTerm terminal emulator with Ghostty. Removed LocalPackages/SwiftTerm and LocalPackages/GhosttySwift in favor of vendored libghostty.a static library. New GhosttyTerminal/ module contains Swift wrappers: GhosttyTerminalView (NSView-based terminal), Ghostty.App (singleton app context), Ghostty.Surface (terminal surface management), plus input handling (Key, KeyEvent, MouseEvent, Mods, Input). TerminalManager and TerminalContainerView updated for new API.
 

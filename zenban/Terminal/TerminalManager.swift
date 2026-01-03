@@ -13,6 +13,9 @@ final class TerminalManager {
     private let maxTerminals = 50
     private var agentLaunchedForCard: Set<UUID> = []
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
+    private var hibernatedCards: Set<UUID> = []
+    /// Terminals pending cleanup - kept alive until surface is freed
+    private var pendingCleanup: [UUID: GhosttyTerminalView] = [:]
     weak var boardStore: BoardStore?
 
     var isTerminalAvailable: Bool { Ghostty.App.shared?.readiness == .ready }
@@ -22,11 +25,16 @@ final class TerminalManager {
     }
 
     func terminalView(for cardID: UUID, boardID: UUID, cardTitle: String) async throws -> GhosttyTerminalView {
+        // Check if terminal exists in active cache
         if let existingView = terminalViews[cardID] {
             existingView.cardTitle = cardTitle
             touch(cardID)
             return existingView
         }
+
+        // Clear pending state if user switched back quickly
+        pendingCleanup.removeValue(forKey: cardID)
+        hibernatedCards.remove(cardID)
 
         let board = boardStore?.board(for: boardID)
         let card = board?.cards.first { $0.id == cardID }
@@ -43,7 +51,9 @@ final class TerminalManager {
 
         // Note: Ghostty handles shell startup internally via surface creation
         // We just need to send the agent command when ready
-        if let agentCommand = agentToLaunch?.launchCommand {
+        // Skip if agent was already launched (e.g., waking from hibernation)
+        if let agentCommand = agentToLaunch?.launchCommand,
+           !agentLaunchedForCard.contains(cardID) {
             terminalView.sendWhenReady(agentCommand + "\n")
             terminalView.notifyAgentLaunched()
             agentLaunchedForCard.insert(cardID)
@@ -67,11 +77,9 @@ final class TerminalManager {
     }
 
     func scrollView(for cardID: UUID) -> TerminalScrollView? {
-        if let scrollView = scrollViews[cardID] {
-            touch(cardID)
-            return scrollView
-        }
-        return nil
+        guard let scrollView = scrollViews[cardID] else { return nil }
+        touch(cardID)
+        return scrollView
     }
 
     func setScrollView(_ scrollView: TerminalScrollView, for cardID: UUID) {
@@ -87,6 +95,8 @@ final class TerminalManager {
         removeTerminal(for: cardID)
         agentLaunchedForCard.remove(cardID)
         pendingWorktreeReady.removeValue(forKey: cardID)
+        hibernatedCards.remove(cardID)
+        pendingCleanup.removeValue(forKey: cardID)
     }
 
     func switchAgent(for cardID: UUID, to agent: Agent) {
@@ -137,6 +147,8 @@ final class TerminalManager {
         accessOrder.removeAll()
         agentLaunchedForCard.removeAll()
         pendingWorktreeReady.removeAll()
+        hibernatedCards.removeAll()
+        pendingCleanup.removeAll()
     }
 
     func focusTerminal(for cardID: UUID) {
@@ -147,6 +159,24 @@ final class TerminalManager {
     func isTerminalFocused(for cardID: UUID) -> Bool {
         guard let terminalView = terminalViews[cardID] else { return false }
         return terminalView.window?.firstResponder === terminalView
+    }
+
+    // MARK: - Hibernation
+
+    /// Hibernate a terminal to save memory.
+    /// The tmux session is preserved, allowing restoration when switching back.
+    func hibernateTerminal(for cardID: UUID) {
+        guard let terminalView = terminalViews[cardID] else { return }
+
+        terminalView.terminate()
+        cleanupTerminal(terminalView)
+        scheduleCleanup(terminalView, for: cardID)
+
+        terminalViews.removeValue(forKey: cardID)
+        scrollViews.removeValue(forKey: cardID)
+        accessOrder.removeAll { $0 == cardID }
+
+        hibernatedCards.insert(cardID)
     }
 
     // MARK: - Private Helpers
@@ -199,7 +229,9 @@ final class TerminalManager {
         while terminalViews.count > maxTerminals, let oldest = accessOrder.first {
             accessOrder.removeFirst()
             if let terminal = terminalViews.removeValue(forKey: oldest) {
+                terminal.terminate()
                 cleanupTerminal(terminal)
+                scheduleCleanup(terminal, for: oldest)
             }
             scrollViews.removeValue(forKey: oldest)
             if !TmuxSessionManager.shared.isTmuxAvailable() {
@@ -211,9 +243,20 @@ final class TerminalManager {
     private func removeTerminal(for cardID: UUID) {
         if let terminal = terminalViews.removeValue(forKey: cardID) {
             cleanupTerminal(terminal)
+            scheduleCleanup(terminal, for: cardID)
         }
         scrollViews.removeValue(forKey: cardID)
         accessOrder.removeAll { $0 == cardID }
+    }
+
+    /// Keep terminal alive temporarily to prevent dangling pointer crash.
+    /// The Ghostty surface may still send callbacks before it's fully freed.
+    private func scheduleCleanup(_ terminal: GhosttyTerminalView, for cardID: UUID) {
+        pendingCleanup[cardID] = terminal
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            self?.pendingCleanup.removeValue(forKey: cardID)
+        }
     }
 
     private func cleanupTerminal(_ terminal: GhosttyTerminalView) {
