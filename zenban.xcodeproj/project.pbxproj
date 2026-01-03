@@ -127,7 +127,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 23B6DAC72EFDA93700D5AB34 /* Build configuration list for PBXNativeTarget "zenban" */;
 			buildPhases = (
-				LIBGHOSTTY_BUILD_PHASE /* Build libghostty */,
 				23B6DAA22EFDA93600D5AB34 /* Sources */,
 				23B6DAA32EFDA93600D5AB34 /* Frameworks */,
 				23B6DAA42EFDA93600D5AB34 /* Resources */,
@@ -262,24 +261,6 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
-/* Begin PBXShellScriptBuildPhase section */
-		LIBGHOSTTY_BUILD_PHASE /* Build libghostty */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Build libghostty";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/bash;
-			shellScript = "if [ ! -f \"$SRCROOT/Vendor/libghostty/lib/libghostty.a\" ]; then\n    echo \"libghostty.a not found, building...\"\n    if ! command -v zig >/dev/null 2>&1; then\n        echo \"error: zig is required to build libghostty. Install with: brew install zig\"\n        exit 1\n    fi\n    \"$SRCROOT/scripts/build-libghostty.sh\"\nelse\n    echo \"libghostty.a found, skipping build\"\nfi\n";
-		};
-/* End PBXShellScriptBuildPhase section */
-
 /* Begin PBXSourcesBuildPhase section */
 		23B6DAA22EFDA93600D5AB34 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -356,7 +337,7 @@
 				DEVELOPMENT_TEAM = 5BV7M9S54F;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -420,7 +401,7 @@
 				DEVELOPMENT_TEAM = 5BV7M9S54F;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
