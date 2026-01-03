@@ -1,5 +1,4 @@
 import SwiftUI
-import GhosttySwift
 import AppKit
 
 struct TerminalContainerView: NSViewRepresentable {
@@ -27,8 +26,10 @@ struct TerminalContainerView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         nsView.layer?.backgroundColor = NSColor(backgroundColor).cgColor
+        if let scrollView = context.coordinator.scrollView {
+            scrollView.frame = nsView.bounds
+        }
         if let terminal = context.coordinator.terminalView {
-            terminal.frame = nsView.bounds
             terminal.layer?.backgroundColor = NSColor(backgroundColor).cgColor
         }
     }
@@ -47,11 +48,15 @@ struct TerminalContainerView: NSViewRepresentable {
 
             terminal.layer?.backgroundColor = NSColor(backgroundColor).cgColor
             terminal.frame = hostView.bounds
-            terminal.autoresizingMask = [.width, .height]
+
+            let scrollView = TerminalScrollView(contentSize: hostView.bounds.size, surfaceView: terminal)
+            scrollView.frame = hostView.bounds
+            scrollView.autoresizingMask = [.width, .height]
 
             hostView.subviews.forEach { $0.removeFromSuperview() }
-            hostView.addSubview(terminal)
+            hostView.addSubview(scrollView)
             coordinator.terminalView = terminal
+            coordinator.scrollView = scrollView
         } catch is CancellationError {
             // Task was cancelled, ignore
         } catch {
@@ -62,5 +67,6 @@ struct TerminalContainerView: NSViewRepresentable {
     final class Coordinator {
         var loadTask: Task<Void, Never>?
         var terminalView: GhosttyTerminalView?
+        var scrollView: TerminalScrollView?
     }
 }

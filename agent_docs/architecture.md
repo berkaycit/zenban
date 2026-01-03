@@ -14,7 +14,8 @@ zenban/
 │   ├── Git/         # Git changes view, diff display, PR creation
 │   ├── DevServer/   # Dev server preview with WebView
 │   └── Components/  # Reusable UI components
-├── Terminal/        # Embedded terminal per card (Ghostty)
+├── Terminal/        # Embedded terminal per card
+│   └── GhosttyTerminal/  # Ghostty integration (Metal rendering, input handling)
 ├── Services/        # App-wide services (notifications, git, AI providers)
 ├── Commands/        # Menu keyboard shortcuts
 └── Extensions/      # Color theme extensions

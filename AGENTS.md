@@ -4,7 +4,7 @@
 - `zenban/`: main macOS app target (SwiftUI app entry, Views, ViewModels, Models, Services, Storage, Terminal).
 - `zenbanTests/`: unit tests using Swift Testing.
 - `zenbanUITests/`: UI tests using XCTest.
-- `LocalPackages/`: local Swift packages (GhosttyKit, GhosttySwift, SwiftTerm fork).
+- `Vendor/`: vendored static libraries (libghostty.a for terminal rendering).
 - `agent_docs/`: architecture and conventions references for larger changes.
 - `aizen/`: related app and vendor code; treat as a separate module with its own docs.
 
@@ -31,9 +31,9 @@
 - Commits are short, imperative, sentence case (e.g., "Add Ghostty", "Update ...", "Fix ..."). Use "Revert ..." for rollbacks.
 - PRs should include a clear summary, test commands run, and screenshots for UI changes.
 
-## Local Packages & Dependencies
-- `LocalPackages/SwiftTerm` is a local fork with required fixes; do not swap back to upstream yet.
-- Keep local package references stable unless updating dependencies intentionally.
+## Vendor Libraries
+- `Vendor/libghostty.a`: Pre-built Ghostty terminal emulator library, statically linked via ghostty-bridging-header.h.
+- `zenban/Terminal/GhosttyTerminal/`: Swift wrappers for Ghostty C API (surface management, input handling, Metal rendering).
 
 ## Swift Concurrency
 

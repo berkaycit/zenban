@@ -7,9 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		23B6DBB02EFEEA8800D5AB34 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 23B6DAD12EFDA93700D5AB34 /* SwiftTerm */; };
-		23C7EAA02F000000GHOSTTY /* GhosttyKit in Frameworks */ = {isa = PBXBuildFile; productRef = 23C7EAA12F000001GHOSTTY /* GhosttyKit */; };
-		23C7EAA52F000005GSWIFT /* GhosttySwift in Frameworks */ = {isa = PBXBuildFile; productRef = 23C7EAA42F000004GSWIFT /* GhosttySwift */; };
+		114868812A9E4B9192F557FD /* libghostty.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1B5F5001E481458AA833EF64 /* libghostty.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -30,6 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1B5F5001E481458AA833EF64 /* libghostty.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libghostty.a; path = libghostty/lib/libghostty.a; sourceTree = "<group>"; };
 		23B6DAA62EFDA93600D5AB34 /* zenban.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = zenban.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DAB32EFDA93700D5AB34 /* zenbanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DABD2EFDA93700D5AB34 /* zenbanUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -71,9 +70,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				23B6DBB02EFEEA8800D5AB34 /* SwiftTerm in Frameworks */,
-				23C7EAA02F000000GHOSTTY /* GhosttyKit in Frameworks */,
-				23C7EAA52F000005GSWIFT /* GhosttySwift in Frameworks */,
+				114868812A9E4B9192F557FD /* libghostty.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -100,8 +97,17 @@
 				23B6DAA82EFDA93600D5AB34 /* zenban */,
 				23B6DAB62EFDA93700D5AB34 /* zenbanTests */,
 				23B6DAC02EFDA93700D5AB34 /* zenbanUITests */,
+				34A65B16E2F644D6AE876491 /* Vendor */,
 				23B6DAA72EFDA93600D5AB34 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		34A65B16E2F644D6AE876491 /* Vendor */ = {
+			isa = PBXGroup;
+			children = (
+				1B5F5001E481458AA833EF64 /* libghostty.a */,
+			);
+			path = Vendor;
 			sourceTree = "<group>";
 		};
 		23B6DAA72EFDA93600D5AB34 /* Products */ = {
@@ -134,9 +140,6 @@
 			);
 			name = zenban;
 			packageProductDependencies = (
-				23B6DAD12EFDA93700D5AB34 /* SwiftTerm */,
-				23C7EAA12F000001GHOSTTY /* GhosttyKit */,
-				23C7EAA42F000004GSWIFT /* GhosttySwift */,
 			);
 			productName = zenban;
 			productReference = 23B6DAA62EFDA93600D5AB34 /* zenban.app */;
@@ -221,9 +224,6 @@
 			mainGroup = 23B6DA9D2EFDA93600D5AB34;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				23B6DAD02EFDA93700D5AB34 /* XCLocalSwiftPackageReference "LocalPackages/SwiftTerm" */,
-				23C7EAA22F000002GHOSTTY /* XCLocalSwiftPackageReference "LocalPackages/GhosttyKit" */,
-				23C7EAA32F000003GSWIFT /* XCLocalSwiftPackageReference "LocalPackages/GhosttySwift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23B6DAA72EFDA93600D5AB34 /* Products */;
@@ -434,14 +434,22 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libghostty/include",
+				);
 				INFOPLIST_FILE = zenban/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libghostty/lib",
+				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
+					"-lghostty",
+					"-lc++",
 					"-framework",
 					Carbon,
 					"-framework",
@@ -467,6 +475,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/zenban/ghostty-bridging-header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -487,14 +496,22 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libghostty/include",
+				);
 				INFOPLIST_FILE = zenban/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libghostty/lib",
+				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
+					"-lghostty",
+					"-lc++",
 					"-framework",
 					Carbon,
 					"-framework",
@@ -520,6 +537,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/zenban/ghostty-bridging-header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -646,35 +664,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		23B6DAD02EFDA93700D5AB34 /* XCLocalSwiftPackageReference "LocalPackages/SwiftTerm" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = LocalPackages/SwiftTerm;
-		};
-		23C7EAA22F000002GHOSTTY /* XCLocalSwiftPackageReference "LocalPackages/GhosttyKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = LocalPackages/GhosttyKit;
-		};
-		23C7EAA32F000003GSWIFT /* XCLocalSwiftPackageReference "LocalPackages/GhosttySwift" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = LocalPackages/GhosttySwift;
-		};
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		23B6DAD12EFDA93700D5AB34 /* SwiftTerm */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = SwiftTerm;
-		};
-		23C7EAA12F000001GHOSTTY /* GhosttyKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = GhosttyKit;
-		};
-		23C7EAA42F000004GSWIFT /* GhosttySwift */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = GhosttySwift;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 23B6DA9E2EFDA93600D5AB34 /* Project object */;
 }

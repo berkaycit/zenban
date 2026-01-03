@@ -1,20 +1,21 @@
 import Foundation
-import GhosttySwift
 import AppKit
 
 @Observable
 final class TerminalManager {
+    enum TerminalManagerError: Error {
+        case ghosttyUnavailable
+    }
 
     private var terminalViews: [UUID: GhosttyTerminalView] = [:]
     private var agentLaunchedForCard: Set<UUID> = []
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
     weak var boardStore: BoardStore?
 
-    var isTerminalAvailable: Bool { GhosttyApp.shared.isReady }
+    var isTerminalAvailable: Bool { Ghostty.App.shared?.readiness == .ready }
 
     init() {
-        // Initialize GhosttyApp singleton
-        _ = GhosttyApp.shared
+        _ = Ghostty.App.shared
     }
 
     func terminalView(for cardID: UUID, boardID: UUID, cardTitle: String) async throws -> GhosttyTerminalView {
@@ -29,7 +30,7 @@ final class TerminalManager {
 
         // Determine initial working directory: worktree path > repository path > none
         let workingDirectory = card?.worktreePath ?? board?.repositoryPath
-        let terminalView = createTerminalView(cardID: cardID, boardID: boardID, cardTitle: cardTitle, workingDirectory: workingDirectory)
+        let terminalView = try createTerminalView(cardID: cardID, boardID: boardID, cardTitle: cardTitle, workingDirectory: workingDirectory)
 
         // For git repos, agent is launched via worktreeReady (after worktree is created)
         // For non-git repos or empty boards, launch agent directly
@@ -129,10 +130,23 @@ final class TerminalManager {
 
     // MARK: - Private Helpers
 
-    private func createTerminalView(cardID: UUID, boardID: UUID, cardTitle: String, workingDirectory: String?) -> GhosttyTerminalView {
+    private func createTerminalView(cardID: UUID, boardID: UUID, cardTitle: String, workingDirectory: String?) throws -> GhosttyTerminalView {
         let frame = NSRect(x: 0, y: 0, width: 600, height: 400)
 
-        let terminalView = GhosttyTerminalView(frame: frame, workingDirectory: workingDirectory)
+        guard let ghosttyAppWrapper = Ghostty.App.shared,
+              let ghosttyApp = ghosttyAppWrapper.app else {
+            throw TerminalManagerError.ghosttyUnavailable
+        }
+
+        let worktreePath = workingDirectory ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let terminalView = GhosttyTerminalView(
+            frame: frame,
+            worktreePath: worktreePath,
+            ghosttyApp: ghosttyApp,
+            appWrapper: ghosttyAppWrapper,
+            paneId: cardID.uuidString,
+            command: nil
+        )
         terminalView.cardID = cardID
         terminalView.boardID = boardID
         terminalView.cardTitle = cardTitle

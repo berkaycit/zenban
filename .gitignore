@@ -67,5 +67,5 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 
-# Ghostty (must be cloned and built locally with Zig)
-LocalPackages/ghostty/
+# Ghostty static library (too large for git, must be built locally)
+Vendor/libghostty/lib/libghostty.a
