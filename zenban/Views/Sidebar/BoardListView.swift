@@ -36,6 +36,12 @@ struct BoardListView: View {
                 .controlSize(.large)
                 .help("Dev Server Settings")
                 .disabled(store.selectedBoard == nil)
+
+                SettingsLink {
+                    Image(systemName: "terminal")
+                }
+                .controlSize(.large)
+                .help("Terminal Style Settings")
             }
         }
         .sheet(isPresented: $isAddingBoard) {

@@ -45,8 +45,8 @@ actor TmuxSessionManager {
         let configFile = zenbanDir.appendingPathComponent("tmux.conf")
 
         // Get theme-based mode style for selection highlighting
-        let themeName = "Dracula"
-        let modeStyle = GhosttyThemeParser.loadTmuxModeStyle()
+        let themeName = UserDefaults.standard.string(forKey: "terminalThemeName") ?? "Dracula"
+        let modeStyle = GhosttyThemeParser.loadTmuxModeStyle(named: themeName)
 
         // Always overwrite to ensure latest config
         let config = """

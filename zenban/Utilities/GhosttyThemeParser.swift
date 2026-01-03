@@ -46,17 +46,19 @@ nonisolated struct GhosttyThemeParser {
 
     /// Returns tmux mode-style string for selection highlighting
     /// Format: "fg=#RRGGBB,bg=#RRGGBB"
-    static func loadTmuxModeStyle() -> String {
+    static func loadTmuxModeStyle(named name: String) -> String {
+        let fallbackStyle = "fg=#cdd6f4,bg=#45475a"
+
         guard let resourcePath = Bundle.main.resourcePath else {
-            return "fg=#cdd6f4,bg=#45475a"
+            return fallbackStyle
         }
 
         let themePath = ((resourcePath as NSString)
             .appendingPathComponent("ghostty/themes") as NSString)
-            .appendingPathComponent("Dracula")
+            .appendingPathComponent(name)
 
         guard let theme = parseTheme(contentsOf: themePath) else {
-            return "fg=#cdd6f4,bg=#45475a"
+            return fallbackStyle
         }
 
         let fg = theme.foreground ?? "cdd6f4"

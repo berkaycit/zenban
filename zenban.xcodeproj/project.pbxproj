@@ -102,14 +102,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		34A65B16E2F644D6AE876491 /* Vendor */ = {
-			isa = PBXGroup;
-			children = (
-				1B5F5001E481458AA833EF64 /* libghostty.a */,
-			);
-			path = Vendor;
-			sourceTree = "<group>";
-		};
 		23B6DAA72EFDA93600D5AB34 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -118,6 +110,14 @@
 				23B6DABD2EFDA93700D5AB34 /* zenbanUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		34A65B16E2F644D6AE876491 /* Vendor */ = {
+			isa = PBXGroup;
+			children = (
+				1B5F5001E481458AA833EF64 /* libghostty.a */,
+			);
+			path = Vendor;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -434,18 +434,14 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = (
-					"$(SRCROOT)/Vendor/libghostty/include",
-				);
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Vendor/libghostty/include";
 				INFOPLIST_FILE = zenban/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/Vendor/libghostty/lib",
-				);
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/libghostty/lib";
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"-lghostty",
@@ -496,18 +492,14 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = (
-					"$(SRCROOT)/Vendor/libghostty/include",
-				);
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Vendor/libghostty/include";
 				INFOPLIST_FILE = zenban/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/Vendor/libghostty/lib",
-				);
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/libghostty/lib";
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"-lghostty",
@@ -663,7 +655,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = 23B6DA9E2EFDA93600D5AB34 /* Project object */;
 }

@@ -13,6 +13,7 @@ zenban/
 │   ├── Card/        # Card display and editing
 │   ├── Git/         # Git changes view, diff display, PR creation
 │   ├── DevServer/   # Dev server preview with WebView
+│   ├── Settings/    # App settings (terminal font, theme)
 │   └── Components/  # Reusable UI components
 ├── Terminal/        # Embedded terminal per card
 │   └── GhosttyTerminal/  # Ghostty integration (Metal rendering, input handling)
@@ -42,7 +43,7 @@ zenban/
 | `CardDetailView` | Right panel with card editing, column move, and agent picker (switches terminal) |
 | `TerminalManager` | Manages GhosttyTerminalView instances per card. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell is ready via OSC 133 signals or fallback timer. Terminates processes on card/board deletion and app quit. |
 | `GhosttyTerminalView` | Ghostty-based terminal with state machine (shell/agentActive/agentIdle). Uses OSC 133 shell integration for command completion detection. Ctrl+C detection for agent exit. Callbacks for task completion and agent resume. |
-| `GhosttyApp` | Singleton managing Ghostty application context. Routes surface actions to terminal views. Handles clipboard operations. |
+| `GhosttyApp` | Singleton managing Ghostty application context. Routes surface actions to terminal views. Handles clipboard operations. Reloads config when terminal settings change. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
 | `GitService` | Git operations: repository init, worktree CRUD, status/diff, commit/push, merge, PR creation (gh CLI), AI commit message generation |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |

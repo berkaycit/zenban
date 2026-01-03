@@ -27,6 +27,7 @@ struct zenbanApp: App {
     @State private var store = BoardStore()
     @State private var terminalManager = TerminalManager()
     @State private var devServerManager = DevServerManager()
+    @State private var terminalConfigObserver = TerminalConfigObserver()
 
     init() {
         NotificationCenter.default.addObserver(
@@ -104,9 +105,17 @@ struct zenbanApp: App {
                     setupCardDeletionHandler()
                     setupNotifications()
                 }
+                .task(id: terminalConfigObserver.version) {
+                    Ghostty.App.shared?.reloadConfig()
+                    await TmuxSessionManager.shared.updateConfig()
+                }
         }
         .commands {
             BoardCommands(store: store)
+        }
+
+        Settings {
+            SettingsView()
         }
     }
 

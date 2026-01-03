@@ -9,6 +9,7 @@ import Foundation
 import AppKit
 import Combine
 import OSLog
+import SwiftUI
 
 // MARK: - Ghostty Namespace
 
@@ -72,13 +73,17 @@ extension Ghostty {
 
         // MARK: - Terminal Settings
 
-        private let terminalFontName = "Menlo"
-        private let terminalFontSize = 12.0
-        private let terminalThemeName = "Dracula"
-        private let usePerAppearanceTheme = false
+        @AppStorage("terminalFontName") private var terminalFontName = "Menlo"
+        @AppStorage("terminalFontSize") private var terminalFontSize = 14.0
+        @AppStorage("terminalThemeName") private var terminalThemeName = "Dracula"
+        @AppStorage("terminalThemeNameLight") private var terminalThemeNameLight = "Builtin Light"
+        @AppStorage("terminalUsePerAppearanceTheme") private var usePerAppearanceTheme = false
 
         private var effectiveThemeName: String {
-            terminalThemeName
+            guard usePerAppearanceTheme else { return terminalThemeName }
+
+            let isDark = NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark ? terminalThemeName : terminalThemeNameLight
         }
 
         // MARK: - Initialization
