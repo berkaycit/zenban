@@ -49,9 +49,18 @@ struct TerminalContainerView: NSViewRepresentable {
             terminal.layer?.backgroundColor = NSColor(backgroundColor).cgColor
             terminal.frame = hostView.bounds
 
-            let scrollView = TerminalScrollView(contentSize: hostView.bounds.size, surfaceView: terminal)
-            scrollView.frame = hostView.bounds
-            scrollView.autoresizingMask = [.width, .height]
+            let scrollView: TerminalScrollView
+            if let cachedScrollView = terminalManager.scrollView(for: cardID) {
+                scrollView = cachedScrollView
+                scrollView.frame = hostView.bounds
+                scrollView.autoresizingMask = [.width, .height]
+            } else {
+                let newScrollView = TerminalScrollView(contentSize: hostView.bounds.size, surfaceView: terminal)
+                newScrollView.frame = hostView.bounds
+                newScrollView.autoresizingMask = [.width, .height]
+                terminalManager.setScrollView(newScrollView, for: cardID)
+                scrollView = newScrollView
+            }
 
             hostView.subviews.forEach { $0.removeFromSuperview() }
             hostView.addSubview(scrollView)

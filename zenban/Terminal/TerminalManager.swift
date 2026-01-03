@@ -8,6 +8,9 @@ final class TerminalManager {
     }
 
     private var terminalViews: [UUID: GhosttyTerminalView] = [:]
+    private var scrollViews: [UUID: TerminalScrollView] = [:]
+    private var accessOrder: [UUID] = []
+    private let maxTerminals = 50
     private var agentLaunchedForCard: Set<UUID> = []
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
     weak var boardStore: BoardStore?
@@ -21,6 +24,7 @@ final class TerminalManager {
     func terminalView(for cardID: UUID, boardID: UUID, cardTitle: String) async throws -> GhosttyTerminalView {
         if let existingView = terminalViews[cardID] {
             existingView.cardTitle = cardTitle
+            touch(cardID)
             return existingView
         }
 
@@ -45,7 +49,7 @@ final class TerminalManager {
             agentLaunchedForCard.insert(cardID)
         }
 
-        terminalViews[cardID] = terminalView
+        setTerminal(terminalView, for: cardID)
 
         // Check if there's a pending worktree ready call (only for git repos)
         if let pending = pendingWorktreeReady[cardID] {
@@ -62,10 +66,25 @@ final class TerminalManager {
         return terminalView
     }
 
+    func scrollView(for cardID: UUID) -> TerminalScrollView? {
+        if let scrollView = scrollViews[cardID] {
+            touch(cardID)
+            return scrollView
+        }
+        return nil
+    }
+
+    func setScrollView(_ scrollView: TerminalScrollView, for cardID: UUID) {
+        scrollViews[cardID] = scrollView
+        touch(cardID)
+        evictIfNeeded()
+    }
+
     func killSessionForCard(_ cardID: UUID) async {
-        if let terminalView = terminalViews.removeValue(forKey: cardID) {
+        if let terminalView = terminalViews[cardID] {
             terminalView.terminate()
         }
+        removeTerminal(for: cardID)
         agentLaunchedForCard.remove(cardID)
         pendingWorktreeReady.removeValue(forKey: cardID)
     }
@@ -114,6 +133,8 @@ final class TerminalManager {
             terminalView.terminate()
         }
         terminalViews.removeAll()
+        scrollViews.removeAll()
+        accessOrder.removeAll()
         agentLaunchedForCard.removeAll()
         pendingWorktreeReady.removeAll()
     }
@@ -161,5 +182,46 @@ final class TerminalManager {
         }
 
         return terminalView
+    }
+
+    private func setTerminal(_ terminal: GhosttyTerminalView, for cardID: UUID) {
+        terminalViews[cardID] = terminal
+        touch(cardID)
+        evictIfNeeded()
+    }
+
+    private func touch(_ cardID: UUID) {
+        accessOrder.removeAll { $0 == cardID }
+        accessOrder.append(cardID)
+    }
+
+    private func evictIfNeeded() {
+        while terminalViews.count > maxTerminals, let oldest = accessOrder.first {
+            accessOrder.removeFirst()
+            if let terminal = terminalViews.removeValue(forKey: oldest) {
+                cleanupTerminal(terminal)
+            }
+            scrollViews.removeValue(forKey: oldest)
+            if !TmuxSessionManager.shared.isTmuxAvailable() {
+                agentLaunchedForCard.remove(oldest)
+            }
+        }
+    }
+
+    private func removeTerminal(for cardID: UUID) {
+        if let terminal = terminalViews.removeValue(forKey: cardID) {
+            cleanupTerminal(terminal)
+        }
+        scrollViews.removeValue(forKey: cardID)
+        accessOrder.removeAll { $0 == cardID }
+    }
+
+    private func cleanupTerminal(_ terminal: GhosttyTerminalView) {
+        terminal.onProcessExit = nil
+        terminal.onTitleChange = nil
+        terminal.onReady = nil
+        terminal.onProgressReport = nil
+        terminal.onTaskCompleted = nil
+        terminal.onAgentResumed = nil
     }
 }
