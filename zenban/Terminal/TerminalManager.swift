@@ -97,6 +97,9 @@ final class TerminalManager {
         pendingWorktreeReady.removeValue(forKey: cardID)
         hibernatedCards.remove(cardID)
         pendingCleanup.removeValue(forKey: cardID)
+
+        // Kill associated tmux session
+        await TmuxSessionManager.shared.killSession(paneId: cardID.uuidString)
     }
 
     func switchAgent(for cardID: UUID, to agent: Agent) {

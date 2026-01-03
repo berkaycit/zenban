@@ -37,6 +37,10 @@ struct zenbanApp: App {
         ) { [terminalManager, devServerManager] _ in
             terminalManager.terminateAllSessions()
             devServerManager.stopAllServers()
+
+            if UserDefaults.standard.bool(forKey: "cleanupSessionsOnQuit") {
+                TmuxSessionManager.shared.killAllZenbanSessionsSync()
+            }
         }
 
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in

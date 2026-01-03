@@ -41,7 +41,8 @@ zenban/
 | `HSplitView` | Three-column layout: sidebar, board, card detail (enforces min widths) |
 | `ColumnView` | Handles drag-drop with `.onDrag` and `.dropDestination()` |
 | `CardDetailView` | Right panel with card editing, column move, and agent picker (switches terminal) |
-| `TerminalManager` | Manages GhosttyTerminalView instances per card with LRU eviction (max 50). Hibernates terminals when card is deselected (tmux preserves session). Uses card's worktree or board's repo as start directory. Auto-launches agent when shell ready. |
+| `TerminalManager` | Manages GhosttyTerminalView instances per card with LRU eviction (max 50). Hibernates terminals when card is deselected (tmux preserves session). Kills tmux session on card delete. Uses card's worktree or board's repo as start directory. Auto-launches agent when shell ready. |
+| `TmuxSessionManager` | Actor managing tmux sessions for terminal persistence. Sessions prefixed with `zenban-`. Provides sync cleanup for app termination and async cleanup for card deletion. Settings control whether sessions are killed on app quit. |
 | `GhosttyTerminalView` | Ghostty-based terminal with state machine (shell/agentActive/agentIdle). Uses OSC 133 shell integration for command completion detection. Ctrl+C detection for agent exit. Callbacks for task completion and agent resume. |
 | `GhosttyApp` | Singleton managing Ghostty application context. Routes surface actions to terminal views. Handles clipboard operations. Reloads config when terminal settings change. |
 | `NotificationService` | macOS notifications + card movement callbacks (onTaskCompleted, onAgentResumed) |
@@ -50,6 +51,7 @@ zenban/
 | `ProcessEnvironment` | Shared utility for building process environment with PATH setup (node/nvm/homebrew). Used by ClaudeService and DevServerManager. |
 | `DevServerManager` | Manages dev server processes for cards. Handles setup (npm install), port detection, and WebView preview. Single server at a time with proper cleanup. Output buffer limited to 100KB with throttled UI updates (150ms). |
 | `DevServerSettingsSheet` | Sidebar-accessible sheet for editing board dev server config (setup command, dev command, skip setup toggle). |
+| `TerminalSettingsView` | Terminal settings: font, theme, and session cleanup options. |
 | `GitChangesView` | Board-area view (toggled via Cmd+Shift+X or button) showing diff, branch picker, Commit/Merge/Create PR actions. Loads diffs on-demand when files are expanded. |
 | `DiffContentView` | Split-view diff renderer with async parsing and line limiting (300 lines visible by default). |
 | `DirectoryPicker` | NSOpenPanel wrapper for folder selection |

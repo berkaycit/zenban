@@ -241,6 +241,52 @@ actor TmuxSessionManager {
         Self.logger.info("Killed all zenban tmux sessions")
     }
 
+    /// Synchronous version for use during app termination
+    nonisolated func killAllZenbanSessionsSync() {
+        guard let tmux = tmuxPath() else { return }
+
+        // List sessions
+        let listProcess = Process()
+        listProcess.executableURL = URL(fileURLWithPath: tmux)
+        listProcess.arguments = ["list-sessions", "-F", "#{session_name}"]
+
+        let pipe = Pipe()
+        listProcess.standardOutput = pipe
+        listProcess.standardError = FileHandle.nullDevice
+
+        do {
+            try listProcess.run()
+            listProcess.waitUntilExit()
+        } catch {
+            return
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        try? pipe.fileHandleForReading.close()
+        guard let output = String(data: data, encoding: .utf8) else { return }
+
+        let sessions = output
+            .components(separatedBy: .newlines)
+            .filter { $0.hasPrefix(sessionPrefix) }
+
+        // Kill each session
+        for session in sessions {
+            let killProcess = Process()
+            killProcess.executableURL = URL(fileURLWithPath: tmux)
+            killProcess.arguments = ["kill-session", "-t", session]
+            killProcess.standardError = FileHandle.nullDevice
+
+            do {
+                try killProcess.run()
+                killProcess.waitUntilExit()
+            } catch {
+                continue
+            }
+        }
+
+        Self.logger.info("Killed all zenban tmux sessions (sync)")
+    }
+
     /// Clean up orphaned sessions (sessions without matching Core Data panes)
     func cleanupOrphanedSessions(validPaneIds: Set<String>) async {
         let sessions = await listZenbanSessions()

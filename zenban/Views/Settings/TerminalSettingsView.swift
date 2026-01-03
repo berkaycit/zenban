@@ -7,9 +7,11 @@ struct TerminalSettingsView: View {
     @AppStorage("terminalThemeName") private var themeName = "Dracula"
     @AppStorage("terminalThemeNameLight") private var themeNameLight = "Builtin Light"
     @AppStorage("terminalUsePerAppearanceTheme") private var usePerAppearanceTheme = false
+    @AppStorage("cleanupSessionsOnQuit") private var cleanupSessionsOnQuit = false
 
     @State private var availableFonts: [String] = []
     @State private var themeNames: [String] = []
+    @State private var clearingSessions = false
 
     private static var themesPath: String? {
         guard let resourcePath = Bundle.main.resourcePath else { return nil }
@@ -93,6 +95,27 @@ struct TerminalSettingsView: View {
                     }
                     .disabled(themeNames.isEmpty)
                 }
+            }
+
+            Section("Sessions") {
+                Toggle("Clean up sessions on quit", isOn: $cleanupSessionsOnQuit)
+
+                Button {
+                    clearingSessions = true
+                    Task {
+                        await TmuxSessionManager.shared.killAllZenbanSessions()
+                        clearingSessions = false
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        if clearingSessions {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text("Kill All Sessions")
+                    }
+                }
+                .disabled(clearingSessions)
             }
         }
         .formStyle(.grouped)
