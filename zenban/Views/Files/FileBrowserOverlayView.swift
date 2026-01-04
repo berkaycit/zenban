@@ -20,7 +20,7 @@ struct FileBrowserOverlayView: View {
                                     .padding(.vertical, 4)
                             }
                         }
-                        .frame(minWidth: 180, idealWidth: 260, maxWidth: 420)
+                        .frame(minWidth: 180, idealWidth: 200, maxWidth: 220)
 
                         FileContentTabView(store: store)
                             .frame(minWidth: 360)
