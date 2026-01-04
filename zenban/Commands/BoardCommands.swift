@@ -38,8 +38,3 @@ struct BoardCommands: Commands {
         }
     }
 }
-
-extension Notification.Name {
-    static let newBoard = Notification.Name("newBoard")
-    static let newCard = Notification.Name("newCard")
-}

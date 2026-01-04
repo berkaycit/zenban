@@ -51,6 +51,17 @@ struct zenbanApp: App {
             if store.showDeleteConfirmation {
                 return event
             }
+
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if modifiers == [.command],
+               event.charactersIgnoringModifiers?.lowercased() == "w" {
+                // When file browser is open, close the tab; otherwise just consume the event
+                if store.showFileBrowser {
+                    NotificationCenter.default.post(name: .closeFileBrowserTab, object: nil)
+                }
+                return nil
+            }
+
             if let firstResponder = NSApp.keyWindow?.firstResponder,
                firstResponder is NSTextView {
                 return event

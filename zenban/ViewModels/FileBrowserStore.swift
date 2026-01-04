@@ -179,9 +179,17 @@ final class FileBrowserStore {
     }
 
     func closeFile(id: UUID) {
+        let closingIndex = openFiles.firstIndex(where: { $0.id == id })
+        let wasSelected = selectedFileId == id
         openFiles.removeAll { $0.id == id }
-        if selectedFileId == id {
-            selectedFileId = openFiles.last?.id
+
+        if wasSelected {
+            if let closingIndex, !openFiles.isEmpty {
+                let nextIndex = min(closingIndex, openFiles.count - 1)
+                selectedFileId = openFiles[nextIndex].id
+            } else {
+                selectedFileId = openFiles.last?.id
+            }
         }
         persistSession()
     }

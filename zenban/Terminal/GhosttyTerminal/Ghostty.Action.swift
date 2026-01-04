@@ -41,13 +41,3 @@ extension Ghostty.Action {
     }
 }
 
-// MARK: - Notification Names
-
-extension Notification.Name {
-    /// Posted when the terminal scrollbar state changes.
-    /// userInfo contains ScrollbarKey with Ghostty.Action.Scrollbar value.
-    static let ghosttyDidUpdateScrollbar = Notification.Name("win.aizen.app.ghostty.didUpdateScrollbar")
-
-    /// Key for scrollbar state in notification userInfo
-    static let ScrollbarKey = ghosttyDidUpdateScrollbar.rawValue + ".scrollbar"
-}

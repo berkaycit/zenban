@@ -19,7 +19,7 @@ zenban/
 │   └── GhosttyTerminal/  # Ghostty integration (Metal rendering, input handling)
 ├── Services/        # App-wide services (notifications, git, AI providers)
 ├── Commands/        # Menu keyboard shortcuts
-└── Extensions/      # Color theme extensions
+└── Extensions/      # Color theme, Notification.Name extensions
 ```
 
 ## Data Flow
@@ -90,6 +90,7 @@ Board stores DevServerConfig (setup command, dev command). CardDetailView shows 
 | Cmd+Shift+D | Delete selected card (with confirmation) |
 | Cmd+Shift+S | Toggle Dev Server |
 | Cmd+Shift+X | Toggle Git Changes |
+| Cmd+W | Close file browser tab (when open); otherwise disabled |
 | Shift+Arrow Up/Down | Navigate cards in column (when in cards) or boards (when in sidebar) |
 | Shift+Arrow Left | Previous column, or go to sidebar from first column |
 | Shift+Arrow Right | Next column, or go to cards from sidebar |

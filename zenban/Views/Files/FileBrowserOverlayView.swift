@@ -47,6 +47,10 @@ struct FileBrowserOverlayView: View {
                 )
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .closeFileBrowserTab)) { _ in
+            guard let store, let selectedFileId = store.selectedFileId else { return }
+            store.closeFile(id: selectedFileId)
+        }
         .onAppear {
             guard store == nil, let worktreePath = card.worktreePath else { return }
             store = FileBrowserStore(
