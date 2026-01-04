@@ -40,6 +40,9 @@ struct ContentView: View {
                             onDismiss: store.stopGitChanges
                         )
                         .id(card.id)
+                    } else if store.showFileBrowser, let card = store.fileBrowserCard, let board = store.selectedBoard {
+                        FileBrowserOverlayView(card: card, boardID: board.id)
+                            .id(card.id)
                     } else if let board = store.selectedBoard {
                         BoardView(board: board)
                     } else {

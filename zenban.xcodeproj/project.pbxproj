@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		114868812A9E4B9192F557FD /* libghostty.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1B5F5001E481458AA833EF64 /* libghostty.a */; };
+		12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */ = {isa = PBXBuildFile; productRef = 0F130FE69B3B46DE88340E02 /* CodeEditLanguages */; };
+		93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */ = {isa = PBXBuildFile; productRef = A67F2A020FCB4AB1B074837D /* CodeEditSymbols */; };
+		D7245E606E834A01AF59B435 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = 9149CD05B1074D1490C41427 /* CodeEditSourceEditor */; };
+		ECC201D4093342D8A219C1EA /* CodeEditTextView in Frameworks */ = {isa = PBXBuildFile; productRef = 1B6E2133151B4B8A9DE213DC /* CodeEditTextView */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,6 +74,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D7245E606E834A01AF59B435 /* CodeEditSourceEditor in Frameworks */,
+				12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */,
+				ECC201D4093342D8A219C1EA /* CodeEditTextView in Frameworks */,
+				93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */,
 				114868812A9E4B9192F557FD /* libghostty.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -140,6 +148,10 @@
 			);
 			name = zenban;
 			packageProductDependencies = (
+				9149CD05B1074D1490C41427 /* CodeEditSourceEditor */,
+				0F130FE69B3B46DE88340E02 /* CodeEditLanguages */,
+				1B6E2133151B4B8A9DE213DC /* CodeEditTextView */,
+				A67F2A020FCB4AB1B074837D /* CodeEditSymbols */,
 			);
 			productName = zenban;
 			productReference = 23B6DAA62EFDA93600D5AB34 /* zenban.app */;
@@ -224,6 +236,10 @@
 			mainGroup = 23B6DA9D2EFDA93600D5AB34;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				AD8D57EBCC204B0A8CCC0988 /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */,
+				5CDF753EA2FB40DDB955C0A6 /* XCRemoteSwiftPackageReference "CodeEditLanguages" */,
+				18FA255C9F11408C8DB18369 /* XCRemoteSwiftPackageReference "CodeEditTextView" */,
+				4E26F0CB434349ABBC938F2B /* XCRemoteSwiftPackageReference "CodeEditSymbols" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23B6DAA72EFDA93600D5AB34 /* Products */;
@@ -655,6 +671,64 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		18FA255C9F11408C8DB18369 /* XCRemoteSwiftPackageReference "CodeEditTextView" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CodeEditApp/CodeEditTextView.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.12.1;
+			};
+		};
+		4E26F0CB434349ABBC938F2B /* XCRemoteSwiftPackageReference "CodeEditSymbols" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CodeEditApp/CodeEditSymbols.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.2.3;
+			};
+		};
+		5CDF753EA2FB40DDB955C0A6 /* XCRemoteSwiftPackageReference "CodeEditLanguages" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CodeEditApp/CodeEditLanguages.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.20;
+			};
+		};
+		AD8D57EBCC204B0A8CCC0988 /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CodeEditApp/CodeEditSourceEditor.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0F130FE69B3B46DE88340E02 /* CodeEditLanguages */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5CDF753EA2FB40DDB955C0A6 /* XCRemoteSwiftPackageReference "CodeEditLanguages" */;
+			productName = CodeEditLanguages;
+		};
+		1B6E2133151B4B8A9DE213DC /* CodeEditTextView */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 18FA255C9F11408C8DB18369 /* XCRemoteSwiftPackageReference "CodeEditTextView" */;
+			productName = CodeEditTextView;
+		};
+		9149CD05B1074D1490C41427 /* CodeEditSourceEditor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AD8D57EBCC204B0A8CCC0988 /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */;
+			productName = CodeEditSourceEditor;
+		};
+		A67F2A020FCB4AB1B074837D /* CodeEditSymbols */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4E26F0CB434349ABBC938F2B /* XCRemoteSwiftPackageReference "CodeEditSymbols" */;
+			productName = CodeEditSymbols;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 23B6DA9E2EFDA93600D5AB34 /* Project object */;
 }

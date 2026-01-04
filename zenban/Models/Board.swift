@@ -57,8 +57,17 @@ struct Card: Identifiable, Codable, Hashable, Transferable {
     var orderIndex: Int
     var agent: Agent?
     var worktreePath: String?
+    var fileBrowserSession: FileBrowserSessionState?
 
-    init(id: UUID = UUID(), title: String, column: Column = .todo, orderIndex: Int = 0, agent: Agent? = nil, worktreePath: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        column: Column = .todo,
+        orderIndex: Int = 0,
+        agent: Agent? = nil,
+        worktreePath: String? = nil,
+        fileBrowserSession: FileBrowserSessionState? = nil
+    ) {
         self.id = id
         self.title = title
         self.column = column
@@ -66,6 +75,7 @@ struct Card: Identifiable, Codable, Hashable, Transferable {
         self.orderIndex = orderIndex
         self.agent = agent
         self.worktreePath = worktreePath
+        self.fileBrowserSession = fileBrowserSession
     }
 
     static var transferRepresentation: some TransferRepresentation {

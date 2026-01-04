@@ -28,6 +28,9 @@ final class BoardStore {
     // Git changes state
     private(set) var gitChangesCardID: UUID?
 
+    // File browser state
+    private(set) var fileBrowserCardID: UUID?
+
     var onCardDeleted: ((UUID) -> Void)?
     weak var terminalManager: TerminalManager?
 
@@ -169,6 +172,17 @@ final class BoardStore {
         return selectedBoard?.cards.first { $0.id == cardID }
     }
 
+    // MARK: - File Browser Computed Properties
+
+    var showFileBrowser: Bool {
+        fileBrowserCardID != nil
+    }
+
+    var fileBrowserCard: Card? {
+        guard let cardID = fileBrowserCardID else { return nil }
+        return selectedBoard?.cards.first { $0.id == cardID }
+    }
+
     // MARK: - Git Changes Transitions
 
     func toggleGitChanges() {
@@ -188,9 +202,27 @@ final class BoardStore {
         gitChangesCardID = nil
     }
 
+    // MARK: - File Browser Transitions
+
+    func toggleFileBrowser() {
+        guard let card = selectedCard else { return }
+
+        if fileBrowserCardID == card.id {
+            stopFileBrowser()
+            return
+        }
+
+        fileBrowserCardID = card.id
+    }
+
+    func stopFileBrowser() {
+        fileBrowserCardID = nil
+    }
+
     func stopOverlays() {
         stopDevServer()
         stopGitChanges()
+        stopFileBrowser()
     }
 
     init() {
@@ -218,6 +250,7 @@ final class BoardStore {
         // Stop overlays if showing for any card in this board
         if let id = devServerCard?.id, cardIDs.contains(id) { stopDevServer() }
         if let id = gitChangesCard?.id, cardIDs.contains(id) { stopGitChanges() }
+        if let id = fileBrowserCardID, cardIDs.contains(id) { stopFileBrowser() }
 
         for card in board.cards {
             onCardDeleted?(card.id)
@@ -309,6 +342,12 @@ final class BoardStore {
         scheduleSave()
     }
 
+    func updateFileBrowserSession(_ cardID: UUID, in boardID: UUID, session: FileBrowserSessionState?) {
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        boards[bi].cards[ci].fileBrowserSession = session
+        scheduleSave()
+    }
+
     func requestDeleteSelectedCard() {
         guard selectedBoardID != nil, selectedCardID != nil else { return }
         showDeleteConfirmation = true
@@ -339,6 +378,7 @@ final class BoardStore {
 
         if devServerCard?.id == cardID { stopDevServer() }
         if gitChangesCard?.id == cardID { stopGitChanges() }
+        if fileBrowserCardID == cardID { stopFileBrowser() }
 
         boards[i].cards.removeAll { $0.id == cardID }
         if draggedCardID == cardID { draggedCardID = nil }

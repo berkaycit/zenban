@@ -99,6 +99,14 @@ struct CardDetailView: View {
                         .foregroundStyle(.secondary)
                         .help("View Changes")
 
+                        Button(action: { store.toggleFileBrowser() }) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 15))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("File Browser")
+
                         Button(action: startDevServer) {
                             Image(systemName: "play.circle")
                                 .font(.system(size: 15))
