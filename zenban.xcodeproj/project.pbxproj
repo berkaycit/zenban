@@ -236,10 +236,10 @@
 			mainGroup = 23B6DA9D2EFDA93600D5AB34;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				AD8D57EBCC204B0A8CCC0988 /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */,
-				5CDF753EA2FB40DDB955C0A6 /* XCRemoteSwiftPackageReference "CodeEditLanguages" */,
-				18FA255C9F11408C8DB18369 /* XCRemoteSwiftPackageReference "CodeEditTextView" */,
-				4E26F0CB434349ABBC938F2B /* XCRemoteSwiftPackageReference "CodeEditSymbols" */,
+				D0A1B2C3D4E5F60718293A4B /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditSourceEditor" */,
+				D0A1B2C3D4E5F60718293A4E /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditLanguages" */,
+				D0A1B2C3D4E5F60718293A4C /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditTextView" */,
+				D0A1B2C3D4E5F60718293A4D /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditSymbols" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23B6DAA72EFDA93600D5AB34 /* Products */;
@@ -672,6 +672,25 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		D0A1B2C3D4E5F60718293A4B /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditSourceEditor" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = aizen/Packages/CodeEditSourceEditor;
+		};
+		D0A1B2C3D4E5F60718293A4C /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditTextView" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = aizen/Packages/CodeEditTextView;
+		};
+		D0A1B2C3D4E5F60718293A4D /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditSymbols" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = aizen/Packages/CodeEditSymbols;
+		};
+		D0A1B2C3D4E5F60718293A4E /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditLanguages" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = aizen/Packages/CodeEditLanguages;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		18FA255C9F11408C8DB18369 /* XCRemoteSwiftPackageReference "CodeEditTextView" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -710,22 +729,22 @@
 /* Begin XCSwiftPackageProductDependency section */
 		0F130FE69B3B46DE88340E02 /* CodeEditLanguages */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 5CDF753EA2FB40DDB955C0A6 /* XCRemoteSwiftPackageReference "CodeEditLanguages" */;
+			package = D0A1B2C3D4E5F60718293A4E /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditLanguages" */;
 			productName = CodeEditLanguages;
 		};
 		1B6E2133151B4B8A9DE213DC /* CodeEditTextView */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 18FA255C9F11408C8DB18369 /* XCRemoteSwiftPackageReference "CodeEditTextView" */;
+			package = D0A1B2C3D4E5F60718293A4C /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditTextView" */;
 			productName = CodeEditTextView;
 		};
 		9149CD05B1074D1490C41427 /* CodeEditSourceEditor */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = AD8D57EBCC204B0A8CCC0988 /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */;
+			package = D0A1B2C3D4E5F60718293A4B /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditSourceEditor" */;
 			productName = CodeEditSourceEditor;
 		};
 		A67F2A020FCB4AB1B074837D /* CodeEditSymbols */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 4E26F0CB434349ABBC938F2B /* XCRemoteSwiftPackageReference "CodeEditSymbols" */;
+			package = D0A1B2C3D4E5F60718293A4D /* XCLocalSwiftPackageReference "aizen/Packages/CodeEditSymbols" */;
 			productName = CodeEditSymbols;
 		};
 /* End XCSwiftPackageProductDependency section */
