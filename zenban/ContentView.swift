@@ -53,7 +53,7 @@ struct ContentView: View {
                         )
                     }
                 }
-                .frame(minWidth: 850, idealWidth: 950, maxWidth: 1050)
+                .frame(minWidth: 800, idealWidth: 900, maxWidth: 1000)
 
                 // Card detail
                 Group {
@@ -67,7 +67,7 @@ struct ContentView: View {
                         )
                     }
                 }
-                .frame(minWidth: 400, idealWidth: 600, maxWidth: .infinity)
+                .frame(minWidth: 400, maxWidth: .infinity)
             }
         }
         .onChange(of: store.selectedBoardID) {
