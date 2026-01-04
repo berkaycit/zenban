@@ -18,7 +18,7 @@ struct ContentView: View {
             NavigationStack {
                 BoardListView()
             }
-            .frame(minWidth: 160, idealWidth: 160, maxWidth: 260)
+            .frame(minWidth: 180, idealWidth: 200, maxWidth: 220)
 
             // Content + Detail
             HSplitView {
@@ -53,7 +53,7 @@ struct ContentView: View {
                         )
                     }
                 }
-                .frame(minWidth: 900, maxWidth: 950)
+                .frame(minWidth: 850, idealWidth: 950, maxWidth: 1050)
 
                 // Card detail
                 Group {
@@ -67,7 +67,7 @@ struct ContentView: View {
                         )
                     }
                 }
-                .frame(minWidth: 400, idealWidth: 500, maxWidth: .infinity)
+                .frame(minWidth: 400, idealWidth: 600, maxWidth: .infinity)
             }
         }
         .onChange(of: store.selectedBoardID) {
