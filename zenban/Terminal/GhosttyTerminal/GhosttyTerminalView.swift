@@ -115,6 +115,9 @@ class GhosttyTerminalView: NSView {
         let initialFrame = frame.width > 0 && frame.height > 0 ? frame : NSRect(x: 0, y: 0, width: 800, height: 600)
         super.init(frame: initialFrame)
 
+        // Register this view as valid for callback safety
+        Ghostty.App.registerTerminalView(self)
+
         // Initialize handlers before setup
         self.inputHandler = GhosttyInputHandler(view: self, surface: nil)
 
@@ -136,6 +139,9 @@ class GhosttyTerminalView: NSView {
     }
 
     deinit {
+        // Unregister from validity registry (thread-safe, can be called from deinit)
+        Ghostty.App.unregisterTerminalView(self)
+
         // Surface cleanup happens via Surface's deinit
         // Note: Cannot access @MainActor properties in deinit
         // Tracking areas are automatically cleaned up by NSView

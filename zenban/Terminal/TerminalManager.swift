@@ -102,7 +102,8 @@ final class TerminalManager {
         agentLaunchedForCard.remove(cardID)
         pendingWorktreeReady.removeValue(forKey: cardID)
         hibernatedCards.remove(cardID)
-        pendingCleanup.removeValue(forKey: cardID)
+        // Note: Do NOT remove from pendingCleanup here - the terminal must stay
+        // alive temporarily to prevent dangling pointer crash from Ghostty callbacks
 
         // Kill associated tmux session
         await TmuxSessionManager.shared.killSession(paneId: cardID.uuidString)
@@ -272,6 +273,9 @@ final class TerminalManager {
     }
 
     private func cleanupTerminal(_ terminal: GhosttyTerminalView) {
+        // Unregister from callback safety registry before invalidation
+        Ghostty.App.unregisterTerminalView(terminal)
+
         terminal.onProcessExit = nil
         terminal.onTitleChange = nil
         terminal.onReady = nil

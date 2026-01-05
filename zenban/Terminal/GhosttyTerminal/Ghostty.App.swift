@@ -62,6 +62,11 @@ extension Ghostty {
         /// Track active surfaces for config propagation
         private var activeSurfaces: [Ghostty.SurfaceReference] = []
 
+        /// Registry of valid terminal view pointers (for callback safety)
+        /// Protected by lock since C callbacks may run on non-main threads
+        private nonisolated(unsafe) static var validTerminalViews: Set<UnsafeRawPointer> = []
+        private static let validTerminalViewsLock = NSLock()
+
         /// Track last known appearance to detect changes
         private var lastKnownAppearance: NSAppearance.Name?
 
@@ -245,6 +250,32 @@ extension Ghostty {
             activeSurfaces = activeSurfaces.filter { $0.isValid }
         }
 
+        /// Register a terminal view as valid for callback safety
+        nonisolated static func registerTerminalView(_ view: GhosttyTerminalView) {
+            let ptr = Unmanaged.passUnretained(view).toOpaque()
+            validTerminalViewsLock.lock()
+            validTerminalViews.insert(UnsafeRawPointer(ptr))
+            validTerminalViewsLock.unlock()
+        }
+
+        /// Unregister a terminal view (call before deallocation)
+        nonisolated static func unregisterTerminalView(_ view: GhosttyTerminalView) {
+            let ptr = Unmanaged.passUnretained(view).toOpaque()
+            validTerminalViewsLock.lock()
+            validTerminalViews.remove(UnsafeRawPointer(ptr))
+            validTerminalViewsLock.unlock()
+        }
+
+        /// Safely get a terminal view from userdata, returning nil if invalid
+        nonisolated static func terminalView(from userdata: UnsafeMutableRawPointer?) -> GhosttyTerminalView? {
+            guard let userdata = userdata else { return nil }
+            validTerminalViewsLock.lock()
+            let isValid = validTerminalViews.contains(UnsafeRawPointer(userdata))
+            validTerminalViewsLock.unlock()
+            guard isValid else { return nil }
+            return Unmanaged<GhosttyTerminalView>.fromOpaque(userdata).takeUnretainedValue()
+        }
+
         /// Reload configuration (call when settings change)
         func reloadConfig() {
             guard let app = self.app else { return }
@@ -358,12 +389,9 @@ extension Ghostty {
         static func action(_ app: ghostty_app_t, target: ghostty_target_s, action: ghostty_action_s) -> Bool {
             // Get the terminal view from surface userdata if target is a surface
             let terminalView: GhosttyTerminalView? = {
-                guard target.tag == GHOSTTY_TARGET_SURFACE else { return nil }
-                // Surface could be nil during early initialization - safely unwrap
-                let surfacePtr: ghostty_surface_t? = target.target.surface
-                guard let surface = surfacePtr else { return nil }
-                guard let userdata = ghostty_surface_userdata(surface) else { return nil }
-                return Unmanaged<GhosttyTerminalView>.fromOpaque(userdata).takeUnretainedValue()
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface: ghostty_surface_t = target.target.surface else { return nil }
+                return self.terminalView(from: ghostty_surface_userdata(surface))
             }()
 
             if let terminalView = terminalView {
@@ -443,10 +471,8 @@ extension Ghostty {
         }
 
         static func readClipboard(_ userdata: UnsafeMutableRawPointer?, location: ghostty_clipboard_e, state: UnsafeMutableRawPointer?) {
-            // userdata is the GhosttyTerminalView instance
-            guard let userdata = userdata else { return }
-            let terminalView = Unmanaged<GhosttyTerminalView>.fromOpaque(userdata).takeUnretainedValue()
-            guard let surface = terminalView.surface?.unsafeCValue else { return }
+            guard let terminalView = terminalView(from: userdata),
+                  let surface = terminalView.surface?.unsafeCValue else { return }
 
             // Read from macOS clipboard
             let clipboardString = Clipboard.readString() ?? ""
@@ -497,10 +523,7 @@ extension Ghostty {
         }
 
         static func closeSurface(_ userdata: UnsafeMutableRawPointer?, processAlive: Bool) {
-            // userdata is the GhosttyTerminalView instance
-            guard let userdata = userdata else { return }
-            let terminalView = Unmanaged<GhosttyTerminalView>.fromOpaque(userdata).takeUnretainedValue()
-
+            guard let terminalView = terminalView(from: userdata) else { return }
             Ghostty.logger.info("Close surface: processAlive=\(processAlive)")
 
             // Trigger process exit callback on main thread
