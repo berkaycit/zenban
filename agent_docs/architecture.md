@@ -33,7 +33,7 @@ zenban/
 
 | Component | Purpose |
 |-----------|---------|
-| `BoardStore` | Central state manager. Tracks focusRegion, devServerState FSM, gitChangesCardID. Creates/deletes worktrees. stopOverlays() cleans up on card/board delete. |
+| `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board/Card/Column` | Data models. Board has repositoryPath/agent. Card can override agent. Column has display name/color. |
 | `TerminalManager` | Manages GhosttyTerminalView per card with LRU eviction (max 50). Hibernates on deselect. Auto-launches agent. |
@@ -64,6 +64,6 @@ Board stores DevServerConfig. First run prompts for commands (auto-detected from
 
 ## Keyboard Shortcuts
 
-Cmd+Shift: N (new board), A (new card), D (delete card), S (dev server), X (git changes). Cmd+W closes file tab.
+Cmd+Shift: N (new board), A (new card), D (delete card), S (dev server), X (git changes), F (file browser). Cmd+W closes file tab.
 Shift+Arrow: Up/Down navigates cards/boards, Left/Right moves columns. Enter focuses terminal.
 FocusRegion tracks keyboard focus. NSEvent monitor in zenbanApp for app-wide capture.

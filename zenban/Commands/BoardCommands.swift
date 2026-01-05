@@ -35,6 +35,12 @@ struct BoardCommands: Commands {
             }
             .keyboardShortcut("x", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
+
+            Button("Toggle File Browser") {
+                store.toggleFileBrowser()
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .disabled(store.selectedCardID == nil)
         }
     }
 }

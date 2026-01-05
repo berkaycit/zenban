@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Unify overlay state with OverlayState FSM
+- **Description**: Replaced separate devServerState, gitChangesCardID, and fileBrowserCardID with single OverlayState enum. Overlays are now mutually exclusive - opening one automatically closes others. Added Cmd+Shift+F shortcut for file browser. OverlayState includes cardID and isDevServer helpers for cleaner delete/cleanup logic.
+
 - **Summary**: Migrate GitService from git CLI to libgit2
 - **Description**: GitService now uses libgit2 (native C library via Clibgit2 module) instead of spawning git processes. New Libgit2* files in Services/Git/Libgit2/ wrap C API for repository, branch, commit, diff, remote, status, and worktree operations. SSH authentication via SSHConfigParser for host resolution. Improves performance and reduces process overhead.
 
