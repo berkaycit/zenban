@@ -52,8 +52,9 @@ zenban/
 | `DevServerManager` | Manages dev server processes for cards. Handles setup (npm install), port detection, and WebView preview. Single server at a time with proper cleanup. Output buffer limited to 100KB with throttled UI updates (150ms). |
 | `DevServerSettingsSheet` | Sidebar-accessible sheet for editing board dev server config (setup command, dev command, skip setup toggle). |
 | `TerminalSettingsView` | Terminal settings: font, theme, and session cleanup options. |
-| `GitChangesView` | Board-area view (toggled via Cmd+Shift+X or button) showing diff, branch picker, Commit/Merge/Create PR actions. Loads diffs on-demand when files are expanded. |
-| `DiffContentView` | Split-view diff renderer with async parsing and line limiting (300 lines visible by default). |
+| `GitChangesView` | Board-area view (toggled via Cmd+Shift+X or button) showing file list with diff detail panel. Uses GitDiffViewModel for batch diff loading with LRU caching. Branch picker, Commit/Merge/Create PR actions. |
+| `DiffView` | NSTableView-based diff renderer with lazy line parsing. Scroll tracking, file navigation, copy support. |
+| `GitDiffCache` | Actor-based LRU cache for parsed diff lines. Single-file and batch invalidation. |
 | `DirectoryPicker` | NSOpenPanel wrapper for folder selection |
 
 ## Board Creation

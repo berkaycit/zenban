@@ -2,54 +2,21 @@ import SwiftUI
 
 struct DiffFileRow: View {
     let file: FileChange
-    @Binding var isExpanded: Bool
-    let diffContent: String?
-    var onNeedsDiff: (() -> Void)? = nil
+    let isSelected: Bool
+    let onSelect: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            fileHeaderRow
-
-            if isExpanded {
-                if let diff = diffContent, !diff.isEmpty {
-                    DiffContentView(diffText: diff)
-                        .padding(.top, 1)
-                } else {
-                    HStack {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Loading diff...")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(12)
-                    .onAppear {
-                        onNeedsDiff?()
-                    }
-                }
-            }
-        }
-        .background(Color.secondary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-
-    private var fileHeaderRow: some View {
         HStack(spacing: 8) {
-            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .frame(width: 12)
-
             statusIcon
 
             Text(file.path)
-                .font(.system(.body, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
 
             Spacer()
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 if file.additions > 0 {
                     Text("+\(file.additions)")
                         .font(.caption.monospaced())
@@ -62,13 +29,13 @@ struct DiffFileRow: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isExpanded.toggle()
-            }
+            onSelect()
         }
     }
 

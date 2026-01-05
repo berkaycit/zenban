@@ -5,6 +5,7 @@ struct GitChangesView: View {
     let boardID: UUID
     let onDismiss: () -> Void
     @Environment(BoardStore.self) private var store
+    @StateObject private var diffViewModel: GitDiffViewModel
 
     @State private var branchChanges: [FileChange] = []
     @State private var totalAdditions = 0
@@ -18,17 +19,33 @@ struct GitChangesView: View {
     @State private var showCreatePR = false
     @State private var selectedTargetBranch = "main"
     @State private var availableBranches: [BranchInfo] = []
-    @State private var expandedFiles: Set<String> = []
-    @State private var fileDiffs: [String: String] = [:]
+    @State private var selectedFilePath: String?
     @State private var isMerging = false
 
     // Task handles for cancellation
     @State private var loadChangesTask: Task<Void, any Error>?
     @State private var loadBranchesTask: Task<Void, any Error>?
-    @State private var loadDiffTasks: [String: Task<Void, any Error>] = [:]
 
     private var repositoryPath: String? {
         store.board(for: boardID)?.repositoryPath
+    }
+
+    private var selectedFileChange: FileChange? {
+        guard let selectedFilePath else { return nil }
+        return branchChanges.first { $0.path == selectedFilePath }
+    }
+
+    private var selectedFileFullPath: String? {
+        guard let worktreePath = card.worktreePath,
+              let selectedFilePath else { return nil }
+        return (worktreePath as NSString).appendingPathComponent(selectedFilePath)
+    }
+
+    init(card: Card, boardID: UUID, onDismiss: @escaping () -> Void) {
+        self.card = card
+        self.boardID = boardID
+        self.onDismiss = onDismiss
+        _diffViewModel = StateObject(wrappedValue: GitDiffViewModel(repoPath: card.worktreePath ?? ""))
     }
 
     var body: some View {
@@ -49,13 +66,20 @@ struct GitChangesView: View {
             loadBranches()
             loadChanges()
         }
+        .onChange(of: selectedFilePath) { _, newValue in
+            guard let path = newValue else { return }
+            if diffViewModel.loadedDiffs[path] == nil &&
+                !diffViewModel.loadingFiles.contains(path) {
+                loadDiffForFile(path)
+            }
+        }
         .onDisappear {
             loadChangesTask?.cancel()
             loadBranchesTask?.cancel()
-            for task in loadDiffTasks.values {
-                task.cancel()
+            let loadingFiles = diffViewModel.loadingFiles
+            for file in loadingFiles {
+                diffViewModel.cancelLoad(for: file)
             }
-            loadDiffTasks.removeAll()
         }
         .sheet(isPresented: $showCommit) {
             if let worktreePath = card.worktreePath {
@@ -227,37 +251,142 @@ struct GitChangesView: View {
         }
     }
 
+    private var diffLoadingView: some View {
+        VStack {
+            Spacer()
+            ProgressView()
+                .controlSize(.regular)
+            Text("Loading diff...")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+            Spacer()
+        }
+    }
+
+    private var emptySelectionView: some View {
+        VStack {
+            Spacer()
+            Image(systemName: "doc.text")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("Select a file to view its diff")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+            Spacer()
+        }
+    }
+
+    private var emptyDiffView: some View {
+        VStack {
+            Spacer()
+            Image(systemName: "checkmark.circle")
+                .font(.largeTitle)
+                .foregroundStyle(.green)
+            Text("No changes in this file")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+            Spacer()
+        }
+    }
+
     private var changesListView: some View {
+        HSplitView {
+            changesListPanel
+                .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
+
+            diffDetailPanel
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var changesListPanel: some View {
         VStack(spacing: 0) {
             branchInfoSection
+            Divider()
 
             ScrollView {
-                LazyVStack(spacing: 1) {
+                LazyVStack(spacing: 4) {
                     ForEach(branchChanges) { file in
                         DiffFileRow(
                             file: file,
-                            isExpanded: Binding(
-                                get: { expandedFiles.contains(file.path) },
-                                set: { expanded in
-                                    if expanded {
-                                        expandedFiles.insert(file.path)
-                                    } else {
-                                        expandedFiles.remove(file.path)
-                                    }
-                                }
-                            ),
-                            diffContent: fileDiffs[file.path],
-                            onNeedsDiff: {
-                                // Only load if not already loaded or loading
-                                if fileDiffs[file.path] == nil && loadDiffTasks[file.path] == nil {
-                                    loadDiffForFile(file.path)
-                                }
+                            isSelected: file.path == selectedFilePath,
+                            onSelect: {
+                                selectedFilePath = file.path
                             }
                         )
                     }
                 }
                 .padding(12)
             }
+        }
+    }
+
+    private var diffDetailPanel: some View {
+        VStack(spacing: 0) {
+            diffHeaderSection
+            Divider()
+            diffContentSection
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var diffHeaderSection: some View {
+        HStack(spacing: 8) {
+            if let file = selectedFileChange, let fullPath = selectedFileFullPath {
+                FileIconView(path: fullPath, size: 14)
+                Text(file.path)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    if file.additions > 0 {
+                        Text("+\(file.additions)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.green)
+                    }
+                    if file.deletions > 0 {
+                        Text("-\(file.deletions)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.red)
+                    }
+                }
+            } else {
+                Text("Select a file to view diff")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.05))
+    }
+
+    @ViewBuilder
+    private var diffContentSection: some View {
+        if let file = selectedFileChange {
+            if let lines = diffViewModel.loadedDiffs[file.path] {
+                if lines.isEmpty {
+                    emptyDiffView
+                } else {
+                    DiffView(lines: lines, fontSize: 12, fontFamily: "Menlo")
+                }
+            } else if diffViewModel.loadingFiles.contains(file.path) || diffViewModel.isBatchLoading {
+                diffLoadingView
+            } else {
+                diffLoadingView
+                    .onAppear {
+                        loadDiffForFile(file.path)
+                    }
+            }
+        } else {
+            emptySelectionView
         }
     }
 
@@ -333,15 +462,18 @@ struct GitChangesView: View {
 
         // Cancel existing tasks
         loadChangesTask?.cancel()
-        for task in loadDiffTasks.values {
-            task.cancel()
+        let loadingFiles = diffViewModel.loadingFiles
+        for file in loadingFiles {
+            diffViewModel.cancelLoad(for: file)
         }
-        loadDiffTasks.removeAll()
+        diffViewModel.errors.removeAll()
+        diffViewModel.loadedDiffs.removeAll()
+        Task {
+            await diffViewModel.invalidateCache()
+        }
 
         isLoading = true
         errorMessage = nil
-        fileDiffs = [:]
-        expandedFiles = []
 
         loadChangesTask = Task {
             do {
@@ -370,10 +502,30 @@ struct GitChangesView: View {
                 totalAdditions = branchChanges.reduce(0) { $0 + $1.additions }
                 totalDeletions = branchChanges.reduce(0) { $0 + $1.deletions }
 
-                // Files start collapsed - user expands what they need
-                // expandedFiles already cleared at start of loadChanges()
+                let untrackedFiles = Set(branchChanges.compactMap { change in
+                    change.status == .untracked ? change.path : nil
+                })
+                diffViewModel.updateContext(
+                    targetBranch: selectedTargetBranch,
+                    hasCommittedChanges: hasCommittedChanges,
+                    hasUncommittedChanges: hasUncommittedChanges,
+                    untrackedFiles: untrackedFiles
+                )
+
+                if branchChanges.isEmpty {
+                    selectedFilePath = nil
+                } else if selectedFilePath == nil ||
+                            !branchChanges.contains(where: { $0.path == selectedFilePath }) {
+                    selectedFilePath = branchChanges.first?.path
+                }
 
                 isLoading = false
+
+                // Batch load all diffs in background
+                if !branchChanges.isEmpty {
+                    let filePaths = branchChanges.map { $0.path }
+                    await diffViewModel.loadAllDiffs(for: filePaths)
+                }
             } catch is CancellationError {
                 // Task was cancelled, do nothing
             } catch {
@@ -426,31 +578,8 @@ struct GitChangesView: View {
     }
 
     private func loadDiffForFile(_ path: String) {
-        guard let worktreePath = card.worktreePath else { return }
-
-        // Cancel existing task for this file if any
-        loadDiffTasks[path]?.cancel()
-
-        loadDiffTasks[path] = Task {
-            // Try branch diff first, fall back to uncommitted diff
-            var diff = (try? await GitService.getBranchFileDiff(
-                worktreePath: worktreePath,
-                targetBranch: selectedTargetBranch,
-                file: path
-            )) ?? ""
-
-            // If branch diff is empty and we have uncommitted changes, get uncommitted diff
-            if diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && hasUncommittedChanges {
-                diff = (try? await GitService.getDiff(worktreePath: worktreePath, file: path)) ?? ""
-            }
-
-            guard !Task.isCancelled else {
-                loadDiffTasks.removeValue(forKey: path)
-                return
-            }
-            fileDiffs[path] = diff
-            loadDiffTasks.removeValue(forKey: path)
-        }
+        guard card.worktreePath != nil else { return }
+        diffViewModel.loadDiff(for: path)
     }
 
     private func merge() {

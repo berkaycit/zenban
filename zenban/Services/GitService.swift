@@ -274,6 +274,14 @@ struct GitService {
         return try await runGit(args, in: worktreePath, errorMapper: { .diffFailed($0) })
     }
 
+    static func getUnstagedDiff(worktreePath: String, file: String? = nil) async throws -> String {
+        var args = ["diff"]
+        if let file = file {
+            args += ["--", file]
+        }
+        return try await runGit(args, in: worktreePath, errorMapper: { .diffFailed($0) })
+    }
+
     static func getDiffStats(worktreePath: String) async throws -> [(path: String, additions: Int, deletions: Int)] {
         let output = try await runGit(["diff", "HEAD", "--numstat"], in: worktreePath, errorMapper: { .diffFailed($0) })
         return parseNumstatOutput(output)
