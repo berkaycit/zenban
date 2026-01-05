@@ -377,12 +377,12 @@ struct GitChangesView: View {
                 } else {
                     DiffView(lines: lines, fontSize: 12, fontFamily: "Menlo")
                 }
-            } else if diffViewModel.loadingFiles.contains(file.path) || diffViewModel.isBatchLoading {
-                diffLoadingView
             } else {
                 diffLoadingView
                     .onAppear {
-                        loadDiffForFile(file.path)
+                        if !diffViewModel.loadingFiles.contains(file.path) && !diffViewModel.isBatchLoading {
+                            loadDiffForFile(file.path)
+                        }
                     }
             }
         } else {
@@ -599,11 +599,9 @@ struct GitChangesView: View {
                 isMerging = false
                 loadChanges()
             } catch let gitError as GitError {
-                print("[GitChangesView] Merge failed with GitError: \(gitError)")
                 errorMessage = gitError.errorDescription ?? "Unknown error"
                 isMerging = false
             } catch {
-                print("[GitChangesView] Merge failed with error: \(error)")
                 errorMessage = error.localizedDescription
                 isMerging = false
             }

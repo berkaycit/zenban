@@ -11,7 +11,7 @@ struct DiffLineParser {
     /// Parse a single line at the given index, calculating line numbers by scanning backwards.
     func parseLine(at rawIndex: Int) -> DiffLine {
         guard rawIndex < rawLines.count else {
-            return DiffLine(lineNumber: 0, oldLineNumber: nil, newLineNumber: nil, content: "", type: .context)
+            return .empty
         }
 
         let line = rawLines[rawIndex]

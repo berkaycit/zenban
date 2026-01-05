@@ -47,6 +47,8 @@ nonisolated struct DiffLine: Identifiable, Hashable, Sendable {
 
     var id: Int { lineNumber }
 
+    static let empty = DiffLine(lineNumber: 0, oldLineNumber: nil, newLineNumber: nil, content: "", type: .context)
+
     func hash(into hasher: inout Hasher) {
         hasher.combine(lineNumber)
         hasher.combine(content)

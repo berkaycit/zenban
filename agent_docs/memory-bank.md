@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Migrate GitService from git CLI to libgit2
+- **Description**: GitService now uses libgit2 (native C library via Clibgit2 module) instead of spawning git processes. New Libgit2* files in Services/Git/Libgit2/ wrap C API for repository, branch, commit, diff, remote, status, and worktree operations. SSH authentication via SSHConfigParser for host resolution. Improves performance and reduces process overhead.
+
 - **Summary**: Add batch diff loading and scroll tracking
 - **Description**: GitDiffViewModel now supports batch loading via loadAllDiffs() which fetches all file diffs in a single git call and parses them with DiffParser.splitDiffByFile(). GitDiffCache simplified to store [DiffLine] directly with single-file invalidation. DiffView gains scroll tracking (onFileVisible callback), file navigation (scrollToFile), and onOpenFile callback. GitChangesView uses batch loading after fetching file list for faster diff display.
 

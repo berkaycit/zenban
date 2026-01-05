@@ -359,7 +359,7 @@ struct DiffView: NSViewRepresentable {
 
         func getRow(at index: Int) -> DiffRow {
             guard index < rows.count else {
-                return .line(DiffLine(lineNumber: 0, oldLineNumber: nil, newLineNumber: nil, content: "", type: .context))
+                return .line(.empty)
             }
 
             switch rows[index] {
@@ -367,7 +367,7 @@ struct DiffView: NSViewRepresentable {
                 if let cached = parsedRows[index] {
                     return cached
                 }
-                let parsed = DiffRow.line(lineParser?.parseLine(at: rawIndex) ?? DiffLine(lineNumber: rawIndex, oldLineNumber: nil, newLineNumber: nil, content: "", type: .context))
+                let parsed = DiffRow.line(lineParser?.parseLine(at: rawIndex) ?? .empty)
                 parsedRows[index] = parsed
                 return parsed
             default:

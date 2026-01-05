@@ -1,0 +1,10 @@
+module Clibgit2 [system] {
+    header "git2.h"
+    link "git2"
+    link "ssh2"
+    link "ssl"
+    link "crypto"
+    link "z"
+    link "iconv"
+    export *
+}

@@ -1,4 +1,5 @@
 import Foundation
+import Clibgit2
 
 enum GitError: Error, LocalizedError {
     case initFailed
@@ -14,8 +15,6 @@ enum GitError: Error, LocalizedError {
     case mergeFailed(String)
     case mergeSucceededPushFailed(String)
     case prCreationFailed(String)
-    case ghNotInstalled
-    case ghNotAuthenticated
     case branchListFailed(String)
     case claudeNotInstalled
     case claudeGenerationFailed(String)
@@ -69,10 +68,6 @@ enum GitError: Error, LocalizedError {
             return "Merge completed locally but push failed: \(msg)"
         case .prCreationFailed(let msg):
             return "Failed to create PR: \(msg)"
-        case .ghNotInstalled:
-            return "GitHub CLI (gh) is not installed"
-        case .ghNotAuthenticated:
-            return "GitHub CLI is not authenticated. Run 'gh auth login' first"
         case .branchListFailed(let msg):
             return "Failed to list branches: \(msg)"
         case .claudeNotInstalled:
@@ -87,12 +82,14 @@ struct GitService {
     private struct WorktreePaths {
         let branch: String
         let directory: String
+        let worktreeName: String
 
         init(cardID: UUID, repositoryPath: String) {
             branch = "card/\(cardID.uuidString)"
             let repoParent = (repositoryPath as NSString).deletingLastPathComponent
             let worktreesDir = (repoParent as NSString).appendingPathComponent("repo-worktrees")
             directory = (worktreesDir as NSString).appendingPathComponent(branch)
+            worktreeName = cardID.uuidString
         }
     }
 
@@ -110,7 +107,14 @@ struct GitService {
             throw GitError.directoryCreationFailed
         }
 
-        try await runGit(["init"], in: repoPath, errorMapper: { _ in .initFailed })
+        do {
+            try await runLibgit2 {
+                let repo = try Libgit2Repository(initAt: repoPath)
+                try repo.setHeadSymbolic(refName: "refs/heads/main")
+            }
+        } catch {
+            throw GitError.initFailed
+        }
         return repoPath
     }
 
@@ -125,7 +129,21 @@ struct GitService {
 
         await pruneAndCleanup(paths: paths, repositoryPath: repositoryPath)
 
-        try await runGit(["worktree", "add", "-b", paths.branch, paths.directory], in: repositoryPath, errorMapper: { .worktreeCreationFailed($0) })
+        do {
+            try await runLibgit2 {
+                let repo = try Libgit2Repository(path: repositoryPath)
+                let baseBranch = try repo.currentBranchName()
+                try repo.addWorktree(
+                    name: paths.worktreeName,
+                    path: paths.directory,
+                    branch: paths.branch,
+                    createBranch: true,
+                    baseBranch: baseBranch
+                )
+            }
+        } catch {
+            throw GitError.worktreeCreationFailed(libgit2ErrorMessage(error))
+        }
         return paths.directory
     }
 
@@ -135,210 +153,176 @@ struct GitService {
     }
 
     static func isGitRepository(path: String) -> Bool {
-        let gitPath = (path as NSString).appendingPathComponent(".git")
-        return FileManager.default.fileExists(atPath: gitPath)
+        Libgit2Repository.isRepository(path)
     }
 
     /// Cleans up stale worktree entries, removes worktree registration, deletes branch, and removes directory
     private static func pruneAndCleanup(paths: WorktreePaths, repositoryPath: String) async {
-        try? await runGit(["worktree", "prune"], in: repositoryPath, errorMapper: { _ in .worktreeDeletionFailed("") })
-        try? await runGit(["worktree", "remove", "--force", paths.directory], in: repositoryPath, errorMapper: { _ in .worktreeDeletionFailed("") })
-        try? await runGit(["branch", "-D", paths.branch], in: repositoryPath, errorMapper: { _ in .branchDeletionFailed("") })
+        _ = try? await runLibgit2 {
+            let repo = try Libgit2Repository(path: repositoryPath)
+            try? repo.removeWorktree(name: paths.worktreeName, force: true)
+            try? repo.deleteBranch(name: paths.branch)
+        }
         try? FileManager.default.removeItem(atPath: paths.directory)
     }
 
-    // MARK: - Process Execution
-
-    private static func runProcess(
-        executable: String,
-        args: [String],
-        directory: String,
-        errorMapper: @escaping (String) -> GitError
-    ) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: executable)
-                process.arguments = args
-                process.currentDirectoryURL = URL(fileURLWithPath: directory)
-
-                let outputPipe = Pipe()
-                let errorPipe = Pipe()
-                process.standardOutput = outputPipe
-                process.standardError = errorPipe
-
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-
-                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                    let stdout = String(data: outputData, encoding: .utf8) ?? ""
-                    let stderr = String(data: errorData, encoding: .utf8) ?? ""
-
-                    print("[runProcess] Command: \(executable) \(args.joined(separator: " "))")
-                    print("[runProcess] Exit status: \(process.terminationStatus)")
-                    if !stdout.isEmpty { print("[runProcess] stdout: \(stdout)") }
-                    if !stderr.isEmpty { print("[runProcess] stderr: \(stderr)") }
-
-                    if process.terminationStatus == 0 {
-                        continuation.resume(returning: stdout)
-                    } else {
-                        // Use stderr if available, otherwise use stdout (git sometimes writes errors to stdout)
-                        let errorMsg = stderr.isEmpty ? (stdout.isEmpty ? "Unknown error (exit code: \(process.terminationStatus))" : stdout) : stderr
-                        continuation.resume(throwing: errorMapper(errorMsg))
-                    }
-                } catch {
-                    continuation.resume(throwing: errorMapper(error.localizedDescription))
-                }
-            }
+    private static func libgit2ErrorMessage(_ error: Error) -> String {
+        if let libgit2Error = error as? Libgit2Error {
+            return libgit2Error.errorDescription ?? "Unknown libgit2 error"
         }
+        return error.localizedDescription
     }
 
-    @discardableResult
-    private static func runGit(
-        _ args: [String],
-        in directory: String,
-        errorMapper: @escaping (String) -> GitError
-    ) async throws -> String {
-        try await runProcess(executable: "/usr/bin/git", args: args, directory: directory, errorMapper: errorMapper)
-    }
-
-    private static var ghPath: String? {
-        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first { FileManager.default.fileExists(atPath: $0) }
-    }
-
-    private static func runGh(_ args: [String], in directory: String) async throws -> String {
-        guard let path = ghPath else { throw GitError.ghNotInstalled }
-        return try await runProcess(executable: path, args: args, directory: directory, errorMapper: { .prCreationFailed($0) })
+    private static func runLibgit2<T>(_ work: @escaping () throws -> T) async throws -> T {
+        try await Task.detached(priority: .utility) {
+            try work()
+        }.value
     }
 
     // MARK: - Status & Diff Operations
 
     static func getStatus(worktreePath: String) async throws -> GitStatus {
-        let branch = try await getCurrentBranch(worktreePath: worktreePath)
-        let statusOutput = try await runGit(["status", "--porcelain"], in: worktreePath, errorMapper: { .statusFailed($0) })
-        let diffStats = try await getDiffStats(worktreePath: worktreePath)
+        do {
+            return try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                let status = try repo.status(includeUntracked: true, includeIgnored: false)
+                if status.entries.isEmpty {
+                    let branch = (try repo.currentBranchName()) ?? "HEAD"
+                    return GitStatus(
+                        branch: branch,
+                        filesChanged: [],
+                        totalAdditions: 0,
+                        totalDeletions: 0
+                    )
+                }
 
-        var filesChanged: [FileChange] = []
+                let deltas = try repo.diffHeadToWorkdir(includeUntracked: true)
 
-        // Parse status output
-        for line in statusOutput.split(separator: "\n", omittingEmptySubsequences: true) {
-            let lineStr = String(line)
-            guard lineStr.count >= 3 else { continue }
+                var statsByPath: [String: (additions: Int, deletions: Int)] = [:]
+                for delta in deltas {
+                    let path = delta.newPath ?? delta.oldPath ?? ""
+                    guard !path.isEmpty else { continue }
+                    let current = statsByPath[path] ?? (0, 0)
+                    statsByPath[path] = (
+                        current.additions + delta.additions,
+                        current.deletions + delta.deletions
+                    )
+                }
 
-            let statusChar = lineStr.prefix(2).trimmingCharacters(in: .whitespaces)
-            let filePath = String(lineStr.dropFirst(3))
+                let filesChanged = status.entries.map { entry in
+                    let stats = statsByPath[entry.path] ?? (0, 0)
+                    return FileChange(
+                        path: entry.path,
+                        status: mapLibgit2Status(entry.status),
+                        additions: stats.additions,
+                        deletions: stats.deletions
+                    )
+                }
 
-            let status: FileChange.FileStatus
-            switch statusChar {
-            case "A", "??":
-                status = statusChar == "??" ? .untracked : .added
-            case "M", "MM", " M":
-                status = .modified
-            case "D", " D":
-                status = .deleted
-            case "R":
-                status = .renamed
-            default:
-                status = .modified
+                let totalAdditions = filesChanged.reduce(0) { $0 + $1.additions }
+                let totalDeletions = filesChanged.reduce(0) { $0 + $1.deletions }
+                let branch = (try repo.currentBranchName()) ?? "HEAD"
+
+                return GitStatus(
+                    branch: branch,
+                    filesChanged: filesChanged,
+                    totalAdditions: totalAdditions,
+                    totalDeletions: totalDeletions
+                )
             }
-
-            // Find stats for this file
-            let stats = diffStats.first { $0.path == filePath }
-
-            filesChanged.append(FileChange(
-                path: filePath,
-                status: status,
-                additions: stats?.additions ?? 0,
-                deletions: stats?.deletions ?? 0
-            ))
+        } catch {
+            throw GitError.statusFailed(libgit2ErrorMessage(error))
         }
+    }
 
-        let totalAdditions = filesChanged.reduce(0) { $0 + $1.additions }
-        let totalDeletions = filesChanged.reduce(0) { $0 + $1.deletions }
-
-        return GitStatus(
-            branch: branch,
-            filesChanged: filesChanged,
-            totalAdditions: totalAdditions,
-            totalDeletions: totalDeletions
-        )
+    private static nonisolated func mapLibgit2Status(_ status: Libgit2FileStatus) -> FileChange.FileStatus {
+        if status.isUntracked {
+            return .untracked
+        }
+        if status.contains(.indexNew) || status.contains(.wtNew) {
+            return .added
+        }
+        if status.contains(.indexDeleted) || status.contains(.wtDeleted) {
+            return .deleted
+        }
+        if status.contains(.indexRenamed) || status.contains(.wtRenamed) {
+            return .renamed
+        }
+        return .modified
     }
 
     static func getDiff(worktreePath: String, file: String? = nil) async throws -> String {
-        var args = ["diff", "HEAD"]
-        if let file = file {
-            args += ["--", file]
+        do {
+            return try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                return try repo.diffUnified(pathspec: file)
+            }
+        } catch {
+            throw GitError.diffFailed(libgit2ErrorMessage(error))
         }
-        return try await runGit(args, in: worktreePath, errorMapper: { .diffFailed($0) })
     }
 
     static func getUnstagedDiff(worktreePath: String, file: String? = nil) async throws -> String {
-        var args = ["diff"]
-        if let file = file {
-            args += ["--", file]
-        }
-        return try await runGit(args, in: worktreePath, errorMapper: { .diffFailed($0) })
-    }
-
-    static func getDiffStats(worktreePath: String) async throws -> [(path: String, additions: Int, deletions: Int)] {
-        let output = try await runGit(["diff", "HEAD", "--numstat"], in: worktreePath, errorMapper: { .diffFailed($0) })
-        return parseNumstatOutput(output)
-    }
-
-    private static func parseNumstatOutput(_ output: String) -> [(path: String, additions: Int, deletions: Int)] {
-        output.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
-            let parts = line.split(separator: "\t")
-            guard parts.count >= 3 else { return nil }
-            return (path: String(parts[2]), additions: Int(parts[0]) ?? 0, deletions: Int(parts[1]) ?? 0)
+        do {
+            return try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                return try repo.diffUnstagedUnified(pathspec: file)
+            }
+        } catch {
+            throw GitError.diffFailed(libgit2ErrorMessage(error))
         }
     }
 
     // MARK: - Branch Operations
 
     static func getCurrentBranch(worktreePath: String) async throws -> String {
-        let output = try await runGit(["rev-parse", "--abbrev-ref", "HEAD"], in: worktreePath, errorMapper: { .branchListFailed($0) })
-        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            return try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                return (try repo.currentBranchName()) ?? "HEAD"
+            }
+        } catch {
+            throw GitError.branchListFailed(libgit2ErrorMessage(error))
+        }
     }
 
     static func listBranches(repositoryPath: String, includeRemote: Bool = true) async throws -> [BranchInfo] {
-        var args = ["branch", "--format=%(refname:short)"]
-        if includeRemote { args.append("-a") }
+        do {
+            return try await runLibgit2 {
+                let repo = try Libgit2Repository(path: repositoryPath)
+                let branchType: Libgit2BranchType = includeRemote ? .all : .local
+                let branchInfos = try repo.listBranches(type: branchType, includeUpstreamInfo: false)
+                let currentBranch = (try repo.currentBranchName()) ?? "HEAD"
 
-        let output = try await runGit(args, in: repositoryPath, errorMapper: { .branchListFailed($0) })
-        let currentBranch = try? await getCurrentBranch(worktreePath: repositoryPath)
+                var branches: [BranchInfo] = []
+                for info in branchInfos {
+                    var name = info.name
+                    let isRemote = info.isRemote
 
-        var branches: [BranchInfo] = []
-        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
-            var name = String(line).trimmingCharacters(in: .whitespaces)
-            let isRemote = name.hasPrefix("remotes/") || name.hasPrefix("origin/")
+                    if name.contains("HEAD") { continue }
+                    if name.hasPrefix("card/") { continue }
 
-            // Clean up remote branch names
-            if name.hasPrefix("remotes/origin/") {
-                name = String(name.dropFirst("remotes/origin/".count))
-            } else if name.hasPrefix("origin/") {
-                name = String(name.dropFirst("origin/".count))
+                    if isRemote {
+                        if name.hasPrefix("origin/") {
+                            name = String(name.dropFirst("origin/".count))
+                        }
+                        if name == "origin" { continue }
+                    }
+
+                    if branches.contains(where: { $0.name == name }) { continue }
+
+                    branches.append(BranchInfo(
+                        name: name,
+                        isCurrent: name == currentBranch,
+                        isRemote: isRemote
+                    ))
+                }
+
+                return branches
             }
-
-            // Skip HEAD pointer and origin-only entries
-            if name.contains("HEAD") { continue }
-            if name == "origin" { continue }
-
-            // Skip card branches (worktree branches)
-            if name.hasPrefix("card/") { continue }
-
-            // Skip duplicates (local and remote versions of same branch)
-            if branches.contains(where: { $0.name == name }) { continue }
-
-            branches.append(BranchInfo(
-                name: name,
-                isCurrent: name == currentBranch,
-                isRemote: isRemote
-            ))
+        } catch {
+            throw GitError.branchListFailed(libgit2ErrorMessage(error))
         }
-
-        return branches
     }
 
     // MARK: - AI Commit Message Generation
@@ -371,17 +355,26 @@ struct GitService {
     // MARK: - Commit & Push Operations
 
     static func commitAll(worktreePath: String, message: String) async throws {
-        try await runGit(["add", "-A"], in: worktreePath, errorMapper: { .commitFailed($0) })
-        try await runGit(["commit", "-m", message], in: worktreePath, errorMapper: { .commitFailed($0) })
+        do {
+            try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                try repo.stageAll()
+                _ = try repo.commit(message: message)
+            }
+        } catch {
+            throw GitError.commitFailed(libgit2ErrorMessage(error))
+        }
     }
 
     static func push(worktreePath: String, setUpstream: Bool = false) async throws {
-        var args = ["push"]
-        if setUpstream {
-            let branch = try await getCurrentBranch(worktreePath: worktreePath)
-            args += ["-u", "origin", branch]
+        do {
+            try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                try repo.push(remoteName: "origin", shouldSetUpstream: setUpstream)
+            }
+        } catch {
+            throw GitError.pushFailed(libgit2ErrorMessage(error))
         }
-        try await runGit(args, in: worktreePath, errorMapper: { .pushFailed($0) })
     }
 
     static func commitAndPush(worktreePath: String, message: String) async throws {
@@ -396,84 +389,350 @@ struct GitService {
     // MARK: - Merge Operations
 
     static func merge(worktreePath: String, targetBranch: String, repositoryPath: String) async throws {
-        print("[GitService.merge] Starting merge...")
-        print("[GitService.merge] worktreePath: \(worktreePath)")
-        print("[GitService.merge] targetBranch: \(targetBranch)")
-        print("[GitService.merge] repositoryPath: \(repositoryPath)")
-
-        let worktreeBranch = try await getCurrentBranch(worktreePath: worktreePath)
-        let originalRepoBranch = try await getCurrentBranch(worktreePath: repositoryPath)
-        print("[GitService.merge] worktreeBranch: \(worktreeBranch)")
-        print("[GitService.merge] originalRepoBranch: \(originalRepoBranch)")
-
-        // Checkout and merge with rollback on failure
         do {
-            print("[GitService.merge] Checking out target branch: \(targetBranch)")
-            try await runGit(["checkout", targetBranch], in: repositoryPath, errorMapper: { .mergeFailed($0) })
-            print("[GitService.merge] Checkout successful, now merging \(worktreeBranch)...")
-            try await runGit(["merge", worktreeBranch], in: repositoryPath, errorMapper: { .mergeFailed($0) })
-            print("[GitService.merge] Merge successful")
-        } catch {
-            print("[GitService.merge] Merge failed with error: \(error)")
-            // Abort merge if in progress and restore original branch
-            try? await runGit(["merge", "--abort"], in: repositoryPath, errorMapper: { _ in .mergeFailed("") })
-            try? await runGit(["checkout", originalRepoBranch], in: repositoryPath, errorMapper: { _ in .mergeFailed("") })
-            throw error
-        }
+            try await runLibgit2 {
+                let worktreeRepo = try Libgit2Repository(path: worktreePath)
+                guard let worktreeBranch = try worktreeRepo.currentBranchName() else {
+                    throw Libgit2Error.referenceNotFound("HEAD")
+                }
 
-        // Push separately - merge succeeded, push might fail
-        do {
-            print("[GitService.merge] Pushing to remote...")
-            try await runGit(["push"], in: repositoryPath, errorMapper: { .pushFailed($0) })
-            print("[GitService.merge] Push successful")
+                let repo = try Libgit2Repository(path: repositoryPath)
+                let originalRepoBranch = (try repo.currentBranchName()) ?? worktreeBranch
+
+                var originalHeadOid = git_oid()
+                var hasOriginalHead = false
+                if let ptr = repo.pointer {
+                    var headRef: OpaquePointer?
+                    if git_repository_head(&headRef, ptr) == 0, let h = headRef {
+                        defer { git_reference_free(h) }
+                        if let target = git_reference_target(h) {
+                            originalHeadOid = target.pointee
+                            hasOriginalHead = true
+                        }
+                    }
+                }
+
+                do {
+                    try repo.checkoutBranch(name: targetBranch)
+                    try performMerge(repo: repo, sourceBranch: worktreeBranch)
+                } catch {
+                    if let ptr = repo.pointer {
+                        git_repository_state_cleanup(ptr)
+                        if hasOriginalHead {
+                            var commit: OpaquePointer?
+                            if git_commit_lookup(&commit, ptr, &originalHeadOid) == 0, let c = commit {
+                                defer { git_commit_free(c) }
+                                var opts = git_checkout_options()
+                                git_checkout_options_init(&opts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+                                opts.checkout_strategy = UInt32(GIT_CHECKOUT_FORCE.rawValue)
+                                _ = git_reset(ptr, c, GIT_RESET_HARD, &opts)
+                            }
+                        }
+                    }
+                    try? repo.checkoutBranch(name: originalRepoBranch)
+                    throw error
+                }
+
+                try repo.push(remoteName: "origin")
+            }
+        } catch let error as Libgit2Error {
+            if case .mergeConflict = error {
+                throw GitError.mergeFailed(error.errorDescription ?? "Merge conflict")
+            }
+            throw GitError.mergeFailed(error.errorDescription ?? error.localizedDescription)
         } catch {
-            print("[GitService.merge] Push failed with error: \(error)")
-            throw GitError.mergeSucceededPushFailed(error.localizedDescription)
+            throw GitError.mergeFailed(error.localizedDescription)
         }
     }
 
-    // MARK: - PR Operations (gh CLI)
+    private static nonisolated func performMerge(repo: Libgit2Repository, sourceBranch: String) throws {
+        guard let ptr = repo.pointer else {
+            throw Libgit2Error.notARepository(repo.path)
+        }
 
-    static var isGhInstalled: Bool { ghPath != nil }
+        let sourceRefName = "refs/heads/\(sourceBranch)"
+        var sourceRef: OpaquePointer?
+        let lookupError = git_reference_lookup(&sourceRef, ptr, sourceRefName)
+        guard lookupError == 0, let sRef = sourceRef else {
+            throw Libgit2Error.branchNotFound(sourceBranch)
+        }
+        defer { git_reference_free(sRef) }
 
-    static func isGhAuthenticated() async -> Bool {
-        guard ghPath != nil else { return false }
-        return (try? await runGh(["auth", "status"], in: FileManager.default.currentDirectoryPath)) != nil
+        var annotatedCommit: OpaquePointer?
+        let annotateError = git_annotated_commit_from_ref(&annotatedCommit, ptr, sRef)
+        guard annotateError == 0, let ac = annotatedCommit else {
+            throw Libgit2Error.from(annotateError, context: "annotated commit")
+        }
+        defer { git_annotated_commit_free(ac) }
+
+        var analysis: git_merge_analysis_t = GIT_MERGE_ANALYSIS_NONE
+        var preference: git_merge_preference_t = GIT_MERGE_PREFERENCE_NONE
+
+        var commits: [OpaquePointer?] = [ac]
+        let analysisError = commits.withUnsafeMutableBufferPointer { buffer in
+            git_merge_analysis(&analysis, &preference, ptr, buffer.baseAddress, 1)
+        }
+        guard analysisError == 0 else {
+            throw Libgit2Error.from(analysisError, context: "merge analysis")
+        }
+
+        if analysis.rawValue & GIT_MERGE_ANALYSIS_UP_TO_DATE.rawValue != 0 {
+            return
+        }
+
+        if analysis.rawValue & GIT_MERGE_ANALYSIS_FASTFORWARD.rawValue != 0 {
+            var targetOid = git_oid()
+            let oidError = git_reference_name_to_id(&targetOid, ptr, sourceRefName)
+            guard oidError == 0 else {
+                throw Libgit2Error.from(oidError, context: "get target oid")
+            }
+
+            var targetCommit: OpaquePointer?
+            let commitError = git_commit_lookup(&targetCommit, ptr, &targetOid)
+            guard commitError == 0, let tc = targetCommit else {
+                throw Libgit2Error.from(commitError, context: "commit lookup")
+            }
+            defer { git_commit_free(tc) }
+
+            var tree: OpaquePointer?
+            let treeError = git_commit_tree(&tree, tc)
+            guard treeError == 0, let t = tree else {
+                throw Libgit2Error.from(treeError, context: "get commit tree")
+            }
+            defer { git_tree_free(t) }
+
+            var checkoutOpts = git_checkout_options()
+            git_checkout_options_init(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+            checkoutOpts.checkout_strategy = UInt32(GIT_CHECKOUT_SAFE.rawValue)
+
+            let checkoutError = git_checkout_tree(ptr, t, &checkoutOpts)
+            guard checkoutError == 0 else {
+                throw Libgit2Error.from(checkoutError, context: "checkout tree")
+            }
+
+            let headRef = try repo.head()
+            defer { git_reference_free(headRef) }
+
+            var newRef: OpaquePointer?
+            let setError = git_reference_set_target(&newRef, headRef, &targetOid, "fast-forward")
+            defer { if let r = newRef { git_reference_free(r) } }
+            guard setError == 0 else {
+                throw Libgit2Error.from(setError, context: "update HEAD")
+            }
+
+            return
+        }
+
+        if analysis.rawValue & GIT_MERGE_ANALYSIS_NORMAL.rawValue != 0 {
+            var mergeOpts = git_merge_options()
+            git_merge_options_init(&mergeOpts, UInt32(GIT_MERGE_OPTIONS_VERSION))
+
+            var checkoutOpts = git_checkout_options()
+            git_checkout_options_init(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+            checkoutOpts.checkout_strategy = UInt32(GIT_CHECKOUT_SAFE.rawValue)
+
+            var commits: [OpaquePointer?] = [ac]
+            let mergeError = commits.withUnsafeMutableBufferPointer { buffer in
+                git_merge(ptr, buffer.baseAddress, 1, &mergeOpts, &checkoutOpts)
+            }
+
+            if mergeError != 0 {
+                if mergeError == Int32(GIT_ECONFLICT.rawValue) || mergeError == Int32(GIT_EMERGECONFLICT.rawValue) {
+                    throw Libgit2Error.mergeConflict("Merge conflicts detected. Please resolve manually.")
+                }
+                throw Libgit2Error.from(mergeError, context: "merge")
+            }
+
+            let index = try repo.getIndex()
+            defer { git_index_free(index) }
+
+            if git_index_has_conflicts(index) != 0 {
+                throw Libgit2Error.mergeConflict("Merge conflicts detected. Please resolve manually.")
+            }
+
+            var treeOid = git_oid()
+            let writeError = git_index_write_tree(&treeOid, index)
+            guard writeError == 0 else {
+                throw Libgit2Error.from(writeError, context: "write tree")
+            }
+
+            var tree: OpaquePointer?
+            let treeLookupError = git_tree_lookup(&tree, ptr, &treeOid)
+            guard treeLookupError == 0, let t = tree else {
+                throw Libgit2Error.from(treeLookupError, context: "tree lookup")
+            }
+            defer { git_tree_free(t) }
+
+            let sig = try repo.defaultSignature()
+            defer { git_signature_free(sig) }
+
+            let headRef = try repo.head()
+            defer { git_reference_free(headRef) }
+
+            var headCommit: OpaquePointer?
+            let peelError = git_reference_peel(&headCommit, headRef, GIT_OBJECT_COMMIT)
+            guard peelError == 0, let hc = headCommit else {
+                throw Libgit2Error.from(peelError, context: "peel HEAD")
+            }
+            defer { git_commit_free(hc) }
+
+            guard let sourceOidPtr = git_annotated_commit_id(ac) else {
+                throw Libgit2Error.referenceNotFound(sourceBranch)
+            }
+            var sourceOid = sourceOidPtr.pointee
+            var sourceCommit: OpaquePointer?
+            let sourceLookupError = git_commit_lookup(&sourceCommit, ptr, &sourceOid)
+            guard sourceLookupError == 0, let sc = sourceCommit else {
+                throw Libgit2Error.from(sourceLookupError, context: "source commit lookup")
+            }
+            defer { git_commit_free(sc) }
+
+            var parents: [OpaquePointer?] = [hc, sc]
+            var commitOid = git_oid()
+            let commitError = parents.withUnsafeMutableBufferPointer { buffer in
+                git_commit_create(
+                    &commitOid,
+                    ptr,
+                    "HEAD",
+                    sig,
+                    sig,
+                    nil,
+                    "Merge branch '\(sourceBranch)'",
+                    t,
+                    2,
+                    buffer.baseAddress
+                )
+            }
+            guard commitError == 0 else {
+                throw Libgit2Error.from(commitError, context: "create merge commit")
+            }
+
+            git_repository_state_cleanup(ptr)
+        }
+    }
+
+    // MARK: - PR Operations
+
+    private static var githubToken: String? {
+        let env = ProcessInfo.processInfo.environment
+        return env["GITHUB_TOKEN"] ?? env["GITHUB_PAT"] ?? env["GITHUB_API_TOKEN"]
+    }
+
+    private static func parseGitHubRemote(_ remote: String) -> (owner: String, repo: String)? {
+        if let url = URL(string: remote), let host = url.host, host.contains("github.com") {
+            let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let parts = path.split(separator: "/")
+            guard parts.count >= 2 else { return nil }
+            let owner = String(parts[0])
+            let repo = String(parts[1]).replacingOccurrences(of: ".git", with: "")
+            return (owner, repo)
+        }
+
+        if !remote.contains("://"), let colonIndex = remote.firstIndex(of: ":") {
+            let afterColon = String(remote[remote.index(after: colonIndex)...])
+            let parts = afterColon.split(separator: "/")
+            guard parts.count >= 2 else { return nil }
+            let owner = String(parts[0])
+            let repo = String(parts[1]).replacingOccurrences(of: ".git", with: "")
+            return (owner, repo)
+        }
+
+        return nil
     }
 
     static func createPR(worktreePath: String, config: PRConfig) async throws -> PRResult {
-        guard isGhInstalled else { throw GitError.ghNotInstalled }
-        guard await isGhAuthenticated() else { throw GitError.ghNotAuthenticated }
-
-        var args = ["pr", "create", "--title", config.title, "--base", config.baseBranch, "--body", config.description]
-        if config.isDraft { args.append("--draft") }
-
-        let output = try await runGh(args, in: worktreePath)
-        let url = output.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var prNumber = 0
-        if let range = url.range(of: "/pull/") {
-            prNumber = Int(url[range.upperBound...]) ?? 0
+        guard let token = githubToken else {
+            throw GitError.prCreationFailed("Missing GitHub token. Set GITHUB_TOKEN or GITHUB_PAT.")
         }
-        return PRResult(url: url, number: prNumber)
+
+        let remoteURL = try await runLibgit2 {
+            let repo = try Libgit2Repository(path: worktreePath)
+            let remote = try repo.defaultRemote()
+            return remote?.pushUrl ?? remote?.url
+        }
+
+        guard let remoteURL, let repoInfo = parseGitHubRemote(remoteURL) else {
+            throw GitError.prCreationFailed("Unable to determine GitHub repository from remotes.")
+        }
+
+        let headBranch = try await getCurrentBranch(worktreePath: worktreePath)
+        let url = URL(string: "https://api.github.com/repos/\(repoInfo.owner)/\(repoInfo.repo)/pulls")
+        guard let apiURL = url else {
+            throw GitError.prCreationFailed("Invalid GitHub API URL.")
+        }
+
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "POST"
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("token \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("zenban", forHTTPHeaderField: "User-Agent")
+
+        var body: [String: Any] = [
+            "title": config.title,
+            "head": headBranch,
+            "base": config.baseBranch,
+            "body": config.description
+        ]
+        if config.isDraft {
+            body["draft"] = true
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GitError.prCreationFailed("Invalid response from GitHub.")
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let message = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let errorMessage = message?["message"] as? String ?? "GitHub API returned status \(httpResponse.statusCode)"
+            throw GitError.prCreationFailed(errorMessage)
+        }
+
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let prUrl = json?["html_url"] as? String ?? ""
+        let number = json?["number"] as? Int ?? 0
+        return PRResult(url: prUrl, number: number)
     }
 
     static func generatePRDescription(worktreePath: String) async throws -> String {
-        let output = try await runGit(["log", "main..HEAD", "--pretty=format:- %s"], in: worktreePath, errorMapper: { .diffFailed($0) })
-        return output.isEmpty ? "" : "## Changes\n\n\(output)"
+        let summaries = try await runLibgit2 {
+            let repo = try Libgit2Repository(path: worktreePath)
+            return try repo.commitSummaries(range: "main..HEAD")
+        }
+        guard !summaries.isEmpty else { return "" }
+        let lines = summaries.map { "- \($0)" }.joined(separator: "\n")
+        return "## Changes\n\n\(lines)"
     }
 
     // MARK: - Branch Comparison
 
     /// Get diff between current branch and target branch (for merge/PR)
     static func getBranchDiff(worktreePath: String, targetBranch: String) async throws -> String {
-        try await runGit(["diff", "\(targetBranch)...HEAD"], in: worktreePath, errorMapper: { .diffFailed($0) })
+        do {
+            return try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                return try repo.diffBetweenUnified(base: targetBranch, head: "HEAD")
+            }
+        } catch {
+            throw GitError.diffFailed(libgit2ErrorMessage(error))
+        }
     }
 
     /// Get diff stats between current branch and target branch
     static func getBranchDiffStats(worktreePath: String, targetBranch: String) async throws -> [(path: String, additions: Int, deletions: Int)] {
-        let output = try await runGit(["diff", "\(targetBranch)...HEAD", "--numstat"], in: worktreePath, errorMapper: { .diffFailed($0) })
-        return parseNumstatOutput(output)
+        do {
+            return try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                let deltas = try repo.diffBetween(base: targetBranch, head: "HEAD")
+                return deltas.compactMap { delta in
+                    guard let path = delta.newPath ?? delta.oldPath else { return nil }
+                    return (path: path, additions: delta.additions, deletions: delta.deletions)
+                }
+            }
+        } catch {
+            throw GitError.diffFailed(libgit2ErrorMessage(error))
+        }
     }
 
     /// Get list of changed files between current branch and target branch
@@ -492,12 +751,26 @@ struct GitService {
 
     /// Check if there are uncommitted changes
     static func hasUncommittedChanges(worktreePath: String) async -> Bool {
-        let output = (try? await runGit(["status", "--porcelain"], in: worktreePath, errorMapper: { .statusFailed($0) })) ?? ""
-        return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        do {
+            return try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                let status = try repo.status(includeUntracked: true, includeIgnored: false)
+                return status.hasChanges
+            }
+        } catch {
+            return false
+        }
     }
 
     /// Get file diff between branches
     static func getBranchFileDiff(worktreePath: String, targetBranch: String, file: String) async throws -> String {
-        try await runGit(["diff", "\(targetBranch)...HEAD", "--", file], in: worktreePath, errorMapper: { .diffFailed($0) })
+        do {
+            return try await runLibgit2 {
+                let repo = try Libgit2Repository(path: worktreePath)
+                return try repo.diffBetweenUnified(base: targetBranch, head: "HEAD", pathspec: file)
+            }
+        } catch {
+            throw GitError.diffFailed(libgit2ErrorMessage(error))
+        }
     }
 }
