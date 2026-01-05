@@ -36,6 +36,12 @@ final class TerminalManager {
         pendingCleanup.removeValue(forKey: cardID)
         hibernatedCards.remove(cardID)
 
+        let isRestoringTmuxSession = TmuxSessionManager.shared.isTmuxAvailable()
+            && TmuxSessionManager.shared.sessionExistsSync(paneId: cardID.uuidString)
+        if isRestoringTmuxSession {
+            agentLaunchedForCard.insert(cardID)
+        }
+
         let board = boardStore?.board(for: boardID)
         let card = board?.cards.first { $0.id == cardID }
         let agent = card?.agent ?? board?.agent
@@ -51,7 +57,7 @@ final class TerminalManager {
 
         // Note: Ghostty handles shell startup internally via surface creation
         // We just need to send the agent command when ready
-        // Skip if agent was already launched (e.g., waking from hibernation)
+        // Skip if agent was already launched (e.g., waking from hibernation or restoring tmux)
         if let agentCommand = agentToLaunch?.launchCommand,
            !agentLaunchedForCard.contains(cardID) {
             terminalView.sendWhenReady(agentCommand + "\n")
@@ -125,7 +131,10 @@ final class TerminalManager {
 
     func worktreeReady(cardID: UUID, worktreePath: String, agent: Agent) {
         // Prevent duplicate agent launches
-        guard !agentLaunchedForCard.contains(cardID) else { return }
+        guard !agentLaunchedForCard.contains(cardID) else {
+            pendingWorktreeReady.removeValue(forKey: cardID)
+            return
+        }
 
         // If terminal doesn't exist yet, store for later
         guard let terminalView = terminalViews[cardID] else {
