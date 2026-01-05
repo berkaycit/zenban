@@ -295,7 +295,7 @@ struct GitChangesView: View {
     private var changesListView: some View {
         HSplitView {
             changesListPanel
-                .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
+                .frame(minWidth: 180, idealWidth: 200, maxWidth: 220)
 
             diffDetailPanel
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

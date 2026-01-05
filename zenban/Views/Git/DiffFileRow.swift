@@ -5,11 +5,15 @@ struct DiffFileRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
 
+    private var fileName: String {
+        (file.path as NSString).lastPathComponent
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             statusIcon
 
-            Text(file.path)
+            Text(fileName)
                 .font(.system(size: 12, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
