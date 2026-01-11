@@ -42,7 +42,7 @@ struct DevServerView: View {
     @State private var showConsole = true
     @AppStorage("devServerConsolePosition") private var consolePosition: ConsolePosition = .bottom
     @State private var consoleHeight: CGFloat = 250
-    @State private var consoleWidth: CGFloat = 360
+    @State private var consoleWidth: CGFloat = 320
 
     private let maxRetries = 5
 
