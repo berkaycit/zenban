@@ -409,6 +409,7 @@ struct GitChangesView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
+            .keyboardShortcut("c", modifiers: [.command, .shift])
             .disabled(isMerging || !hasUncommittedChanges)
 
             Button(action: merge) {
@@ -426,11 +427,12 @@ struct GitChangesView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(hasCommittedChanges ? Color.green : Color.green.opacity(0.5))
+                .background(hasCommittedChanges ? Color.buttonGreen : Color.buttonGreen.opacity(0.5))
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
+            .keyboardShortcut("m", modifiers: [.command, .shift])
             .disabled(isMerging || !hasCommittedChanges)
 
             Button(action: { showCreatePR = true }) {

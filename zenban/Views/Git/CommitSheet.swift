@@ -18,6 +18,9 @@ struct CommitSheet: View {
         }
         .padding(24)
         .frame(width: 450)
+        .task {
+            generateWithAI()
+        }
     }
 
     private var headerSection: some View {
@@ -103,10 +106,12 @@ struct CommitSheet: View {
             }
 
             // Buttons
-            HStack {
-                Button("Cancel") {
-                    isPresented = false
+            HStack(spacing: 12) {
+                Button(action: { isPresented = false }) {
+                    Text("Cancel")
+                        .frame(width: 80)
                 }
+                .buttonStyle(ConfirmationButtonStyle(isSelected: true, isDestructive: true))
                 .keyboardShortcut(.cancelAction)
 
                 Spacer()
@@ -119,13 +124,10 @@ struct CommitSheet: View {
                         }
                         Text("Commit")
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(summary.trimmingCharacters(in: .whitespaces).isEmpty ? Color.accentColor.opacity(0.5) : Color.accentColor)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .frame(width: 80)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ConfirmationButtonStyle(isSelected: true, isDestructive: false))
+                .keyboardShortcut(.defaultAction)
                 .disabled(summary.trimmingCharacters(in: .whitespaces).isEmpty || isCommitting)
             }
         }
