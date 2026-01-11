@@ -4,7 +4,7 @@ import AppKit
 struct TerminalSettingsView: View {
     @AppStorage("terminalFontName") private var fontName = "Menlo"
     @AppStorage("terminalFontSize") private var fontSize = 14.0
-    @AppStorage("terminalThemeName") private var themeName = "Apple System Colors"
+    @AppStorage("terminalThemeName") private var themeName = "Obsidian"
     @AppStorage("terminalThemeNameLight") private var themeNameLight = "Builtin Light"
     @AppStorage("terminalUsePerAppearanceTheme") private var usePerAppearanceTheme = false
     @AppStorage("cleanupSessionsOnQuit") private var cleanupSessionsOnQuit = false

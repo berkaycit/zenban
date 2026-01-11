@@ -80,7 +80,7 @@ extension Ghostty {
 
         @AppStorage("terminalFontName") private var terminalFontName = "Menlo"
         @AppStorage("terminalFontSize") private var terminalFontSize = 14.0
-        @AppStorage("terminalThemeName") private var terminalThemeName = "Apple System Colors"
+        @AppStorage("terminalThemeName") private var terminalThemeName = "Obsidian"
         @AppStorage("terminalThemeNameLight") private var terminalThemeNameLight = "Builtin Light"
         @AppStorage("terminalUsePerAppearanceTheme") private var usePerAppearanceTheme = false
 
