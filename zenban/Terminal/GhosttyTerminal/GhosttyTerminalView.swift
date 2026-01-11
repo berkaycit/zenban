@@ -8,6 +8,7 @@
 import AppKit
 import Metal
 import OSLog
+import UniformTypeIdentifiers
 
 /// NSView that embeds a Ghostty terminal surface with Metal rendering
 ///
@@ -126,6 +127,7 @@ class GhosttyTerminalView: NSView {
         setupTrackingArea()
         setupAppearanceObservation()
         setupFrameObservation()
+        registerForDraggedTypes([.fileURL])
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self, !self.isShellReady else { return }
@@ -576,5 +578,54 @@ extension GhosttyTerminalView: NSTextInputClient {
 
     func characterIndex(for point: NSPoint) -> Int {
         return 0
+    }
+}
+
+// MARK: - Drag and Drop
+
+extension GhosttyTerminalView {
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingPasteboard.canReadObject(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) else {
+            return []
+        }
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingPasteboard.canReadObject(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) else {
+            return []
+        }
+        return .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL], !urls.isEmpty else {
+            return false
+        }
+
+        let escapedPaths = urls.map { shellEscapedPath($0.path) }
+        let text = escapedPaths.joined(separator: " ")
+
+        send(text: text)
+        return true
+    }
+
+    private func shellEscapedPath(_ path: String) -> String {
+        let specialChars = CharacterSet(charactersIn: " \t'\"\\$`!#&*()[]{}|;<>?~")
+        if path.unicodeScalars.allSatisfy({ !specialChars.contains($0) }) {
+            return path
+        }
+        let escaped = path.replacingOccurrences(of: "'", with: "'\\''")
+        return "'\(escaped)'"
     }
 }
