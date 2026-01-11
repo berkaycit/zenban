@@ -40,7 +40,7 @@ struct DevServerView: View {
     @State private var webViewError: String?
     @State private var retryCount = 0
     @State private var showConsole = true
-    @AppStorage("devServerConsolePosition") private var consolePosition: ConsolePosition = .bottom
+    @AppStorage("devServerConsolePosition") private var consolePosition: ConsolePosition = .left
     @State private var consoleHeight: CGFloat = 250
     @State private var consoleWidth: CGFloat = 320
 
