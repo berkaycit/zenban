@@ -67,18 +67,20 @@ struct zenbanApp: App {
                 return event
             }
 
-            // Enter to focus terminal (only if terminal doesn't have focus)
+            // Cmd+Shift+Enter to focus terminal (only if terminal doesn't have focus)
+            let enterModifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
             if event.keyCode == 36,
-               !event.modifierFlags.contains(.shift),
+               enterModifiers == [.command, .shift],
                let cardID = store.selectedCardID,
                !terminalManager.isTerminalFocused(for: cardID) {
                 terminalManager.focusTerminal(for: cardID)
                 return nil
             }
 
-            guard event.modifierFlags.contains(.shift) else { return event }
+            let navModifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            guard navModifiers == [.command, .shift] else { return event }
 
-            // Shift+Arrow for navigation
+            // Cmd+Shift+Arrow for navigation
             guard let key = ArrowKey(keyCode: event.keyCode) else {
                 return event
             }
