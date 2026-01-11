@@ -1,5 +1,30 @@
 import SwiftUI
 
+enum ConsolePosition: String {
+    case bottom
+    case left
+
+    var isHorizontal: Bool { self == .bottom }
+
+    var resizeCursor: NSCursor {
+        isHorizontal ? .resizeUpDown : .resizeLeftRight
+    }
+
+    var toggleIcon: String {
+        isHorizontal ? "rectangle.lefthalf.inset.filled" : "rectangle.bottomhalf.inset.filled"
+    }
+
+    var toggleHelp: String {
+        isHorizontal ? "Move to Left" : "Move to Bottom"
+    }
+
+    mutating func toggle() {
+        self = isHorizontal ? .left : .bottom
+    }
+}
+
+private let consoleAnimation = Animation.easeOut(duration: 0.15)
+
 /// Fullscreen overlay view for dev server preview
 struct DevServerView: View {
     let card: Card
@@ -15,9 +40,11 @@ struct DevServerView: View {
     @State private var webViewError: String?
     @State private var retryCount = 0
     @State private var showConsole = true
+    @AppStorage("devServerConsolePosition") private var consolePosition: ConsolePosition = .bottom
+    @State private var consoleHeight: CGFloat = 250
+    @State private var consoleWidth: CGFloat = 360
 
     private let maxRetries = 5
-    private let consoleHeight: CGFloat = 180
 
     var body: some View {
         VStack(spacing: 0) {
@@ -70,7 +97,7 @@ struct DevServerView: View {
                 .buttonStyle(.plain)
                 .disabled(isWebViewLoading)
 
-                Button(action: { withAnimation(.easeOut(duration: 0.15)) { showConsole.toggle() } }) {
+                Button(action: { withAnimation(consoleAnimation) { showConsole.toggle() } }) {
                     Image(systemName: "terminal")
                         .foregroundStyle(showConsole ? .primary : .secondary)
                 }
@@ -188,58 +215,23 @@ struct DevServerView: View {
 
     @ViewBuilder
     private func webViewSection(url: URL) -> some View {
-        VStack(spacing: 0) {
-            ZStack {
-                ReloadableWebView(
-                    url: url,
-                    isLoading: $isWebViewLoading,
-                    reloadTrigger: $reloadTrigger,
-                    onError: { error in
-                        handleWebViewError(error)
-                    },
-                    onConsoleMessage: { message in
-                        devServerManager.addBrowserConsoleMessage(
-                            for: card.id,
-                            level: message.level.rawValue,
-                            message: message.message
-                        )
+        Group {
+            if consolePosition.isHorizontal {
+                VStack(spacing: 0) {
+                    webViewContent(url: url)
+                    if showConsole {
+                        Divider()
+                        consoleSection
                     }
-                )
-
-                if let error = webViewError {
-                    VStack(spacing: 12) {
-                        Image(systemName: "wifi.exclamationmark")
-                            .font(.largeTitle)
-                            .foregroundStyle(.orange)
-                        Text("Connection Error")
-                            .font(.headline)
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-
-                        if retryCount < maxRetries {
-                            Text("Retrying... (\(retryCount + 1)/\(maxRetries))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            retryReconfigureButtons {
-                                retryCount = 0
-                                webViewError = nil
-                                reloadTrigger += 1
-                            }
-                        }
-                    }
-                    .padding(32)
-                    .background(Color.cardBackground.opacity(0.95))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            if showConsole {
-                Divider()
-                consoleSection
+            } else {
+                HStack(spacing: 0) {
+                    if showConsole {
+                        consoleSection
+                        Divider()
+                    }
+                    webViewContent(url: url)
+                }
             }
         }
         .onAppear {
@@ -247,13 +239,107 @@ struct DevServerView: View {
         }
     }
 
+    @ViewBuilder
+    private func webViewContent(url: URL) -> some View {
+        ZStack {
+            ReloadableWebView(
+                url: url,
+                isLoading: $isWebViewLoading,
+                reloadTrigger: $reloadTrigger,
+                onError: { error in
+                    handleWebViewError(error)
+                },
+                onConsoleMessage: { message in
+                    devServerManager.addBrowserConsoleMessage(
+                        for: card.id,
+                        level: message.level.rawValue,
+                        message: message.message
+                    )
+                }
+            )
+
+            if let error = webViewError {
+                VStack(spacing: 12) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.largeTitle)
+                        .foregroundStyle(.orange)
+                    Text("Connection Error")
+                        .font(.headline)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    if retryCount < maxRetries {
+                        Text("Retrying... (\(retryCount + 1)/\(maxRetries))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        retryReconfigureButtons {
+                            retryCount = 0
+                            webViewError = nil
+                            reloadTrigger += 1
+                        }
+                    }
+                }
+                .padding(32)
+                .background(Color.cardBackground.opacity(0.95))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var consoleSection: some View {
-        VStack(spacing: 0) {
+        let mainContent = VStack(spacing: 0) {
             consoleHeader
             consoleContent
         }
-        .frame(height: consoleHeight)
+
+        return Group {
+            if consolePosition.isHorizontal {
+                VStack(spacing: 0) {
+                    resizeHandle
+                    mainContent
+                }
+            } else {
+                HStack(spacing: 0) {
+                    mainContent
+                    resizeHandle
+                }
+            }
+        }
+        .frame(
+            width: consolePosition.isHorizontal ? nil : consoleWidth,
+            height: consolePosition.isHorizontal ? consoleHeight : nil
+        )
         .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+    }
+
+    private var resizeHandle: some View {
+        let isHorizontal = consolePosition.isHorizontal
+
+        return Rectangle()
+            .fill(Color.clear)
+            .frame(width: isHorizontal ? nil : 6, height: isHorizontal ? 6 : nil)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        if isHorizontal {
+                            consoleHeight = max(100, min(500, consoleHeight - value.translation.height))
+                        } else {
+                            consoleWidth = max(200, min(600, consoleWidth + value.translation.width))
+                        }
+                    }
+            )
+            .onHover { hovering in
+                if hovering {
+                    consolePosition.resizeCursor.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
     }
 
     private var consoleHeader: some View {
@@ -267,7 +353,15 @@ struct DevServerView: View {
 
             Spacer()
 
-            Button(action: { withAnimation(.easeOut(duration: 0.15)) { showConsole = false } }) {
+            Button(action: { withAnimation(consoleAnimation) { consolePosition.toggle() } }) {
+                Image(systemName: consolePosition.toggleIcon)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(consolePosition.toggleHelp)
+
+            Button(action: { withAnimation(consoleAnimation) { showConsole = false } }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
