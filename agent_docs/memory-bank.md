@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add browser console capture and structured output lines
+- **Description**: DevServerManager now captures browser console messages (log, warn, error, info, debug) via WebView JS injection. OutputLine struct with OutputSource enum replaces raw string buffers for better error/warning categorization. Separate stdout/stderr pipes with partial line buffering prevent mid-line cuts. DevServerView displays colored output based on source type. WebViewContainer injects console override script and communicates via WKScriptMessageHandler.
+
+- **Summary**: Add drag-and-drop file support to terminal
+- **Description**: GhosttyTerminalView now accepts file drops via NSDraggingDestination protocol. Dropped files have their paths shell-escaped and sent to terminal as text. Supports multiple files, paths with spaces, and special characters. Enables dragging screenshots/files to Claude CLI.
+
 - **Summary**: Unify overlay state with OverlayState FSM
 - **Description**: Replaced separate devServerState, gitChangesCardID, and fileBrowserCardID with single OverlayState enum. Overlays are now mutually exclusive - opening one automatically closes others. Added Cmd+Shift+F shortcut for file browser. OverlayState includes cardID and isDevServer helpers for cleaner delete/cleanup logic.
 

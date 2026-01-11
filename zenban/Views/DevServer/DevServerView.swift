@@ -95,14 +95,14 @@ struct DevServerView: View {
         case .idle:
             loadingView(message: "Initializing...")
 
-        case .runningSetup(let output):
-            outputView(title: "Installing dependencies...", output: output, showSpinner: true)
+        case .runningSetup:
+            outputView(title: "Installing dependencies...", showSpinner: true)
 
-        case .startingServer(let output):
-            outputView(title: "Starting dev server...", output: output, showSpinner: true)
+        case .startingServer:
+            outputView(title: "Starting dev server...", showSpinner: true)
 
-        case .detectingPort(let output):
-            outputView(title: "Waiting for server...", output: output, showSpinner: true)
+        case .detectingPort:
+            outputView(title: "Waiting for server...", showSpinner: true)
 
         case .ready(let url):
             webViewSection(url: url)
@@ -124,8 +124,12 @@ struct DevServerView: View {
         }
     }
 
-    private func outputView(title: String, output: String, showSpinner: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func outputView(title: String, showSpinner: Bool) -> some View {
+        // Observe version for throttled updates
+        let _ = devServerManager.outputVersion[card.id]
+        let lines = devServerManager.outputLinesArray(for: card.id)
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 if showSpinner {
                     ProgressView()
@@ -139,15 +143,22 @@ struct DevServerView: View {
 
             ScrollView {
                 ScrollViewReader { proxy in
-                    Text(output.isEmpty ? "Waiting for output..." : output)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(output.isEmpty ? .secondary : .primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .id("output-bottom")
-                        .onChange(of: output) {
-                            proxy.scrollTo("output-bottom", anchor: .bottom)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if lines.isEmpty {
+                            Text("Waiting for output...")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(lines) { line in
+                                outputLineView(line)
+                            }
                         }
+                    }
+                    .padding(12)
+                    .id("output-bottom")
+                    .onChange(of: devServerManager.outputVersion[card.id]) {
+                        proxy.scrollTo("output-bottom", anchor: .bottom)
+                    }
                 }
             }
             .background(Color.black.opacity(0.05))
@@ -155,6 +166,20 @@ struct DevServerView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
         }
+    }
+
+    private func outputLineView(_ line: OutputLine) -> some View {
+        HStack(spacing: 0) {
+            if !line.prefix.isEmpty {
+                Text(line.prefix)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(lineColor(for: line).opacity(0.7))
+            }
+            Text(line.text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(lineColor(for: line))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -167,6 +192,13 @@ struct DevServerView: View {
                     reloadTrigger: $reloadTrigger,
                     onError: { error in
                         handleWebViewError(error)
+                    },
+                    onConsoleMessage: { message in
+                        devServerManager.addBrowserConsoleMessage(
+                            for: card.id,
+                            level: message.level.rawValue,
+                            message: message.message
+                        )
                     }
                 )
 
@@ -246,26 +278,70 @@ struct DevServerView: View {
     private var consoleContent: some View {
         // Observe version for throttled updates
         let _ = devServerManager.outputVersion[card.id]
-        let output = devServerManager.output(for: card.id)
+        let lines = devServerManager.outputLinesArray(for: card.id)
 
         return ScrollView {
             ScrollViewReader { proxy in
-                Text(output.isEmpty ? "Waiting for output..." : output)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(output.isEmpty ? .secondary : .primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .id("console-bottom")
-                    .onAppear {
-                        proxy.scrollTo("console-bottom", anchor: .bottom)
+                VStack(alignment: .leading, spacing: 0) {
+                    if lines.isEmpty {
+                        Text("Waiting for output...")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(buildAttributedConsoleOutput(lines))
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
                     }
-                    .onChange(of: devServerManager.outputVersion[card.id]) {
-                        proxy.scrollTo("console-bottom", anchor: .bottom)
-                    }
+                }
+                .padding(8)
+                .id("console-bottom")
+                .onAppear {
+                    proxy.scrollTo("console-bottom", anchor: .bottom)
+                }
+                .onChange(of: devServerManager.outputVersion[card.id]) {
+                    proxy.scrollTo("console-bottom", anchor: .bottom)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Build attributed string with colors for all console lines
+    private func buildAttributedConsoleOutput(_ lines: [OutputLine]) -> AttributedString {
+        var result = AttributedString()
+
+        for (index, line) in lines.enumerated() {
+            // Add prefix if present
+            if !line.prefix.isEmpty {
+                var prefix = AttributedString(line.prefix)
+                prefix.foregroundColor = nsColor(for: line).withAlphaComponent(0.7)
+                result.append(prefix)
+            }
+
+            // Add line text
+            var text = AttributedString(line.text)
+            text.foregroundColor = nsColor(for: line)
+            result.append(text)
+
+            // Add newline except for last line
+            if index < lines.count - 1 {
+                result.append(AttributedString("\n"))
+            }
+        }
+
+        return result
+    }
+
+    private func lineColor(for line: OutputLine) -> Color {
+        if line.isError { return .red }
+        if line.isWarning { return .orange }
+        if line.isBrowser { return .cyan }
+        return .primary
+    }
+
+    private func nsColor(for line: OutputLine) -> NSColor {
+        NSColor(lineColor(for: line))
     }
 
     private func errorView(message: String) -> some View {
