@@ -35,6 +35,10 @@ struct DevServerView: View {
         .onDisappear {
             devServerManager.stopServer(for: card.id)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .reloadDevServer)) { _ in
+            devServerManager.clearOutput(for: card.id)
+            reloadTrigger += 1
+        }
     }
 
     // MARK: - Header

@@ -115,6 +115,12 @@ final class DevServerManager {
         outputLines[cardID] ?? []
     }
 
+    /// Clear output lines for a card (used for browser refresh)
+    func clearOutput(for cardID: UUID) {
+        outputLines[cardID] = []
+        outputVersion[cardID] = (outputVersion[cardID] ?? 0) + 1
+    }
+
     /// Add a browser console message to the output
     func addBrowserConsoleMessage(for cardID: UUID, level: String, message: String) {
         let source: OutputSource = switch level {

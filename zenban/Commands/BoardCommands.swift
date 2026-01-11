@@ -30,6 +30,12 @@ struct BoardCommands: Commands {
             .keyboardShortcut("s", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
 
+            Button("Reload Dev Server") {
+                NotificationCenter.default.post(name: .reloadDevServer, object: nil)
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(!store.showDevServer)
+
             Button("Toggle Git Changes") {
                 store.toggleGitChanges()
             }
