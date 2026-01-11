@@ -80,7 +80,7 @@ extension Ghostty {
 
         @AppStorage("terminalFontName") private var terminalFontName = "Menlo"
         @AppStorage("terminalFontSize") private var terminalFontSize = 14.0
-        @AppStorage("terminalThemeName") private var terminalThemeName = "Dracula"
+        @AppStorage("terminalThemeName") private var terminalThemeName = "Apple System Colors"
         @AppStorage("terminalThemeNameLight") private var terminalThemeNameLight = "Builtin Light"
         @AppStorage("terminalUsePerAppearanceTheme") private var usePerAppearanceTheme = false
 
@@ -315,7 +315,7 @@ extension Ghostty {
 
         /// Generate and load config content into a ghostty_config_t
         private func loadConfigIntoGhostty(_ config: ghostty_config_t) {
-            // Create temp config directory and use Ghostty themes
+            // Create temp config directory
             let tempDir = NSTemporaryDirectory()
             let ghosttyConfigDir = (tempDir as NSString).appendingPathComponent(".config/ghostty")
             let configFilePath = (ghosttyConfigDir as NSString).appendingPathComponent("config")
@@ -327,8 +327,11 @@ extension Ghostty {
                 let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
                 let shellName = (shell as NSString).lastPathComponent
 
-                // Create config with font settings, shell integration, and theme
-                let configContent = """
+                // Load theme colors from bundle
+                let themeColors = loadThemeColors(named: effectiveThemeName)
+
+                // Create config with font settings, shell integration, and theme colors
+                var configContent = """
                 font-family = \(terminalFontName)
                 font-size = \(Int(terminalFontSize))
                 window-inherit-font-size = false
@@ -344,8 +347,6 @@ extension Ghostty {
                 # Cursor
                 cursor-style-blink = true
 
-                theme = \(effectiveThemeName)
-
                 # Disable audible bell
                 audible-bell = false
 
@@ -354,23 +355,49 @@ extension Ghostty {
 
                 """
 
+                // Append theme colors directly to config
+                if !themeColors.isEmpty {
+                    configContent += "\n# Theme: \(effectiveThemeName)\n"
+                    configContent += themeColors
+                }
+
                 Ghostty.logger.info("Loading Ghostty theme: \(self.effectiveThemeName)")
 
                 try configContent.write(toFile: configFilePath, atomically: true, encoding: .utf8)
 
                 // Set XDG_CONFIG_HOME to our temp directory
-                // With bundle ID "com.berkaycit.zenban", Ghostty will look for config at:
-                // ~/Library/Application Support/com.berkaycit.zenban/config (won't exist)
-                // So it will use our XDG config only
                 setenv("XDG_CONFIG_HOME", (tempDir as NSString).appendingPathComponent(".config"), 1)
 
                 // Load default files - will load our XDG config
-                // Will NOT load user's Ghostty config (com.mitchellh.ghostty) since bundle ID is different
                 ghostty_config_load_default_files(config)
 
                 Ghostty.logger.info("Loaded Zenban terminal settings - Font: \(self.terminalFontName) \(Int(self.terminalFontSize))pt, Theme: \(self.effectiveThemeName)")
             } catch {
                 Ghostty.logger.warning("Failed to write config: \(error)")
+            }
+        }
+
+        /// Load theme colors from bundle Resources
+        private func loadThemeColors(named themeName: String) -> String {
+            // Themes are copied directly to Resources/ by Xcode
+            guard let resourcePath = Bundle.main.resourcePath else {
+                Ghostty.logger.warning("Could not get bundle resource path")
+                return ""
+            }
+
+            let themePath = (resourcePath as NSString).appendingPathComponent(themeName)
+
+            guard FileManager.default.fileExists(atPath: themePath) else {
+                Ghostty.logger.warning("Theme file not found: \(themePath)")
+                return ""
+            }
+
+            do {
+                let themeContent = try String(contentsOfFile: themePath, encoding: .utf8)
+                return themeContent
+            } catch {
+                Ghostty.logger.warning("Failed to read theme file: \(error)")
+                return ""
             }
         }
 

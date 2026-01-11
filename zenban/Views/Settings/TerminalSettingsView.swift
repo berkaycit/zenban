@@ -4,7 +4,7 @@ import AppKit
 struct TerminalSettingsView: View {
     @AppStorage("terminalFontName") private var fontName = "Menlo"
     @AppStorage("terminalFontSize") private var fontSize = 14.0
-    @AppStorage("terminalThemeName") private var themeName = "Dracula"
+    @AppStorage("terminalThemeName") private var themeName = "Apple System Colors"
     @AppStorage("terminalThemeNameLight") private var themeNameLight = "Builtin Light"
     @AppStorage("terminalUsePerAppearanceTheme") private var usePerAppearanceTheme = false
     @AppStorage("cleanupSessionsOnQuit") private var cleanupSessionsOnQuit = false
@@ -14,8 +14,8 @@ struct TerminalSettingsView: View {
     @State private var clearingSessions = false
 
     private static var themesPath: String? {
-        guard let resourcePath = Bundle.main.resourcePath else { return nil }
-        return (resourcePath as NSString).appendingPathComponent("ghostty/themes")
+        // Themes are copied directly to Resources/ by Xcode (not in ghostty/themes subfolder)
+        return Bundle.main.resourcePath
     }
 
     private func loadSystemFonts() -> [String] {
