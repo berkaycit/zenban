@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Optimize AI commit message generation for large diffs
+- **Description**: generateCommitMessage() now uses smart summarization for large changesets (>200 lines). When threshold exceeded, createSummarizedDiff() builds condensed context: top 30 files listed with +/- stats, top 8 non-binary files fetched in parallel via withTaskGroup, snippets truncated to 300 chars. Binary/generated files (30+ extensions, lock files, .min.js) auto-skipped via shouldSkipFile(). Performance: O(n log n) sort, O(1) dictionary lookup for snippets, array join instead of string concatenation. Timeout reduced from 60s to 30s via new .commitMessage config. Prompt updated to handle both full diff and summarized formats.
+
 - **Summary**: Add browser console capture and structured output lines
 - **Description**: DevServerManager now captures browser console messages (log, warn, error, info, debug) via WebView JS injection. OutputLine struct with OutputSource enum replaces raw string buffers for better error/warning categorization. Separate stdout/stderr pipes with partial line buffering prevent mid-line cuts. DevServerView displays colored output based on source type. WebViewContainer injects console override script and communicates via WKScriptMessageHandler.
 

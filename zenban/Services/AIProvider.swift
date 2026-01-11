@@ -37,6 +37,7 @@ struct AIProviderConfig {
     }
 
     static let `default` = AIProviderConfig()
+    static let commitMessage = AIProviderConfig(timeout: 30)
 }
 
 // MARK: - Errors

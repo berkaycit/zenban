@@ -327,23 +327,131 @@ struct GitService {
 
     // MARK: - AI Commit Message Generation
 
+    private static let binaryExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "ico", "pdf", "webp", "bmp", "tiff",
+        "svg", "woff", "woff2", "ttf", "otf", "eot",
+        "mp3", "mp4", "wav", "ogg", "webm", "avi", "mov",
+        "zip", "tar", "gz", "rar", "7z",
+        "exe", "dll", "so", "dylib", "a",
+        "sqlite", "db"
+    ]
+
+    private static let generatedFilePatterns: Set<String> = [
+        "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Podfile.lock",
+        "Cargo.lock", "Gemfile.lock", "composer.lock"
+    ]
+
+    private static func shouldSkipFile(_ path: String) -> Bool {
+        let filename = (path as NSString).lastPathComponent
+        let ext = (path as NSString).pathExtension.lowercased()
+
+        if binaryExtensions.contains(ext) { return true }
+        if generatedFilePatterns.contains(filename) { return true }
+        if filename.hasSuffix(".min.js") || filename.hasSuffix(".min.css") { return true }
+
+        return false
+    }
+
+    private static func createSummarizedDiff(
+        status: GitStatus,
+        worktreePath: String,
+        maxFilesInList: Int = 30,
+        maxFilesForSnippets: Int = 8,
+        maxCharsPerFile: Int = 300
+    ) async throws -> String {
+        // Sort by change size (most changes first)
+        let sortedFiles = status.filesChanged.sorted {
+            ($0.additions + $0.deletions) > ($1.additions + $1.deletions)
+        }
+
+        // Build output using array (O(n) vs O(n²) for string concatenation)
+        var lines: [String] = []
+        lines.reserveCapacity(maxFilesInList + maxFilesForSnippets + 10)
+
+        lines.append("Changed files (\(status.filesChanged.count) total, +\(status.totalAdditions)/-\(status.totalDeletions)):")
+
+        // List top N files with stats
+        for file in sortedFiles.prefix(maxFilesInList) {
+            lines.append("- \(file.path) (+\(file.additions)/-\(file.deletions))")
+        }
+        if sortedFiles.count > maxFilesInList {
+            lines.append("... and \(sortedFiles.count - maxFilesInList) more files")
+        }
+
+        // Collect files for snippets (stop early once we have enough)
+        var filesForSnippets: [FileChange] = []
+        filesForSnippets.reserveCapacity(maxFilesForSnippets)
+        for file in sortedFiles where filesForSnippets.count < maxFilesForSnippets {
+            if !shouldSkipFile(file.path) {
+                filesForSnippets.append(file)
+            }
+        }
+
+        guard !filesForSnippets.isEmpty else {
+            return lines.joined(separator: "\n")
+        }
+
+        // Fetch diffs in parallel, collect into dictionary for O(1) lookup
+        let snippetDict: [String: String] = await withTaskGroup(of: (String, String?).self) { group in
+            for file in filesForSnippets {
+                group.addTask {
+                    let diff = try? await getDiff(worktreePath: worktreePath, file: file.path)
+                    return (file.path, diff)
+                }
+            }
+
+            var dict: [String: String] = [:]
+            dict.reserveCapacity(filesForSnippets.count)
+            for await (path, diff) in group {
+                if let diff { dict[path] = diff }
+            }
+            return dict
+        }
+
+        // Append snippets in original order
+        lines.append("\nKey changes:")
+        for file in filesForSnippets {
+            guard let diff = snippetDict[file.path] else { continue }
+            let truncated = diff.count > maxCharsPerFile
+                ? String(diff.prefix(maxCharsPerFile)) + "\n..."
+                : diff
+            lines.append("\n--- \(file.path) ---\n\(truncated)")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     static func generateCommitMessage(worktreePath: String) async throws -> CommitMessageResult {
         guard ClaudeService.isAvailable else {
             throw GitError.claudeNotInstalled
         }
 
-        let diff = try await getDiff(worktreePath: worktreePath)
+        let status = try await getStatus(worktreePath: worktreePath)
 
-        guard !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard !status.filesChanged.isEmpty else {
             throw GitError.claudeGenerationFailed("No changes to analyze")
+        }
+
+        // Use line count as threshold for summarization
+        let estimatedLines = status.totalAdditions + status.totalDeletions
+        let threshold = 200
+
+        let context: String
+        if estimatedLines > threshold {
+            context = try await createSummarizedDiff(status: status, worktreePath: worktreePath)
+        } else {
+            context = try await getDiff(worktreePath: worktreePath)
+            guard !context.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw GitError.claudeGenerationFailed("No changes to analyze")
+            }
         }
 
         do {
             let response = try await ClaudeService.generate(
                 prompt: PromptTemplate.commitMessage.template,
-                context: diff,
+                context: context,
                 workingDirectory: worktreePath,
-                config: .default
+                config: .commitMessage
             )
 
             return DefaultCommitMessageParser().parse(response)
