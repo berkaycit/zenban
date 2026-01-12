@@ -541,7 +541,6 @@ struct GitService {
                     throw error
                 }
 
-                try repo.push(remoteName: "origin")
             }
         } catch let error as Libgit2Error {
             if case .mergeConflict = error {
