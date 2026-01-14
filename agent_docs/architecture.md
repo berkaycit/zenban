@@ -13,7 +13,7 @@ zenban/
 │   ├── Card/        # Card display and editing
 │   ├── Git/         # Git changes view, diff display, PR creation
 │   ├── DevServer/   # Dev server preview with WebView
-│   ├── Settings/    # App settings (terminal font, theme)
+│   ├── Settings/    # Unified settings (General, Terminal, Dev Server)
 │   └── Components/  # Reusable UI components
 ├── Terminal/        # Embedded terminal per card
 │   └── GhosttyTerminal/  # Ghostty integration (Metal rendering, input handling)

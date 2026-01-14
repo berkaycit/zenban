@@ -74,26 +74,10 @@ struct TerminalSettingsView: View {
                 Toggle("Use different themes for Light/Dark mode", isOn: $usePerAppearanceTheme)
 
                 if usePerAppearanceTheme {
-                    Picker("Dark Mode Theme", selection: $themeName) {
-                        ForEach(themeNames, id: \.self) { theme in
-                            Text(theme).tag(theme)
-                        }
-                    }
-                    .disabled(themeNames.isEmpty)
-
-                    Picker("Light Mode Theme", selection: $themeNameLight) {
-                        ForEach(themeNames, id: \.self) { theme in
-                            Text(theme).tag(theme)
-                        }
-                    }
-                    .disabled(themeNames.isEmpty)
+                    themePicker("Dark Mode Theme", selection: $themeName)
+                    themePicker("Light Mode Theme", selection: $themeNameLight)
                 } else {
-                    Picker("Theme", selection: $themeName) {
-                        ForEach(themeNames, id: \.self) { theme in
-                            Text(theme).tag(theme)
-                        }
-                    }
-                    .disabled(themeNames.isEmpty)
+                    themePicker("Theme", selection: $themeName)
                 }
             }
 
@@ -127,5 +111,14 @@ struct TerminalSettingsView: View {
                 themeNames = loadThemeNames()
             }
         }
+    }
+
+    private func themePicker(_ title: String, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(themeNames, id: \.self) { theme in
+                Text(theme).tag(theme)
+            }
+        }
+        .disabled(themeNames.isEmpty)
     }
 }

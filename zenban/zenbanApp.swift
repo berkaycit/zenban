@@ -138,6 +138,7 @@ struct zenbanApp: App {
 
         Settings {
             SettingsView()
+                .environment(store)
         }
     }
 
