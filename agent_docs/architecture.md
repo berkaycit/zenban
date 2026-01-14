@@ -23,6 +23,10 @@ zenban/
 └── Extensions/      # Color theme, Notification.Name extensions
 ```
 
+## Layout
+
+ContentView uses NavigationSplitView with three columns: sidebar (board list), content (kanban/overlays), detail (card). Column widths enforced via navigationSplitViewColumnWidth. BoardView centers columns horizontally with top alignment.
+
 ## Data Flow
 
 1. `BoardStore` (@Observable) holds all state

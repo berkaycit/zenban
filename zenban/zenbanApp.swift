@@ -118,6 +118,7 @@ struct zenbanApp: App {
                 .environment(store)
                 .environment(terminalManager)
                 .environment(devServerManager)
+                .navigationTitle("")
                 .onAppear {
                     setupCardDeletionHandler()
                     setupNotifications()
