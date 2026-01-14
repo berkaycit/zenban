@@ -9,8 +9,10 @@ final class FileIconService {
     private let cache = NSCache<NSString, NSImage>()
 
     private init() {
-        cache.countLimit = 500
-        cache.totalCostLimit = 50 * 1024 * 1024
+        // Increased limits for better cache hit rate
+        cache.countLimit = 1000
+        // Cost is calculated as width * height * 4 bytes (RGBA)
+        cache.totalCostLimit = 100 * 1024 * 1024
     }
 
     func icon(forFile filePath: String, size: CGSize) -> NSImage {

@@ -34,7 +34,7 @@ zenban/
 
 | Component | Purpose |
 |-----------|---------|
-| `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. |
+| `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. O(1) board index lookup via lazy cache. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board/Card/Column` | Data models. Board has repositoryPath/agent. Card can override agent. Column has display name/color. |
 | `TerminalManager` | Manages GhosttyTerminalView per card with LRU eviction (max 50). Hibernates on deselect. Auto-launches agent. |
@@ -44,7 +44,7 @@ zenban/
 | `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `DevServerManager` | Dev server processes. Setup (npm install), port detection, WebView preview. 100KB output buffer. |
-| `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). GitDiffViewModel for batch loading with LRU cache. |
+| `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). GitDiffViewModel for batch loading with LRU cache and content hash validation. |
 | `GitHistoryView` | Commit history list with pagination. Uses GitLogService for async loading. |
 | `GitLogService` | Actor for commit history and diff retrieval via libgit2 and ProcessExecutor. |
 | `DiffView` | NSTableView diff renderer with upfront parsing. Scroll tracking, file navigation, copy support. |

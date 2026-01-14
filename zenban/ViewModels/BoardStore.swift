@@ -39,7 +39,9 @@ enum OverlayState: Equatable {
 @MainActor
 @Observable
 final class BoardStore {
-    var boards: [Board] = []
+    var boards: [Board] = [] {
+        didSet { invalidateLookupCache() }
+    }
     var selectedBoardID: UUID?
     var selectedCardID: UUID?
     var draggedCardID: UUID?
@@ -57,6 +59,9 @@ final class BoardStore {
     weak var terminalManager: TerminalManager?
 
     private var saveTask: Task<Void, Never>?
+
+    // O(1) board index cache - invalidated when boards change
+    private var boardIndexCache: [UUID: Int]?
 
     var selectedBoard: Board? {
         boards.first { $0.id == selectedBoardID }
@@ -557,8 +562,22 @@ final class BoardStore {
         }
     }
 
+    // MARK: - O(1) Lookup Cache
+
+    private func invalidateLookupCache() {
+        boardIndexCache = nil
+    }
+
     private func boardIndex(for id: UUID) -> Int? {
-        boards.firstIndex { $0.id == id }
+        if boardIndexCache == nil {
+            var cache: [UUID: Int] = [:]
+            cache.reserveCapacity(boards.count)
+            for (index, board) in boards.enumerated() {
+                cache[board.id] = index
+            }
+            boardIndexCache = cache
+        }
+        return boardIndexCache?[id]
     }
 
     private func cardIndices(cardID: UUID, boardID: UUID) -> (board: Int, card: Int)? {

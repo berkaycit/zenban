@@ -74,7 +74,8 @@ final class GitDiffViewModel: ObservableObject {
 
             guard !Task.isCancelled else { return }
 
-            await self.cache.cacheDiff(lines, for: file)
+            let contentHash = Self.computeDiffHash(lines)
+            await self.cache.cacheDiff(lines, for: file, contentHash: contentHash)
 
             await MainActor.run { [weak self] in
                 guard !Task.isCancelled else { return }
@@ -132,7 +133,8 @@ final class GitDiffViewModel: ObservableObject {
                 let lines = parsedByFile[file] ?? []
                 loadedDiffs[file] = lines
                 if !lines.isEmpty {
-                    await cache.cacheDiff(lines, for: file)
+                    let contentHash = Self.computeDiffHash(lines)
+                    await cache.cacheDiff(lines, for: file, contentHash: contentHash)
                 }
             }
         }
@@ -142,9 +144,23 @@ final class GitDiffViewModel: ObservableObject {
             let lines = await loadUntrackedFileAsDiff(file)
             loadedDiffs[file] = lines
             if !lines.isEmpty {
-                await cache.cacheDiff(lines, for: file)
+                let contentHash = Self.computeDiffHash(lines)
+                await cache.cacheDiff(lines, for: file, contentHash: contentHash)
             }
         }
+    }
+
+    private static func computeDiffHash(_ lines: [DiffLine]) -> String {
+        var hasher = Hasher()
+        hasher.combine(lines.count)
+        // Hash first and last lines for quick validation
+        if let first = lines.first {
+            hasher.combine(first.content)
+        }
+        if let last = lines.last {
+            hasher.combine(last.content)
+        }
+        return String(hasher.finalize())
     }
 
     private func loadBatchDiffOutput() async -> String? {

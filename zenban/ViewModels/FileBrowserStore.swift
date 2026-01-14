@@ -59,6 +59,10 @@ final class FileBrowserStore {
     @ObservationIgnored private let maxOpenFileBytes = 5 * 1024 * 1024
     @ObservationIgnored private let onSessionUpdate: (FileBrowserSessionState) -> Void
 
+    // LRU cache eviction for directory items
+    @ObservationIgnored private var directoryAccessOrder: [String] = []
+    @ObservationIgnored private let maxCachedDirectories = 50
+
     init(
         rootPath: String,
         session: FileBrowserSessionState?,
@@ -82,7 +86,30 @@ final class FileBrowserStore {
     }
 
     func items(for path: String) -> [FileItem] {
-        directoryItems[path] ?? []
+        touchDirectoryCache(path)
+        return directoryItems[path] ?? []
+    }
+
+    // MARK: - LRU Cache Management
+
+    private func touchDirectoryCache(_ path: String) {
+        directoryAccessOrder.removeAll { $0 == path }
+        directoryAccessOrder.append(path)
+    }
+
+    private func evictDirectoryCacheIfNeeded() {
+        guard directoryItems.count > maxCachedDirectories else { return }
+
+        // Find evictable paths (not expanded, not root, not current)
+        let evictable = directoryAccessOrder.filter { path in
+            !expandedPaths.contains(path) && path != rootPath && path != currentPath
+        }
+
+        // Evict oldest evictable entries
+        for path in evictable.prefix(directoryItems.count - maxCachedDirectories) {
+            directoryItems.removeValue(forKey: path)
+            directoryAccessOrder.removeAll { $0 == path }
+        }
     }
 
     func isExpanded(path: String) -> Bool {
@@ -104,7 +131,7 @@ final class FileBrowserStore {
         guard !loadingPaths.contains(path) else { return }
 
         loadingPaths.insert(path)
-        Task.detached {
+        Task.detached(priority: .utility) {
             do {
                 let url = URL(fileURLWithPath: path)
                 let contents = try FileManager.default.contentsOfDirectory(
@@ -134,11 +161,14 @@ final class FileBrowserStore {
 
                 await MainActor.run {
                     self.directoryItems[path] = items
+                    self.touchDirectoryCache(path)
+                    self.evictDirectoryCacheIfNeeded()
                     self.loadingPaths.remove(path)
                 }
             } catch {
                 await MainActor.run {
                     self.directoryItems[path] = []
+                    self.touchDirectoryCache(path)
                     self.loadingPaths.remove(path)
                     self.alert = FileBrowserAlert(message: error.localizedDescription)
                 }

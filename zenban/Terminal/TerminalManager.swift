@@ -16,12 +16,21 @@ final class TerminalManager {
     private var hibernatedCards: Set<UUID> = []
     /// Terminals pending cleanup - kept alive until surface is freed
     private var pendingCleanup: [UUID: GhosttyTerminalView] = [:]
+    /// Tracks scheduled cleanup tasks for proper cancellation
+    private var cleanupTasks: [UUID: Task<Void, Never>] = [:]
     weak var boardStore: BoardStore?
 
     var isTerminalAvailable: Bool { Ghostty.App.shared?.readiness == .ready }
 
     init() {
         _ = Ghostty.App.shared
+    }
+
+    deinit {
+        // Cancel all pending cleanup tasks to prevent leaks
+        for task in cleanupTasks.values {
+            task.cancel()
+        }
     }
 
     func terminalView(for cardID: UUID, boardID: UUID, cardTitle: String) async throws -> GhosttyTerminalView {
@@ -155,6 +164,10 @@ final class TerminalManager {
         for terminalView in terminalViews.values {
             terminalView.terminate()
         }
+        // Cancel all pending cleanup tasks
+        for task in cleanupTasks.values {
+            task.cancel()
+        }
         terminalViews.removeAll()
         scrollViews.removeAll()
         accessOrder.removeAll()
@@ -162,6 +175,7 @@ final class TerminalManager {
         pendingWorktreeReady.removeAll()
         hibernatedCards.removeAll()
         pendingCleanup.removeAll()
+        cleanupTasks.removeAll()
     }
 
     func focusTerminal(for cardID: UUID) {
@@ -265,11 +279,17 @@ final class TerminalManager {
     /// Keep terminal alive temporarily to prevent dangling pointer crash.
     /// The Ghostty surface may still send callbacks before it's fully freed.
     private func scheduleCleanup(_ terminal: GhosttyTerminalView, for cardID: UUID) {
+        // Cancel any existing cleanup task for this card
+        cleanupTasks[cardID]?.cancel()
+
         pendingCleanup[cardID] = terminal
-        Task { @MainActor [weak self] in
+        let task = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
             self?.pendingCleanup.removeValue(forKey: cardID)
+            self?.cleanupTasks.removeValue(forKey: cardID)
         }
+        cleanupTasks[cardID] = task
     }
 
     private func cleanupTerminal(_ terminal: GhosttyTerminalView) {
