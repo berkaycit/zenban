@@ -126,7 +126,12 @@ struct zenbanApp: App {
                     Ghostty.App.shared?.reloadConfig()
                     await TmuxSessionManager.shared.updateConfig()
                 }
+                .onOpenURL { url in
+                    handleZenbanURL(url)
+                }
+                .handlesExternalEvents(preferring: Set(arrayLiteral: "main"), allowing: Set(arrayLiteral: "*"))
         }
+        .handlesExternalEvents(matching: Set(arrayLiteral: "*"))
         .commands {
             BoardCommands(store: store)
         }
@@ -158,6 +163,29 @@ struct zenbanApp: App {
         }
         NotificationService.shared.onAgentResumed = { [store] cardID, boardID in
             store.moveCard(cardID, to: .todo, in: boardID)
+        }
+    }
+
+    /// Handles zenban:// URL scheme for Claude Code task completion notifications
+    private func handleZenbanURL(_ url: URL) {
+        guard url.scheme == "zenban",
+              url.host == "notify",
+              let cardID = store.selectedCardID,
+              let boardID = store.selectedBoardID,
+              let card = store.boards.lazy.flatMap(\.cards).first(where: { $0.id == cardID }) else { return }
+
+        let body = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "body" }?.value ?? "Task completed"
+
+        NotificationService.shared.showNotification(
+            title: card.title,
+            body: body,
+            cardID: cardID,
+            boardID: boardID
+        )
+
+        if card.column == .todo {
+            store.moveCard(cardID, to: .inProgress, in: boardID)
         }
     }
 }

@@ -353,6 +353,9 @@ extension Ghostty {
                 # Custom keybinds
                 keybind = shift+enter=text:\\n
 
+                # Enable desktop notifications (OSC 9/777)
+                desktop-notifications = true
+
                 """
 
                 // Append theme colors directly to config
@@ -490,9 +493,30 @@ extension Ghostty {
                 )
                 return true
 
+            case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
+                let notification = action.action.desktop_notification
+                let title = notification.title.map { String(cString: $0) } ?? "Zenban"
+                let body = notification.body.map { String(cString: $0) } ?? ""
+
+                DispatchQueue.main.async {
+                    guard let terminalView = terminalView,
+                          let cardID = terminalView.cardID,
+                          let boardID = terminalView.boardID else {
+                        Ghostty.logger.warning("Desktop notification received but no card/board context")
+                        return
+                    }
+                    NotificationService.shared.showNotification(
+                        title: title,
+                        body: body,
+                        cardID: cardID,
+                        boardID: boardID
+                    )
+                }
+                return true
+
             default:
-                // Log unhandled actions
-                Ghostty.logger.debug("Action received: \(action.tag.rawValue) on target: \(target.tag.rawValue)")
+                // Unhandled actions
+                Ghostty.logger.debug("Unhandled action: \(action.tag.rawValue)")
                 return false
             }
         }

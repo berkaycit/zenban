@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add Claude Code task completion notifications via URL scheme
+- **Description**: Zenban now receives notifications when Claude Code finishes tasks. Registered `zenban://` URL scheme in Info.plist. Claude Code Stop hook calls `open 'zenban://notify?body=...'` which triggers SwiftUI `.onOpenURL`. Handler shows macOS notification with card title and moves card from To Do to In Review. Also added DESKTOP_NOTIFICATION handler in Ghostty.App for future OSC 9 support.
+
 - **Summary**: Optimize AI commit message generation for large diffs
 - **Description**: generateCommitMessage() now uses smart summarization for large changesets (>200 lines). When threshold exceeded, createSummarizedDiff() builds condensed context: top 30 files listed with +/- stats, top 8 non-binary files fetched in parallel via withTaskGroup, snippets truncated to 300 chars. Binary/generated files (30+ extensions, lock files, .min.js) auto-skipped via shouldSkipFile(). Performance: O(n log n) sort, O(1) dictionary lookup for snippets, array join instead of string concatenation. Timeout reduced from 60s to 30s via new .commitMessage config. Prompt updated to handle both full diff and summarized formats.
 
