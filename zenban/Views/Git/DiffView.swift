@@ -130,9 +130,6 @@ struct DiffView: NSViewRepresentable {
         var lastScrolledFile: String?
 
         private var lastDataHash: Int = 0
-        private var rawLines: [String] = []
-        private var parsedRows: [Int: DiffRow] = [:]
-        private var lineParser: DiffLineParser?
         private var parseTask: Task<ParsedDiffMetadata, Never>?
         private var fileRowIndices: [String: Int] = [:]
         private var rowToFilePath: [Int: String] = [:]
@@ -142,16 +139,14 @@ struct DiffView: NSViewRepresentable {
         enum DiffRow {
             case fileHeader(path: String)
             case line(DiffLine)
-            case lazyLine(rawIndex: Int)
         }
 
         private enum RowKind: Sendable {
             case fileHeader(path: String)
-            case lazyLine(rawIndex: Int)
+            case line(DiffLine)
         }
 
         private struct ParsedDiffMetadata: Sendable {
-            let rawLines: [String]
             let rowKinds: [RowKind]
             let fileRowIndices: [String: Int]
             let rowToFilePath: [Int: String]
@@ -171,7 +166,6 @@ struct DiffView: NSViewRepresentable {
         }
 
         func setupScrollObserver(for scrollView: NSScrollView) {
-            guard scrollObserver == nil else { return }
             scrollObserver = NotificationCenter.default.addObserver(
                 forName: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView,
@@ -268,17 +262,14 @@ struct DiffView: NSViewRepresentable {
                 let parsed = await task.value
                 guard !Task.isCancelled, self.lastDataHash == newHash else { return }
 
-                self.rawLines = parsed.rawLines
-                self.lineParser = DiffLineParser(rawLines: parsed.rawLines)
-                self.parsedRows.removeAll(keepingCapacity: true)
                 self.fileRowIndices = parsed.fileRowIndices
                 self.rowToFilePath = parsed.rowToFilePath
                 self.rows = parsed.rowKinds.map { kind in
                     switch kind {
                     case .fileHeader(let path):
                         return .fileHeader(path: path)
-                    case .lazyLine(let rawIndex):
-                        return .lazyLine(rawIndex: rawIndex)
+                    case .line(let diffLine):
+                        return .line(diffLine)
                     }
                 }
 
@@ -290,41 +281,45 @@ struct DiffView: NSViewRepresentable {
             diffOutput: String,
             showFileHeaders: Bool
         ) -> ParsedDiffMetadata {
-            var rawLines: [String] = []
-            let maxRawLines = 200_000
-            rawLines.reserveCapacity(min(max(128, diffOutput.count / 48), maxRawLines))
-            var didTruncate = false
-
-            diffOutput.enumerateLines { line, stop in
-                if rawLines.count >= maxRawLines {
-                    didTruncate = true
-                    stop = true
-                    return
-                }
-                rawLines.append(line)
-            }
-            if didTruncate {
-                rawLines.append("@@ ... diff view truncated (too many lines) ... @@")
-            }
-
+            let maxLines = 200_000
             var rowKinds: [RowKind] = []
-            rowKinds.reserveCapacity(rawLines.count)
+            rowKinds.reserveCapacity(max(256, diffOutput.count / 48))
 
             var fileRowIndices: [String: Int] = [:]
             var rowToFilePath: [Int: String] = [:]
             var rowIndex = 0
             var currentFilePath: String?
 
-            for (lineIndex, line) in rawLines.enumerated() {
+            var oldLineNum = 0
+            var newLineNum = 0
+            var lineCounter = 0
+
+            diffOutput.enumerateLines { line, stop in
+                if lineCounter >= maxLines {
+                    let truncatedLine = DiffLine(
+                        lineNumber: rowIndex,
+                        oldLineNumber: nil,
+                        newLineNumber: nil,
+                        content: "... diff view truncated (too many lines) ...",
+                        type: .header
+                    )
+                    rowKinds.append(.line(truncatedLine))
+                    stop = true
+                    return
+                }
+                lineCounter += 1
+
                 if line.hasPrefix("diff --git ") {
                     currentFilePath = DiffParser.parseFilePathFromDiffHeader(line)
+                    oldLineNum = 0
+                    newLineNum = 0
                     if showFileHeaders, let path = currentFilePath, !path.isEmpty {
                         fileRowIndices[path] = rowIndex
                         rowKinds.append(.fileHeader(path: path))
                         rowToFilePath[rowIndex] = path
                         rowIndex += 1
                     }
-                    continue
+                    return
                 }
 
                 if line.hasPrefix("--- ") ||
@@ -335,13 +330,86 @@ struct DiffView: NSViewRepresentable {
                     line.hasPrefix("similarity index") ||
                     line.hasPrefix("rename from") ||
                     line.hasPrefix("rename to") {
-                    continue
+                    return
                 }
 
-                guard let firstChar = line.first else { continue }
+                if line.hasPrefix("@@") {
+                    for component in line.split(separator: " ") {
+                        if component.hasPrefix("-") && !component.hasPrefix("---") {
+                            let rangeStr = component.dropFirst()
+                            if let numPart = rangeStr.split(separator: ",").first,
+                               let start = Int(numPart) {
+                                oldLineNum = start - 1
+                            }
+                        } else if component.hasPrefix("+") && !component.hasPrefix("+++") {
+                            let rangeStr = component.dropFirst()
+                            if let numPart = rangeStr.split(separator: ",").first,
+                               let start = Int(numPart) {
+                                newLineNum = start - 1
+                            }
+                        }
+                    }
 
-                if firstChar == "@" || firstChar == "+" || firstChar == "-" || firstChar == " " {
-                    rowKinds.append(.lazyLine(rawIndex: lineIndex))
+                    let diffLine = DiffLine(
+                        lineNumber: rowIndex,
+                        oldLineNumber: nil,
+                        newLineNumber: nil,
+                        content: line,
+                        type: .header
+                    )
+                    rowKinds.append(.line(diffLine))
+                    if let path = currentFilePath {
+                        rowToFilePath[rowIndex] = path
+                    }
+                    rowIndex += 1
+                    return
+                }
+
+                if line.hasPrefix("+") {
+                    newLineNum += 1
+                    let diffLine = DiffLine(
+                        lineNumber: rowIndex,
+                        oldLineNumber: nil,
+                        newLineNumber: String(newLineNum),
+                        content: String(line.dropFirst()),
+                        type: .added
+                    )
+                    rowKinds.append(.line(diffLine))
+                    if let path = currentFilePath {
+                        rowToFilePath[rowIndex] = path
+                    }
+                    rowIndex += 1
+                    return
+                }
+
+                if line.hasPrefix("-") {
+                    oldLineNum += 1
+                    let diffLine = DiffLine(
+                        lineNumber: rowIndex,
+                        oldLineNumber: String(oldLineNum),
+                        newLineNumber: nil,
+                        content: String(line.dropFirst()),
+                        type: .deleted
+                    )
+                    rowKinds.append(.line(diffLine))
+                    if let path = currentFilePath {
+                        rowToFilePath[rowIndex] = path
+                    }
+                    rowIndex += 1
+                    return
+                }
+
+                if line.hasPrefix(" ") {
+                    oldLineNum += 1
+                    newLineNum += 1
+                    let diffLine = DiffLine(
+                        lineNumber: rowIndex,
+                        oldLineNumber: String(oldLineNum),
+                        newLineNumber: String(newLineNum),
+                        content: String(line.dropFirst()),
+                        type: .context
+                    )
+                    rowKinds.append(.line(diffLine))
                     if let path = currentFilePath {
                         rowToFilePath[rowIndex] = path
                     }
@@ -350,29 +418,10 @@ struct DiffView: NSViewRepresentable {
             }
 
             return ParsedDiffMetadata(
-                rawLines: rawLines,
                 rowKinds: rowKinds,
                 fileRowIndices: fileRowIndices,
                 rowToFilePath: rowToFilePath
             )
-        }
-
-        func getRow(at index: Int) -> DiffRow {
-            guard index < rows.count else {
-                return .line(.empty)
-            }
-
-            switch rows[index] {
-            case .lazyLine(let rawIndex):
-                if let cached = parsedRows[index] {
-                    return cached
-                }
-                let parsed = DiffRow.line(lineParser?.parseLine(at: rawIndex) ?? .empty)
-                parsedRows[index] = parsed
-                return parsed
-            default:
-                return rows[index]
-            }
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int {
@@ -382,14 +431,11 @@ struct DiffView: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard row < rows.count else { return nil }
 
-            let resolvedRow = getRow(at: row)
-            switch resolvedRow {
+            switch rows[row] {
             case .fileHeader(let path):
                 return makeFileHeaderCell(path: path, tableView: tableView)
             case .line(let diffLine):
                 return makeLineCell(diffLine: diffLine, tableView: tableView)
-            case .lazyLine:
-                return nil
             }
         }
 
@@ -397,14 +443,11 @@ struct DiffView: NSViewRepresentable {
             guard row < rows.count else { return nil }
             let rowView = DiffNSRowView()
 
-            let resolvedRow = getRow(at: row)
-            switch resolvedRow {
+            switch rows[row] {
             case .fileHeader:
                 rowView.lineType = nil
             case .line(let diffLine):
                 rowView.lineType = diffLine.type
-            case .lazyLine:
-                rowView.lineType = .context
             }
 
             return rowView
@@ -423,14 +466,8 @@ struct DiffView: NSViewRepresentable {
 
         private func makeLineCell(diffLine: DiffLine, tableView: NSTableView) -> NSView {
             let id = NSUserInterfaceItemIdentifier("DiffLine")
-
-            let cell: LineCellView
-            if let existingCell = tableView.makeView(withIdentifier: id, owner: nil) as? LineCellView {
-                cell = existingCell
-            } else {
-                cell = LineCellView(identifier: id)
-            }
-
+            let cell = tableView.makeView(withIdentifier: id, owner: nil) as? LineCellView
+                ?? LineCellView(identifier: id)
             cell.configure(diffLine: diffLine, fontSize: fontSize, fontFamily: fontFamily)
             return cell
         }
@@ -438,16 +475,12 @@ struct DiffView: NSViewRepresentable {
         func selectedCopyText() -> String {
             guard let tableView = tableView else { return "" }
             var lines: [String] = []
-            for rowIndex in tableView.selectedRowIndexes {
-                let row = getRow(at: rowIndex)
-                switch row {
+            for rowIndex in tableView.selectedRowIndexes where rowIndex < rows.count {
+                switch rows[rowIndex] {
                 case .fileHeader(let path):
                     lines.append("--- \(path) ---")
                 case .line(let diffLine):
-                    let marker = diffLine.type.marker
-                    lines.append("\(marker)\(diffLine.content)")
-                case .lazyLine:
-                    break
+                    lines.append("\(diffLine.type.marker)\(diffLine.content)")
                 }
             }
             return lines.joined(separator: "\n")

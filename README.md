@@ -30,3 +30,44 @@ To rebuild libghostty at a specific commit:
 ## Bundle Identifier
 
 `com.berkaycit.zenban`
+
+## Claude Code Integration
+
+Zenban automatically moves cards between columns based on Claude Code activity:
+- **User sends prompt** → Card moves to "To Do"
+- **Claude becomes idle** → Card moves to "In Review"
+
+### Setup
+
+Add the following hooks to your `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "open 'zenban://prompt-submitted'"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "open 'zenban://notify?body=Task%20Completed'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+This requires Zenban to be running for the URL scheme to work.

@@ -72,6 +72,13 @@ nonisolated struct Libgit2DiffDelta: Sendable {
     }
 }
 
+/// Diff statistics
+nonisolated struct Libgit2DiffStats: Sendable {
+    let filesChanged: Int
+    let insertions: Int
+    let deletions: Int
+}
+
 /// Diff operations extension for Libgit2Repository
 nonisolated extension Libgit2Repository {
 

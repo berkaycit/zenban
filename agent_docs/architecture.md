@@ -18,6 +18,7 @@ zenban/
 ├── Terminal/        # Embedded terminal per card
 │   └── GhosttyTerminal/  # Ghostty integration (Metal rendering, input handling)
 ├── Services/        # App-wide services (notifications, git, AI providers)
+├── Utilities/       # Shared helpers (ProcessExecutor, RelativeDateFormatter)
 ├── Commands/        # Menu keyboard shortcuts
 └── Extensions/      # Color theme, Notification.Name extensions
 ```
@@ -43,8 +44,10 @@ zenban/
 | `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `DevServerManager` | Dev server processes. Setup (npm install), port detection, WebView preview. 100KB output buffer. |
-| `GitChangesView` | Board-area view (Cmd+Shift+X). File list + diff panel. GitDiffViewModel for batch loading with LRU cache. |
-| `DiffView` | NSTableView diff renderer with lazy parsing. Scroll tracking, file navigation, copy support. |
+| `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). GitDiffViewModel for batch loading with LRU cache. |
+| `GitHistoryView` | Commit history list with pagination. Uses GitLogService for async loading. |
+| `GitLogService` | Actor for commit history and diff retrieval via libgit2 and ProcessExecutor. |
+| `DiffView` | NSTableView diff renderer with upfront parsing. Scroll tracking, file navigation, copy support. |
 
 ## Board Creation
 

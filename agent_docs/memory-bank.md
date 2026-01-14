@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add Git History tab with fast diff loading
+- **Description**: GitChangesView now has two tabs: Changes and History. History tab shows paginated commit list (GitHistoryView) with diff panel. GitLogService actor fetches commits via libgit2 and diffs via non-blocking ProcessExecutor. DiffView refactored from lazy O(n^2) parsing to upfront O(n) single-pass parsing, eliminating DiffLineParser. New utilities: ProcessExecutor for async subprocess execution, RelativeDateFormatter for date display.
+
 - **Summary**: Add Claude Code task completion notifications via URL scheme
 - **Description**: Zenban now receives notifications when Claude Code finishes tasks. Registered `zenban://` URL scheme in Info.plist. Claude Code Stop hook calls `open 'zenban://notify?body=...'` which triggers SwiftUI `.onOpenURL`. Handler shows macOS notification with card title and moves card from To Do to In Review. Also added DESKTOP_NOTIFICATION handler in Ghostty.App for future OSC 9 support.
 

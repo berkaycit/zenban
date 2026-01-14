@@ -7,6 +7,12 @@ struct GitChangesView: View {
     @Environment(BoardStore.self) private var store
     @StateObject private var diffViewModel: GitDiffViewModel
 
+    private enum GitChangesTab: String, CaseIterable {
+        case changes = "Changes"
+        case history = "History"
+    }
+
+    @State private var selectedTab: GitChangesTab = .changes
     @State private var branchChanges: [FileChange] = []
     @State private var totalAdditions = 0
     @State private var totalDeletions = 0
@@ -21,13 +27,24 @@ struct GitChangesView: View {
     @State private var availableBranches: [BranchInfo] = []
     @State private var selectedFilePath: String?
     @State private var isMerging = false
+    @State private var selectedHistoryCommit: GitCommit?
+    @State private var historyDiffOutput = ""
+    @State private var isHistoryDiffLoading = false
+    @State private var historyDiffError: String?
 
     // Task handles for cancellation
     @State private var loadChangesTask: Task<Void, any Error>?
     @State private var loadBranchesTask: Task<Void, any Error>?
+    @State private var historyDiffTask: Task<Void, Never>?
+
+    private let historyLogService = GitLogService()
 
     private var repositoryPath: String? {
         store.board(for: boardID)?.repositoryPath
+    }
+
+    private var worktreePath: String {
+        card.worktreePath ?? ""
     }
 
     private var selectedFileChange: FileChange? {
@@ -56,8 +73,10 @@ struct GitChangesView: View {
             contentSection
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Divider()
-            footerSection
+            if selectedTab == .changes {
+                Divider()
+                footerSection
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cardBackground)
@@ -73,9 +92,19 @@ struct GitChangesView: View {
                 loadDiffForFile(path)
             }
         }
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue == .history {
+                loadHistoryDiff(for: selectedHistoryCommit)
+            }
+        }
+        .onChange(of: selectedHistoryCommit) { _, newValue in
+            guard selectedTab == .history else { return }
+            loadHistoryDiff(for: newValue)
+        }
         .onDisappear {
             loadChangesTask?.cancel()
             loadBranchesTask?.cancel()
+            historyDiffTask?.cancel()
             let loadingFiles = diffViewModel.loadingFiles
             for file in loadingFiles {
                 diffViewModel.cancelLoad(for: file)
@@ -106,14 +135,18 @@ struct GitChangesView: View {
 
     @ViewBuilder
     private var contentSection: some View {
-        if isLoading {
-            loadingView
-        } else if let error = errorMessage {
-            errorView(error)
-        } else if branchChanges.isEmpty {
-            emptyChangesView
+        if selectedTab == .changes {
+            if isLoading {
+                loadingView
+            } else if let error = errorMessage {
+                errorView(error)
+            } else if branchChanges.isEmpty {
+                emptyChangesView
+            } else {
+                changesListView
+            }
         } else {
-            changesListView
+            historyContentSection
         }
     }
 
@@ -127,36 +160,52 @@ struct GitChangesView: View {
             }
             .buttonStyle(.plain)
 
-            if !branchChanges.isEmpty || !isLoading {
-                Text("\(branchChanges.count) files changed")
-                    .font(.headline)
-
-                HStack(spacing: 4) {
-                    Text("+\(totalAdditions)")
-                        .foregroundStyle(.green)
-                    Text("-\(totalDeletions)")
-                        .foregroundStyle(.red)
+            Picker("View", selection: $selectedTab) {
+                ForEach(GitChangesTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
-                .font(.subheadline.monospaced())
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 180)
 
-                if hasUncommittedChanges {
-                    Text("(uncommitted)")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+            if selectedTab == .changes {
+                if !branchChanges.isEmpty || !isLoading {
+                    Text("\(branchChanges.count) files changed")
+                        .font(.headline)
+
+                    HStack(spacing: 4) {
+                        Text("+\(totalAdditions)")
+                            .foregroundStyle(.green)
+                        Text("-\(totalDeletions)")
+                            .foregroundStyle(.red)
+                    }
+                    .font(.subheadline.monospaced())
+
+                    if hasUncommittedChanges {
+                        Text("(uncommitted)")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } else {
+                    Text("Changes")
+                        .font(.headline)
                 }
             } else {
-                Text("Changes")
+                Text("History")
                     .font(.headline)
             }
 
             Spacer()
 
-            Button(action: { loadChanges() }) {
-                Image(systemName: "arrow.clockwise")
-                    .foregroundStyle(.secondary)
+            if selectedTab == .changes {
+                Button(action: { loadChanges() }) {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
             }
-            .buttonStyle(.plain)
-            .disabled(isLoading)
         }
         .padding(16)
     }
@@ -390,6 +439,105 @@ struct GitChangesView: View {
         }
     }
 
+    // MARK: - History Views
+
+    private var historyContentSection: some View {
+        HSplitView {
+            GitHistoryView(
+                worktreePath: worktreePath,
+                selectedCommit: selectedHistoryCommit,
+                onSelectCommit: { commit in
+                    selectedHistoryCommit = commit
+                }
+            )
+            .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+
+            historyDiffPanel
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var historyDiffPanel: some View {
+        VStack(spacing: 0) {
+            historyDiffHeader
+            Divider()
+            historyDiffContentSection
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var historyDiffHeader: some View {
+        HStack(spacing: 8) {
+            if let commit = selectedHistoryCommit {
+                Text(commit.shortHash)
+                    .font(.caption.monospaced())
+
+                Text(commit.message)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer()
+
+                Text(commit.relativeDate)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Working Changes")
+                    .font(.caption)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.05))
+    }
+
+    @ViewBuilder
+    private var historyDiffContentSection: some View {
+        if isHistoryDiffLoading {
+            diffLoadingView
+        } else if let error = historyDiffError {
+            historyErrorView(error)
+        } else if historyDiffOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            historyEmptyDiffView
+        } else {
+            DiffView(diffOutput: historyDiffOutput, fontSize: 12, fontFamily: "Menlo")
+        }
+    }
+
+    private var historyEmptyDiffView: some View {
+        VStack {
+            Spacer()
+            Image(systemName: "checkmark.circle")
+                .font(.largeTitle)
+                .foregroundStyle(.green)
+            Text("No diff to display")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+            Spacer()
+        }
+    }
+
+    private func historyErrorView(_ error: String) -> some View {
+        VStack {
+            Spacer()
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle)
+                .foregroundStyle(.orange)
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding()
+            Button("Retry") {
+                loadHistoryDiff(for: selectedHistoryCommit)
+            }
+            Spacer()
+        }
+    }
+
     // MARK: - Footer
 
     private var footerSection: some View {
@@ -584,6 +732,34 @@ struct GitChangesView: View {
         diffViewModel.loadDiff(for: path)
     }
 
+    private func loadHistoryDiff(for commit: GitCommit?) {
+        let path = worktreePath
+        guard !path.isEmpty else { return }
+
+        historyDiffTask?.cancel()
+        historyDiffError = nil
+        isHistoryDiffLoading = true
+        historyDiffOutput = ""
+
+        historyDiffTask = Task {
+            do {
+                let output = if let commit {
+                    try await historyLogService.getCommitDiff(hash: commit.id, at: path)
+                } else {
+                    try await GitService.getDiff(worktreePath: path)
+                }
+
+                guard !Task.isCancelled else { return }
+                historyDiffOutput = output
+                isHistoryDiffLoading = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                historyDiffError = error.localizedDescription
+                isHistoryDiffLoading = false
+            }
+        }
+    }
+
     private func merge() {
         guard let worktreePath = card.worktreePath,
               let repoPath = repositoryPath else { return }
@@ -592,20 +768,18 @@ struct GitChangesView: View {
         errorMessage = nil
 
         Task {
+            defer { isMerging = false }
             do {
                 try await GitService.merge(
                     worktreePath: worktreePath,
                     targetBranch: selectedTargetBranch,
                     repositoryPath: repoPath
                 )
-                isMerging = false
                 loadChanges()
             } catch let gitError as GitError {
                 errorMessage = gitError.errorDescription ?? "Unknown error"
-                isMerging = false
             } catch {
                 errorMessage = error.localizedDescription
-                isMerging = false
             }
         }
     }
