@@ -12,7 +12,7 @@ struct BoardView: View {
             }
         }
         .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.boardBackground)
         .dropDestination(for: Card.self) { _, _ in
             store.draggedCardID = nil
