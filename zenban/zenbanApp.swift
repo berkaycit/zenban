@@ -166,26 +166,45 @@ struct zenbanApp: App {
         }
     }
 
-    /// Handles zenban:// URL scheme for Claude Code task completion notifications
+    /// Handles zenban:// URL scheme for Claude Code hooks
     private func handleZenbanURL(_ url: URL) {
-        guard url.scheme == "zenban",
-              url.host == "notify",
-              let cardID = store.selectedCardID,
-              let boardID = store.selectedBoardID,
-              let card = store.boards.lazy.flatMap(\.cards).first(where: { $0.id == cardID }) else { return }
+        switch url.host {
+        case "prompt-submitted":
+            guard let cardID = store.selectedCardID,
+                  let boardID = store.selectedBoardID,
+                  let card = store.card(id: cardID) else { return }
 
-        let body = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?.first { $0.name == "body" }?.value ?? "Task completed"
+            store.activeAgentCardID = cardID
+            store.activeAgentBoardID = boardID
 
-        NotificationService.shared.showNotification(
-            title: card.title,
-            body: body,
-            cardID: cardID,
-            boardID: boardID
-        )
+            if card.column != .todo {
+                store.moveCard(cardID, to: .todo, in: boardID)
+            }
 
-        if card.column == .todo {
-            store.moveCard(cardID, to: .inProgress, in: boardID)
+        case "notify":
+            guard let cardID = store.activeAgentCardID,
+                  let boardID = store.activeAgentBoardID,
+                  let card = store.card(id: cardID) else { return }
+
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            let body = components?.queryItems?.first { $0.name == "body" }?.value ?? "Task completed"
+
+            NotificationService.shared.showNotification(
+                title: card.title,
+                body: body,
+                cardID: cardID,
+                boardID: boardID
+            )
+
+            if card.column == .todo {
+                store.moveCard(cardID, to: .inProgress, in: boardID)
+            }
+
+            store.activeAgentCardID = nil
+            store.activeAgentBoardID = nil
+
+        default:
+            break
         }
     }
 }

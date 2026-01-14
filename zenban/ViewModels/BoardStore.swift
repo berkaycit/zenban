@@ -48,6 +48,10 @@ final class BoardStore {
     // Unified overlay state (FSM)
     var overlayState: OverlayState = .none
 
+    // Tracks which card has an active Claude Code session
+    var activeAgentCardID: UUID?
+    var activeAgentBoardID: UUID?
+
     var onCardDeleted: ((UUID) -> Void)?
     weak var terminalManager: TerminalManager?
 
@@ -64,6 +68,10 @@ final class BoardStore {
     var selectedCard: Card? {
         guard let cardID = selectedCardID else { return nil }
         return selectedBoard?.cards.first { $0.id == cardID }
+    }
+
+    func card(id: UUID) -> Card? {
+        boards.lazy.flatMap(\.cards).first { $0.id == id }
     }
 
     // MARK: - Dev Server Computed Properties
