@@ -92,6 +92,10 @@ final class GitDiffViewModel: ObservableObject {
         loadingFiles.remove(file)
     }
 
+    func unloadDiff(for file: String) {
+        loadedDiffs.removeValue(forKey: file)
+    }
+
     func invalidateCache() async {
         await cache.invalidateAll()
         loadedDiffs.removeAll()

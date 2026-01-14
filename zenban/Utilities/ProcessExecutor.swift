@@ -19,17 +19,11 @@ nonisolated struct ProcessResult: Sendable {
 /// Error types for process execution
 enum ProcessExecutorError: Error, LocalizedError {
     case executionFailed(String)
-    case invalidExecutable(String)
-    case timeout
 
     var errorDescription: String? {
         switch self {
         case .executionFailed(let message):
             return "Process execution failed: \(message)"
-        case .invalidExecutable(let path):
-            return "Invalid executable: \(path)"
-        case .timeout:
-            return "Process execution timed out"
         }
     }
 }

@@ -14,19 +14,40 @@ final class FileIconService {
     }
 
     func icon(forFile filePath: String, size: CGSize) -> NSImage {
-        let cacheKey = "\(filePath)_\(Int(size.width))x\(Int(size.height))" as NSString
+        let sizeKey = "\(Int(size.width))x\(Int(size.height))"
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: filePath, isDirectory: &isDirectory)
+        let isDir = exists && isDirectory.boolValue
+
+        let cacheKey: NSString
+        if isDir {
+            cacheKey = "folder_\(sizeKey)" as NSString
+        } else {
+            let ext = (filePath as NSString).pathExtension.lowercased()
+            let nameKey = ext.isEmpty ? (filePath as NSString).lastPathComponent.lowercased() : ext
+            cacheKey = "\(nameKey)_\(sizeKey)" as NSString
+        }
 
         if let cached = cache.object(forKey: cacheKey) {
             return cached
         }
 
-        let icon = FileManager.default.fileExists(atPath: filePath)
-            ? NSWorkspace.shared.icon(forFile: filePath)
-            : NSWorkspace.shared.icon(for: .data)
+        let icon: NSImage
+        if isDir {
+            icon = NSWorkspace.shared.icon(for: .folder)
+        } else {
+            let ext = (filePath as NSString).pathExtension.lowercased()
+            if let type = UTType(filenameExtension: ext) {
+                icon = NSWorkspace.shared.icon(for: type)
+            } else if exists {
+                icon = NSWorkspace.shared.icon(forFile: filePath)
+            } else {
+                icon = NSWorkspace.shared.icon(for: .data)
+            }
+        }
 
         let resizedIcon = icon.resized(to: size)
-        let cost = Int(size.width * size.height * 4)
-        cache.setObject(resizedIcon, forKey: cacheKey, cost: cost)
+        cache.setObject(resizedIcon, forKey: cacheKey, cost: Int(size.width * size.height * 4))
         return resizedIcon
     }
 }

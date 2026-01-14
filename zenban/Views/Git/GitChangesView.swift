@@ -85,7 +85,13 @@ struct GitChangesView: View {
             loadBranches()
             loadChanges()
         }
-        .onChange(of: selectedFilePath) { _, newValue in
+        .onChange(of: selectedFilePath) { oldValue, newValue in
+            if let oldValue, oldValue != newValue {
+                if diffViewModel.loadingFiles.contains(oldValue) {
+                    diffViewModel.cancelLoad(for: oldValue)
+                }
+                diffViewModel.unloadDiff(for: oldValue)
+            }
             guard let path = newValue else { return }
             if diffViewModel.loadedDiffs[path] == nil &&
                 !diffViewModel.loadingFiles.contains(path) {
@@ -139,7 +145,7 @@ struct GitChangesView: View {
             if isLoading {
                 loadingView
             } else if let error = errorMessage {
-                errorView(error)
+                errorView(error) { loadChanges() }
             } else if branchChanges.isEmpty {
                 emptyChangesView
             } else {
@@ -266,7 +272,7 @@ struct GitChangesView: View {
         }
     }
 
-    private func errorView(_ error: String) -> some View {
+    private func errorView(_ error: String, onRetry: @escaping () -> Void) -> some View {
         VStack {
             Spacer()
             Image(systemName: "exclamationmark.triangle")
@@ -277,9 +283,7 @@ struct GitChangesView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding()
-            Button("Retry") {
-                loadChanges()
-            }
+            Button("Retry", action: onRetry)
             Spacer()
         }
     }
@@ -327,13 +331,13 @@ struct GitChangesView: View {
         }
     }
 
-    private var emptyDiffView: some View {
+    private func noDiffView(_ message: String) -> some View {
         VStack {
             Spacer()
             Image(systemName: "checkmark.circle")
                 .font(.largeTitle)
                 .foregroundStyle(.green)
-            Text("No changes in this file")
+            Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
@@ -422,7 +426,7 @@ struct GitChangesView: View {
         if let file = selectedFileChange {
             if let lines = diffViewModel.loadedDiffs[file.path] {
                 if lines.isEmpty {
-                    emptyDiffView
+                    noDiffView("No changes in this file")
                 } else {
                     DiffView(lines: lines, fontSize: 12, fontFamily: "Menlo")
                 }
@@ -498,43 +502,11 @@ struct GitChangesView: View {
         if isHistoryDiffLoading {
             diffLoadingView
         } else if let error = historyDiffError {
-            historyErrorView(error)
+            errorView(error) { loadHistoryDiff(for: selectedHistoryCommit) }
         } else if historyDiffOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            historyEmptyDiffView
+            noDiffView("No diff to display")
         } else {
             DiffView(diffOutput: historyDiffOutput, fontSize: 12, fontFamily: "Menlo")
-        }
-    }
-
-    private var historyEmptyDiffView: some View {
-        VStack {
-            Spacer()
-            Image(systemName: "checkmark.circle")
-                .font(.largeTitle)
-                .foregroundStyle(.green)
-            Text("No diff to display")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
-            Spacer()
-        }
-    }
-
-    private func historyErrorView(_ error: String) -> some View {
-        VStack {
-            Spacer()
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-                .foregroundStyle(.orange)
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding()
-            Button("Retry") {
-                loadHistoryDiff(for: selectedHistoryCommit)
-            }
-            Spacer()
         }
     }
 
@@ -671,11 +643,6 @@ struct GitChangesView: View {
 
                 isLoading = false
 
-                // Batch load all diffs in background
-                if !branchChanges.isEmpty {
-                    let filePaths = branchChanges.map { $0.path }
-                    await diffViewModel.loadAllDiffs(for: filePaths)
-                }
             } catch is CancellationError {
                 // Task was cancelled, do nothing
             } catch {

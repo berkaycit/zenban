@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 enum FocusRegion {
     case sidebar
@@ -592,10 +593,14 @@ final class BoardStore {
 
     private func scheduleSave() {
         saveTask?.cancel()
-        saveTask = Task {
+        saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            BoardStorage.save(boards)
+            guard let self else { return }
+            let snapshot = self.boards
+            DispatchQueue.global(qos: .utility).async {
+                BoardStorage.save(snapshot)
+            }
         }
     }
 }
