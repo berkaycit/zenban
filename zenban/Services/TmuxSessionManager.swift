@@ -316,7 +316,9 @@ actor TmuxSessionManager {
         let sessionName = sessionPrefix + paneId
         let escapedDir = workingDirectory.replacingOccurrences(of: "'", with: "'\\''")
 
-        return "\(tmux) -f '\(configPath)' new-session -A -s \(sessionName) -c '\(escapedDir)'"
+        // -e ZENBAN_TERMINAL=1 sets env var to identify terminals running inside zenban
+        // This allows Claude Code hooks to detect if they're running from zenban or external terminal
+        return "\(tmux) -f '\(configPath)' new-session -A -s \(sessionName) -c '\(escapedDir)' -e ZENBAN_TERMINAL=1"
     }
 }
 

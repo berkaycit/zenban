@@ -76,6 +76,12 @@ class GhosttyRenderingSetup {
         // Set font size from Aizen settings
         surfaceConfig.font_size = Float(terminalFontSize)
 
+        // Set ZENBAN_TERMINAL env var to identify terminals running inside zenban
+        // This allows Claude Code hooks to detect if they're running from zenban or external terminal
+        let envVarKey = strdup("ZENBAN_TERMINAL")!
+        let envVarValue = strdup("1")!
+        var envVar = ghostty_env_var_s(key: envVarKey, value: envVarValue)
+
         // Set working directory
         var workingDirPtr: UnsafeMutablePointer<CChar>?
         var initialInputPtr: UnsafeMutablePointer<CChar>?
@@ -116,22 +122,31 @@ class GhosttyRenderingSetup {
             }
         }
 
-        defer {
-            if let wd = workingDirPtr {
-                free(wd)
-            }
-            if let input = initialInputPtr {
-                free(input)
-            }
-            if let cmd = commandPtr {
-                free(cmd)
-            }
+        // Set environment variables (must be done with withUnsafeMutablePointer for pointer stability)
+        let cSurface: ghostty_surface_t? = withUnsafeMutablePointer(to: &envVar) { envPtr in
+            surfaceConfig.env_vars = envPtr
+            surfaceConfig.env_var_count = 1
+
+            // Create the surface
+            // NOTE: subprocess spawns during ghostty_surface_new, so size warnings may appear
+            // if view frame isn't set yet - this is unavoidable with current API
+            return ghostty_surface_new(ghosttyApp, &surfaceConfig)
         }
 
-        // Create the surface
-        // NOTE: subprocess spawns during ghostty_surface_new, so size warnings may appear
-        // if view frame isn't set yet - this is unavoidable with current API
-        guard let cSurface = ghostty_surface_new(ghosttyApp, &surfaceConfig) else {
+        // Clean up allocated strings
+        free(envVarKey)
+        free(envVarValue)
+        if let wd = workingDirPtr {
+            free(wd)
+        }
+        if let input = initialInputPtr {
+            free(input)
+        }
+        if let cmd = commandPtr {
+            free(cmd)
+        }
+
+        guard let cSurface else {
             Self.logger.error("ghostty_surface_new failed")
             return nil
         }
