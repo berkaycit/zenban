@@ -328,9 +328,13 @@ final class BoardStore {
 
     // MARK: - Card Operations
 
-    func addCard(title: String, to boardID: UUID) {
+    func addCardWithAutoName(to boardID: UUID) {
         guard let i = boardIndex(for: boardID) else { return }
-        let card = Card(title: title, orderIndex: boards[i].nextOrderIndex)
+
+        let agent = boards[i].agent
+        let title = boards[i].nextAutoName(for: agent)
+        let card = Card(title: title, orderIndex: boards[i].nextOrderIndex, agent: agent)
+
         boards[i].cards.append(card)
         selectedCardID = card.id
         focusRegion = .cards

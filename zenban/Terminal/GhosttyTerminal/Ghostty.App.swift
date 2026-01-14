@@ -438,16 +438,7 @@ extension Ghostty {
                 return true
 
             case GHOSTTY_ACTION_SET_TITLE:
-                // Window/tab title change
-                if let titlePtr = action.action.set_title.title {
-                    let title = String(cString: titlePtr)
-                    Ghostty.logger.info("Title changed: \(title)")
-
-                    // Propagate to terminal view callback
-                    DispatchQueue.main.async {
-                        terminalView?.onTitleChange?(title)
-                    }
-                }
+                // Window/tab title change (not used in embedded mode)
                 return true
 
             case GHOSTTY_ACTION_PWD:
@@ -460,7 +451,6 @@ extension Ghostty {
 
             case GHOSTTY_ACTION_PROMPT_TITLE:
                 // Prompt title update (for shell integration)
-                Ghostty.logger.debug("Prompt title action received")
                 return true
 
             case GHOSTTY_ACTION_PROGRESS_REPORT:

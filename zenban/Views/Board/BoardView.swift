@@ -3,7 +3,6 @@ import SwiftUI
 struct BoardView: View {
     let board: Board
     @Environment(BoardStore.self) private var store
-    @State private var isAddingCard = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -18,11 +17,8 @@ struct BoardView: View {
             store.draggedCardID = nil
             return false
         }
-        .sheet(isPresented: $isAddingCard) {
-            CardEditorView(boardID: board.id, isPresented: $isAddingCard)
-        }
         .onReceive(NotificationCenter.default.publisher(for: .newCard)) { _ in
-            isAddingCard = true
+            store.addCardWithAutoName(to: board.id)
         }
     }
 }

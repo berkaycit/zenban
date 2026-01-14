@@ -35,6 +35,14 @@ enum Agent: String, Codable, CaseIterable, Identifiable {
         case .gemini: "gemini --yolo"
         }
     }
+
+    var autoNamePrefix: String {
+        switch self {
+        case .claude: "cc"
+        case .codex: "codex"
+        case .gemini: "gemini"
+        }
+    }
 }
 
 struct DevServerConfig: Codable, Hashable {
@@ -92,8 +100,9 @@ struct Board: Identifiable, Codable, Hashable {
     var repositoryPath: String?
     var agent: Agent
     var devServerConfig: DevServerConfig?
+    var agentCounters: [String: Int] = [:]
 
-    init(id: UUID = UUID(), name: String, cards: [Card] = [], isPinned: Bool = false, repositoryPath: String? = nil, agent: Agent = .claude, devServerConfig: DevServerConfig? = nil) {
+    init(id: UUID = UUID(), name: String, cards: [Card] = [], isPinned: Bool = false, repositoryPath: String? = nil, agent: Agent = .claude, devServerConfig: DevServerConfig? = nil, agentCounters: [String: Int] = [:]) {
         self.id = id
         self.name = name
         self.cards = cards
@@ -102,6 +111,7 @@ struct Board: Identifiable, Codable, Hashable {
         self.repositoryPath = repositoryPath
         self.agent = agent
         self.devServerConfig = devServerConfig
+        self.agentCounters = agentCounters
     }
 
     func cards(in column: Column) -> [Card] {
@@ -111,5 +121,12 @@ struct Board: Identifiable, Codable, Hashable {
 
     var nextOrderIndex: Int {
         (cards.map(\.orderIndex).min() ?? 1) - 1
+    }
+
+    mutating func nextAutoName(for agent: Agent) -> String {
+        let prefix = agent.autoNamePrefix
+        let counter = (agentCounters[prefix] ?? 0) + 1
+        agentCounters[prefix] = counter
+        return "\(prefix)-\(counter)"
     }
 }

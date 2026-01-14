@@ -40,7 +40,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 |-----------|---------|
 | `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. O(1) board index lookup via lazy cache. |
 | `BoardStorage` | JSON persistence to Application Support |
-| `Board/Card/Column` | Data models. Board has repositoryPath/agent. Card can override agent. Column has display name/color. |
+| `Board/Card/Column` | Data models. Board has repositoryPath/agent/agentCounters. Card can override agent. Column has display name/color. Agent has autoNamePrefix for card naming. |
 | `TerminalManager` | Manages GhosttyTerminalView per card with LRU eviction (max 50). Hibernates on deselect. Auto-launches agent. |
 | `TmuxSessionManager` | Actor managing tmux sessions (zenban- prefix). Sync cleanup on app quit, async on card delete. |
 | `GhosttyTerminalView` | Terminal with state machine (shell/agentActive/agentIdle). OSC 133 for command detection. Ctrl+C exits agent. |
@@ -56,6 +56,10 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 ## Board Creation
 
 Three options: existing directory, create new repo (git init), or empty. Agent (Claude/Codex/Gemini) auto-runs on terminal open.
+
+## Card Creation
+
+Cards auto-named by agent prefix (cc-1, codex-1, gemini-1). Per-board counters persist across restarts.
 
 ## Card Worktrees
 
