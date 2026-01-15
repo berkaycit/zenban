@@ -20,7 +20,13 @@ enum PromptTemplate {
     // MARK: - Templates
 
     private static let commitMessageTemplate = """
-        Analyze the git diff provided via stdin and generate a commit message.
+        Analyze the git changes provided via stdin and generate a commit message.
+
+        The input may be:
+        1. A full unified diff, OR
+        2. A summarized format with file list and partial snippets (for large changesets)
+
+        For summarized input, focus on the overall change pattern across files.
 
         Format your response EXACTLY as:
         SUMMARY: <one line summary, max 72 chars, imperative mood>

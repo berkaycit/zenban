@@ -7,7 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		23B6DBB02EFEEA8800D5AB34 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 23B6DAD12EFDA93700D5AB34 /* SwiftTerm */; };
+		114868812A9E4B9192F557FD /* libghostty.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1B5F5001E481458AA833EF64 /* libghostty.a */; };
+		12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */ = {isa = PBXBuildFile; productRef = 0F130FE69B3B46DE88340E02 /* CodeEditLanguages */; };
+		93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */ = {isa = PBXBuildFile; productRef = A67F2A020FCB4AB1B074837D /* CodeEditSymbols */; };
+		D7245E606E834A01AF59B435 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = 9149CD05B1074D1490C41427 /* CodeEditSourceEditor */; };
+		ECC201D4093342D8A219C1EA /* CodeEditTextView in Frameworks */ = {isa = PBXBuildFile; productRef = 1B6E2133151B4B8A9DE213DC /* CodeEditTextView */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +32,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1B5F5001E481458AA833EF64 /* libghostty.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libghostty.a; path = libghostty/lib/libghostty.a; sourceTree = "<group>"; };
 		23B6DAA62EFDA93600D5AB34 /* zenban.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = zenban.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DAB32EFDA93700D5AB34 /* zenbanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DABD2EFDA93700D5AB34 /* zenbanUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -69,7 +74,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				23B6DBB02EFEEA8800D5AB34 /* SwiftTerm in Frameworks */,
+				D7245E606E834A01AF59B435 /* CodeEditSourceEditor in Frameworks */,
+				12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */,
+				ECC201D4093342D8A219C1EA /* CodeEditTextView in Frameworks */,
+				93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */,
+				114868812A9E4B9192F557FD /* libghostty.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -96,6 +105,7 @@
 				23B6DAA82EFDA93600D5AB34 /* zenban */,
 				23B6DAB62EFDA93700D5AB34 /* zenbanTests */,
 				23B6DAC02EFDA93700D5AB34 /* zenbanUITests */,
+				34A65B16E2F644D6AE876491 /* Vendor */,
 				23B6DAA72EFDA93600D5AB34 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -108,6 +118,14 @@
 				23B6DABD2EFDA93700D5AB34 /* zenbanUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		34A65B16E2F644D6AE876491 /* Vendor */ = {
+			isa = PBXGroup;
+			children = (
+				1B5F5001E481458AA833EF64 /* libghostty.a */,
+			);
+			path = Vendor;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -130,7 +148,10 @@
 			);
 			name = zenban;
 			packageProductDependencies = (
-				23B6DAD12EFDA93700D5AB34 /* SwiftTerm */,
+				9149CD05B1074D1490C41427 /* CodeEditSourceEditor */,
+				0F130FE69B3B46DE88340E02 /* CodeEditLanguages */,
+				1B6E2133151B4B8A9DE213DC /* CodeEditTextView */,
+				A67F2A020FCB4AB1B074837D /* CodeEditSymbols */,
 			);
 			productName = zenban;
 			productReference = 23B6DAA62EFDA93600D5AB34 /* zenban.app */;
@@ -215,7 +236,10 @@
 			mainGroup = 23B6DA9D2EFDA93600D5AB34;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				23B6DAD02EFDA93700D5AB34 /* XCLocalSwiftPackageReference "LocalPackages/SwiftTerm" */,
+				D0A1B2C3D4E5F60718293A4B /* XCLocalSwiftPackageReference "Packages/CodeEditSourceEditor" */,
+				D0A1B2C3D4E5F60718293A4E /* XCLocalSwiftPackageReference "Packages/CodeEditLanguages" */,
+				D0A1B2C3D4E5F60718293A4C /* XCLocalSwiftPackageReference "Packages/CodeEditTextView" */,
+				D0A1B2C3D4E5F60718293A4D /* XCLocalSwiftPackageReference "Packages/CodeEditSymbols" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23B6DAA72EFDA93600D5AB34 /* Products */;
@@ -426,13 +450,52 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libghostty/include",
+					"$(SRCROOT)/Vendor/libgit2/include",
+				);
 				INFOPLIST_FILE = zenban/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libghostty/lib",
+					"$(SRCROOT)/Vendor/libgit2/lib",
+				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lghostty",
+					"-lc++",
+					"-lgit2",
+					"-lssh2",
+					"-lssl",
+					"-lcrypto",
+					"-lz",
+					"-liconv",
+					"-framework",
+					Carbon,
+					"-framework",
+					Security,
+					"-framework",
+					CoreFoundation,
+					"-framework",
+					Metal,
+					"-framework",
+					MetalKit,
+					"-framework",
+					CoreText,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					IOKit,
+					"-framework",
+					UniformTypeIdentifiers,
+				);
+				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=$(SRCROOT)/Vendor/libgit2/include/module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenban;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -441,6 +504,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/zenban/ghostty-bridging-header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -461,13 +526,52 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libghostty/include",
+					"$(SRCROOT)/Vendor/libgit2/include",
+				);
 				INFOPLIST_FILE = zenban/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libghostty/lib",
+					"$(SRCROOT)/Vendor/libgit2/lib",
+				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lghostty",
+					"-lc++",
+					"-lgit2",
+					"-lssh2",
+					"-lssl",
+					"-lcrypto",
+					"-lz",
+					"-liconv",
+					"-framework",
+					Carbon,
+					"-framework",
+					Security,
+					"-framework",
+					CoreFoundation,
+					"-framework",
+					Metal,
+					"-framework",
+					MetalKit,
+					"-framework",
+					CoreText,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					IOKit,
+					"-framework",
+					UniformTypeIdentifiers,
+				);
+				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=$(SRCROOT)/Vendor/libgit2/include/module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenban;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -476,6 +580,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/zenban/ghostty-bridging-header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -603,16 +709,44 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		23B6DAD02EFDA93700D5AB34 /* XCLocalSwiftPackageReference "LocalPackages/SwiftTerm" */ = {
+		D0A1B2C3D4E5F60718293A4B /* XCLocalSwiftPackageReference "Packages/CodeEditSourceEditor" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = LocalPackages/SwiftTerm;
+			relativePath = Packages/CodeEditSourceEditor;
+		};
+		D0A1B2C3D4E5F60718293A4C /* XCLocalSwiftPackageReference "Packages/CodeEditTextView" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/CodeEditTextView;
+		};
+		D0A1B2C3D4E5F60718293A4D /* XCLocalSwiftPackageReference "Packages/CodeEditSymbols" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/CodeEditSymbols;
+		};
+		D0A1B2C3D4E5F60718293A4E /* XCLocalSwiftPackageReference "Packages/CodeEditLanguages" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/CodeEditLanguages;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		23B6DAD12EFDA93700D5AB34 /* SwiftTerm */ = {
+		0F130FE69B3B46DE88340E02 /* CodeEditLanguages */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = SwiftTerm;
+			package = D0A1B2C3D4E5F60718293A4E /* XCLocalSwiftPackageReference "Packages/CodeEditLanguages" */;
+			productName = CodeEditLanguages;
+		};
+		1B6E2133151B4B8A9DE213DC /* CodeEditTextView */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D0A1B2C3D4E5F60718293A4C /* XCLocalSwiftPackageReference "Packages/CodeEditTextView" */;
+			productName = CodeEditTextView;
+		};
+		9149CD05B1074D1490C41427 /* CodeEditSourceEditor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D0A1B2C3D4E5F60718293A4B /* XCLocalSwiftPackageReference "Packages/CodeEditSourceEditor" */;
+			productName = CodeEditSourceEditor;
+		};
+		A67F2A020FCB4AB1B074837D /* CodeEditSymbols */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D0A1B2C3D4E5F60718293A4D /* XCLocalSwiftPackageReference "Packages/CodeEditSymbols" */;
+			productName = CodeEditSymbols;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

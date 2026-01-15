@@ -2,8 +2,23 @@ import SwiftUI
 
 struct BoardCommands: Commands {
     let store: BoardStore
+    @State private var hooksInstalled = ClaudeHooksInstaller.checkInstallationStatus()
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Divider()
+            Button(hooksInstalled ? "Claude Code Hooks Installed" : "Install Claude Code Hooks...") {
+                let result = ClaudeHooksInstaller.install()
+                switch result {
+                case .installed, .alreadyInstalled:
+                    hooksInstalled = true
+                case .failed:
+                    break
+                }
+            }
+            .disabled(hooksInstalled)
+        }
+
         CommandGroup(after: .newItem) {
             Button("New Board") {
                 NotificationCenter.default.post(name: .newBoard, object: nil)
@@ -30,16 +45,30 @@ struct BoardCommands: Commands {
             .keyboardShortcut("s", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
 
+            Button("Reload Dev Server") {
+                NotificationCenter.default.post(name: .reloadDevServer, object: nil)
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(!store.showDevServer)
+
             Button("Toggle Git Changes") {
                 store.toggleGitChanges()
             }
             .keyboardShortcut("x", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
+
+            Button("Toggle File Browser") {
+                store.toggleFileBrowser()
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .disabled(store.selectedCardID == nil)
+        }
+
+        CommandGroup(replacing: .help) {
+            Button("Keyboard Shortcuts") {
+                store.showKeyboardShortcuts = true
+            }
+            .keyboardShortcut("/", modifiers: .command)
         }
     }
-}
-
-extension Notification.Name {
-    static let newBoard = Notification.Name("newBoard")
-    static let newCard = Notification.Name("newCard")
 }

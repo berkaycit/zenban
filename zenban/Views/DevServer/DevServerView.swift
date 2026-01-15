@@ -1,5 +1,30 @@
 import SwiftUI
 
+enum ConsolePosition: String {
+    case bottom
+    case left
+
+    var isHorizontal: Bool { self == .bottom }
+
+    var resizeCursor: NSCursor {
+        isHorizontal ? .resizeUpDown : .resizeLeftRight
+    }
+
+    var toggleIcon: String {
+        isHorizontal ? "rectangle.lefthalf.inset.filled" : "rectangle.bottomhalf.inset.filled"
+    }
+
+    var toggleHelp: String {
+        isHorizontal ? "Move to Left" : "Move to Bottom"
+    }
+
+    mutating func toggle() {
+        self = isHorizontal ? .left : .bottom
+    }
+}
+
+private let consoleAnimation = Animation.easeOut(duration: 0.15)
+
 /// Fullscreen overlay view for dev server preview
 struct DevServerView: View {
     let card: Card
@@ -15,9 +40,11 @@ struct DevServerView: View {
     @State private var webViewError: String?
     @State private var retryCount = 0
     @State private var showConsole = true
+    @AppStorage("devServerConsolePosition") private var consolePosition: ConsolePosition = .left
+    @State private var consoleHeight: CGFloat = 250
+    @State private var consoleWidth: CGFloat = 320
 
     private let maxRetries = 5
-    private let consoleHeight: CGFloat = 180
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,6 +61,10 @@ struct DevServerView: View {
         }
         .onDisappear {
             devServerManager.stopServer(for: card.id)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .reloadDevServer)) { _ in
+            devServerManager.clearOutput(for: card.id)
+            reloadTrigger += 1
         }
     }
 
@@ -66,7 +97,7 @@ struct DevServerView: View {
                 .buttonStyle(.plain)
                 .disabled(isWebViewLoading)
 
-                Button(action: { withAnimation(.easeOut(duration: 0.15)) { showConsole.toggle() } }) {
+                Button(action: { withAnimation(consoleAnimation) { showConsole.toggle() } }) {
                     Image(systemName: "terminal")
                         .foregroundStyle(showConsole ? .primary : .secondary)
                 }
@@ -95,14 +126,14 @@ struct DevServerView: View {
         case .idle:
             loadingView(message: "Initializing...")
 
-        case .runningSetup(let output):
-            outputView(title: "Installing dependencies...", output: output, showSpinner: true)
+        case .runningSetup:
+            outputView(title: "Installing dependencies...", showSpinner: true)
 
-        case .startingServer(let output):
-            outputView(title: "Starting dev server...", output: output, showSpinner: true)
+        case .startingServer:
+            outputView(title: "Starting dev server...", showSpinner: true)
 
-        case .detectingPort(let output):
-            outputView(title: "Waiting for server...", output: output, showSpinner: true)
+        case .detectingPort:
+            outputView(title: "Waiting for server...", showSpinner: true)
 
         case .ready(let url):
             webViewSection(url: url)
@@ -124,8 +155,12 @@ struct DevServerView: View {
         }
     }
 
-    private func outputView(title: String, output: String, showSpinner: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func outputView(title: String, showSpinner: Bool) -> some View {
+        // Observe version for throttled updates
+        let _ = devServerManager.outputVersion[card.id]
+        let lines = devServerManager.outputLinesArray(for: card.id)
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 if showSpinner {
                     ProgressView()
@@ -139,15 +174,22 @@ struct DevServerView: View {
 
             ScrollView {
                 ScrollViewReader { proxy in
-                    Text(output.isEmpty ? "Waiting for output..." : output)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(output.isEmpty ? .secondary : .primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .id("output-bottom")
-                        .onChange(of: output) {
-                            proxy.scrollTo("output-bottom", anchor: .bottom)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if lines.isEmpty {
+                            Text("Waiting for output...")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(lines) { line in
+                                outputLineView(line)
+                            }
                         }
+                    }
+                    .padding(12)
+                    .id("output-bottom")
+                    .onChange(of: devServerManager.outputVersion[card.id]) {
+                        proxy.scrollTo("output-bottom", anchor: .bottom)
+                    }
                 }
             }
             .background(Color.black.opacity(0.05))
@@ -157,53 +199,39 @@ struct DevServerView: View {
         }
     }
 
+    private func outputLineView(_ line: OutputLine) -> some View {
+        HStack(spacing: 0) {
+            if !line.prefix.isEmpty {
+                Text(line.prefix)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(lineColor(for: line).opacity(0.7))
+            }
+            Text(line.text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(lineColor(for: line))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     @ViewBuilder
     private func webViewSection(url: URL) -> some View {
-        VStack(spacing: 0) {
-            ZStack {
-                ReloadableWebView(
-                    url: url,
-                    isLoading: $isWebViewLoading,
-                    reloadTrigger: $reloadTrigger,
-                    onError: { error in
-                        handleWebViewError(error)
+        Group {
+            if consolePosition.isHorizontal {
+                VStack(spacing: 0) {
+                    webViewContent(url: url)
+                    if showConsole {
+                        Divider()
+                        consoleSection
                     }
-                )
-
-                if let error = webViewError {
-                    VStack(spacing: 12) {
-                        Image(systemName: "wifi.exclamationmark")
-                            .font(.largeTitle)
-                            .foregroundStyle(.orange)
-                        Text("Connection Error")
-                            .font(.headline)
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-
-                        if retryCount < maxRetries {
-                            Text("Retrying... (\(retryCount + 1)/\(maxRetries))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            retryReconfigureButtons {
-                                retryCount = 0
-                                webViewError = nil
-                                reloadTrigger += 1
-                            }
-                        }
-                    }
-                    .padding(32)
-                    .background(Color.cardBackground.opacity(0.95))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            if showConsole {
-                Divider()
-                consoleSection
+            } else {
+                HStack(spacing: 0) {
+                    if showConsole {
+                        consoleSection
+                        Divider()
+                    }
+                    webViewContent(url: url)
+                }
             }
         }
         .onAppear {
@@ -211,13 +239,107 @@ struct DevServerView: View {
         }
     }
 
+    @ViewBuilder
+    private func webViewContent(url: URL) -> some View {
+        ZStack {
+            ReloadableWebView(
+                url: url,
+                isLoading: $isWebViewLoading,
+                reloadTrigger: $reloadTrigger,
+                onError: { error in
+                    handleWebViewError(error)
+                },
+                onConsoleMessage: { message in
+                    devServerManager.addBrowserConsoleMessage(
+                        for: card.id,
+                        level: message.level.rawValue,
+                        message: message.message
+                    )
+                }
+            )
+
+            if let error = webViewError {
+                VStack(spacing: 12) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.largeTitle)
+                        .foregroundStyle(.orange)
+                    Text("Connection Error")
+                        .font(.headline)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    if retryCount < maxRetries {
+                        Text("Retrying... (\(retryCount + 1)/\(maxRetries))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        retryReconfigureButtons {
+                            retryCount = 0
+                            webViewError = nil
+                            reloadTrigger += 1
+                        }
+                    }
+                }
+                .padding(32)
+                .background(Color.cardBackground.opacity(0.95))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var consoleSection: some View {
-        VStack(spacing: 0) {
+        let mainContent = VStack(spacing: 0) {
             consoleHeader
             consoleContent
         }
-        .frame(height: consoleHeight)
+
+        return Group {
+            if consolePosition.isHorizontal {
+                VStack(spacing: 0) {
+                    resizeHandle
+                    mainContent
+                }
+            } else {
+                HStack(spacing: 0) {
+                    mainContent
+                    resizeHandle
+                }
+            }
+        }
+        .frame(
+            width: consolePosition.isHorizontal ? nil : consoleWidth,
+            height: consolePosition.isHorizontal ? consoleHeight : nil
+        )
         .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+    }
+
+    private var resizeHandle: some View {
+        let isHorizontal = consolePosition.isHorizontal
+
+        return Rectangle()
+            .fill(Color.clear)
+            .frame(width: isHorizontal ? nil : 6, height: isHorizontal ? 6 : nil)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        if isHorizontal {
+                            consoleHeight = max(100, min(500, consoleHeight - value.translation.height))
+                        } else {
+                            consoleWidth = max(200, min(600, consoleWidth + value.translation.width))
+                        }
+                    }
+            )
+            .onHover { hovering in
+                if hovering {
+                    consolePosition.resizeCursor.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
     }
 
     private var consoleHeader: some View {
@@ -231,7 +353,15 @@ struct DevServerView: View {
 
             Spacer()
 
-            Button(action: { withAnimation(.easeOut(duration: 0.15)) { showConsole = false } }) {
+            Button(action: { withAnimation(consoleAnimation) { consolePosition.toggle() } }) {
+                Image(systemName: consolePosition.toggleIcon)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(consolePosition.toggleHelp)
+
+            Button(action: { withAnimation(consoleAnimation) { showConsole = false } }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -246,26 +376,70 @@ struct DevServerView: View {
     private var consoleContent: some View {
         // Observe version for throttled updates
         let _ = devServerManager.outputVersion[card.id]
-        let output = devServerManager.output(for: card.id)
+        let lines = devServerManager.outputLinesArray(for: card.id)
 
         return ScrollView {
             ScrollViewReader { proxy in
-                Text(output.isEmpty ? "Waiting for output..." : output)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(output.isEmpty ? .secondary : .primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .id("console-bottom")
-                    .onAppear {
-                        proxy.scrollTo("console-bottom", anchor: .bottom)
+                VStack(alignment: .leading, spacing: 0) {
+                    if lines.isEmpty {
+                        Text("Waiting for output...")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(buildAttributedConsoleOutput(lines))
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
                     }
-                    .onChange(of: devServerManager.outputVersion[card.id]) {
-                        proxy.scrollTo("console-bottom", anchor: .bottom)
-                    }
+                }
+                .padding(8)
+                .id("console-bottom")
+                .onAppear {
+                    proxy.scrollTo("console-bottom", anchor: .bottom)
+                }
+                .onChange(of: devServerManager.outputVersion[card.id]) {
+                    proxy.scrollTo("console-bottom", anchor: .bottom)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Build attributed string with colors for all console lines
+    private func buildAttributedConsoleOutput(_ lines: [OutputLine]) -> AttributedString {
+        var result = AttributedString()
+
+        for (index, line) in lines.enumerated() {
+            // Add prefix if present
+            if !line.prefix.isEmpty {
+                var prefix = AttributedString(line.prefix)
+                prefix.foregroundColor = nsColor(for: line).withAlphaComponent(0.7)
+                result.append(prefix)
+            }
+
+            // Add line text
+            var text = AttributedString(line.text)
+            text.foregroundColor = nsColor(for: line)
+            result.append(text)
+
+            // Add newline except for last line
+            if index < lines.count - 1 {
+                result.append(AttributedString("\n"))
+            }
+        }
+
+        return result
+    }
+
+    private func lineColor(for line: OutputLine) -> Color {
+        if line.isError { return .red }
+        if line.isWarning { return .orange }
+        if line.isBrowser { return .cyan }
+        return .primary
+    }
+
+    private func nsColor(for line: OutputLine) -> NSColor {
+        NSColor(lineColor(for: line))
     }
 
     private func errorView(message: String) -> some View {

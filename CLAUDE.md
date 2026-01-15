@@ -40,13 +40,9 @@ The project uses Swift 6 concurrency features:
 
 `com.berkaycit.zenban`
 
-## Local Packages
+## Vendor Libraries
 
-- **LocalPackages/SwiftTerm**: Local fork of SwiftTerm with bug fixes:
-  1. **Mouse selection offset**: The original `calculateMouseHit` in `MacTerminalView.swift:898` added `yDisp` to the row, but selection functions (`startSelection`, `dragExtend`, etc.) also add `yDisp`, causing double-addition. This resulted in mouse selection offset after scrolling. Fix: Removed `+ terminal.buffer.yDisp` from `calculateMouseHit`.
-  2. **Negative savedY crash**: In `Terminal.swift:resizeBuffers`, `savedY = y + dy` could become negative when `dy` was negative and resize changed `y`. This caused crash in `cmdRestoreCursor` when restoring cursor position. Fix: Added `max(0, ...)` guards in both `resizeBuffers` and `cmdRestoreCursor`.
-
-  Do not switch back to the remote SwiftTerm package until these fixes are merged upstream.
+- **Vendor/libghostty.a**: Pre-built Ghostty terminal emulator library. Statically linked via ghostty-bridging-header.h. The GhosttyTerminal/ module wraps the C API with Swift interfaces for surface management, input handling, and rendering.
 
 ## When to Read Agent Docs
 

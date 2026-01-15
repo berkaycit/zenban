@@ -7,6 +7,36 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add Git History tab with fast diff loading
+- **Description**: GitChangesView now has two tabs: Changes and History. History tab shows paginated commit list (GitHistoryView) with diff panel. GitLogService actor fetches commits via libgit2 and diffs via non-blocking ProcessExecutor. DiffView refactored from lazy O(n^2) parsing to upfront O(n) single-pass parsing, eliminating DiffLineParser. New utilities: ProcessExecutor for async subprocess execution, RelativeDateFormatter for date display.
+
+- **Summary**: Add Claude Code task completion notifications via URL scheme
+- **Description**: Zenban now receives notifications when Claude Code finishes tasks. Registered `zenban://` URL scheme in Info.plist. Claude Code Stop hook calls `open 'zenban://notify?body=...'` which triggers SwiftUI `.onOpenURL`. Handler shows macOS notification with card title and moves card from To Do to In Review. Also added DESKTOP_NOTIFICATION handler in Ghostty.App for future OSC 9 support.
+
+- **Summary**: Optimize AI commit message generation for large diffs
+- **Description**: generateCommitMessage() now uses smart summarization for large changesets (>200 lines). When threshold exceeded, createSummarizedDiff() builds condensed context: top 30 files listed with +/- stats, top 8 non-binary files fetched in parallel via withTaskGroup, snippets truncated to 300 chars. Binary/generated files (30+ extensions, lock files, .min.js) auto-skipped via shouldSkipFile(). Performance: O(n log n) sort, O(1) dictionary lookup for snippets, array join instead of string concatenation. Timeout reduced from 60s to 30s via new .commitMessage config. Prompt updated to handle both full diff and summarized formats.
+
+- **Summary**: Add browser console capture and structured output lines
+- **Description**: DevServerManager now captures browser console messages (log, warn, error, info, debug) via WebView JS injection. OutputLine struct with OutputSource enum replaces raw string buffers for better error/warning categorization. Separate stdout/stderr pipes with partial line buffering prevent mid-line cuts. DevServerView displays colored output based on source type. WebViewContainer injects console override script and communicates via WKScriptMessageHandler.
+
+- **Summary**: Add drag-and-drop file support to terminal
+- **Description**: GhosttyTerminalView now accepts file drops via NSDraggingDestination protocol. Dropped files have their paths shell-escaped and sent to terminal as text. Supports multiple files, paths with spaces, and special characters. Enables dragging screenshots/files to Claude CLI.
+
+- **Summary**: Unify overlay state with OverlayState FSM
+- **Description**: Replaced separate devServerState, gitChangesCardID, and fileBrowserCardID with single OverlayState enum. Overlays are now mutually exclusive - opening one automatically closes others. Added Cmd+Shift+F shortcut for file browser. OverlayState includes cardID and isDevServer helpers for cleaner delete/cleanup logic.
+
+- **Summary**: Migrate GitService from git CLI to libgit2
+- **Description**: GitService now uses libgit2 (native C library via Clibgit2 module) instead of spawning git processes. New Libgit2* files in Services/Git/Libgit2/ wrap C API for repository, branch, commit, diff, remote, status, and worktree operations. SSH authentication via SSHConfigParser for host resolution. Improves performance and reduces process overhead.
+
+- **Summary**: Add batch diff loading and scroll tracking
+- **Description**: GitDiffViewModel now supports batch loading via loadAllDiffs() which fetches all file diffs in a single git call and parses them with DiffParser.splitDiffByFile(). GitDiffCache simplified to store [DiffLine] directly with single-file invalidation. DiffView gains scroll tracking (onFileVisible callback), file navigation (scrollToFile), and onOpenFile callback. GitChangesView uses batch loading after fetching file list for faster diff display.
+
+- **Summary**: Add terminal hibernation and LRU eviction
+- **Description**: TerminalManager now hibernates terminals when cards are deselected to save memory (tmux preserves sessions in background). LRU cache limits active terminals to 50, evicting least recently used. TerminalContainerView triggers hibernation in dismantleNSView. Scroll views are cached separately for faster restoration. Delayed cleanup prevents dangling pointer crashes during Ghostty surface teardown.
+
+- **Summary**: Migrate terminal from SwiftTerm to Ghostty
+- **Description**: Replaced SwiftTerm terminal emulator with Ghostty. Removed LocalPackages/SwiftTerm and LocalPackages/GhosttySwift in favor of vendored libghostty.a static library. New GhosttyTerminal/ module contains Swift wrappers: GhosttyTerminalView (NSView-based terminal), Ghostty.App (singleton app context), Ghostty.Surface (terminal surface management), plus input handling (Key, KeyEvent, MouseEvent, Mods, Input). TerminalManager and TerminalContainerView updated for new API.
+
 - **Summary**: Move GitChangesView to board area with toggle
 - **Description**: GitChangesView relocated from CardDetailView overlay to ContentView board area (like DevServerView). New Cmd+Shift+X keyboard shortcut toggles the view. BoardStore tracks gitChangesCardID state with toggleGitChanges/stopGitChanges methods. New stopOverlays() method consolidates cleanup of dev server and git changes on board switch or card/board deletion.
 
@@ -17,7 +47,7 @@ Each item should follow this format:
 - **Description**: DevServerState enum (idle/configuring/running/reconfiguring) moved to BoardStore for centralized state management. DevServerView relocated from CardDetailView overlay to ContentView, replacing board area when active. Browser suppression added via BROWSER=none in ProcessEnvironment and link handling override in ZenbanTerminalView. Terminal ANSI black color adjusted from #282828 to #676767 for visibility on dark backgrounds.
 
 - **Summary**: Add throttled console output and on-demand diff loading
-- **Description**: DevServerManager now limits output buffer to 100KB with throttled UI updates (150ms interval) to prevent performance issues with verbose servers. DevServerView adds toggleable console panel for viewing server output. GitChangesView loads diffs on-demand when files are expanded instead of preloading all. DiffContentView parses diffs asynchronously with 300-line limit and "show more" button. Port detection uses pre-compiled regex and scans only last 2KB of output.
+- **Description**: DevServerManager now limits output buffer to 100KB with throttled UI updates (150ms interval) to prevent performance issues with verbose servers. DevServerView adds toggleable console panel for viewing server output. GitChangesView loads diffs on-demand via GitDiffViewModel with LRU caching. DiffView (NSTableView-based) renders diffs with lazy line parsing. Port detection uses pre-compiled regex and scans only last 2KB of output.
 
 - **Summary**: Add dev server settings sheet and UI improvements
 - **Description**: New DevServerSettingsSheet accessible from sidebar toolbar for editing board dev server config (setup command, dev command, skip setup). DevServerView error states now offer Reconfigure option. CardDetailView redesigned with compacted 160px info section, segmented pill controls for column/agent selection, and icon-only quick actions. Refactored repeated board lookups into computed properties.

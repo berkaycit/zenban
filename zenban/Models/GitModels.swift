@@ -28,6 +28,23 @@ struct FileChange: Identifiable, Equatable {
     }
 }
 
+// MARK: - Git Commit History
+
+struct GitCommit: Identifiable, Equatable {
+    let id: String
+    let shortHash: String
+    let message: String
+    let author: String
+    let date: Date
+    let filesChanged: Int
+    let additions: Int
+    let deletions: Int
+
+    var relativeDate: String {
+        RelativeDateFormatter.shared.string(from: date)
+    }
+}
+
 // MARK: - PR Configuration
 
 struct PRConfig {

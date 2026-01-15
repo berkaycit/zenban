@@ -1,37 +1,68 @@
 import SwiftUI
+import Foundation
 
 enum FocusRegion {
     case sidebar
     case cards
 }
 
-enum DevServerState: Equatable {
-    case idle
-    case configuring(cardID: UUID)
-    case running(cardID: UUID, setup: String?, dev: String)
-    case reconfiguring(cardID: UUID, setup: String?, dev: String)
+enum OverlayState: Equatable {
+    case none
+
+    // Dev Server states
+    case devServerConfiguring(cardID: UUID)
+    case devServerRunning(cardID: UUID, setup: String?, dev: String)
+    case devServerReconfiguring(cardID: UUID, setup: String?, dev: String)
+
+    // Git Changes state
+    case gitChanges(cardID: UUID)
+
+    // File Browser state
+    case fileBrowser(cardID: UUID)
+
+    var cardID: UUID? {
+        switch self {
+        case .none: nil
+        case .devServerConfiguring(let id), .devServerRunning(let id, _, _), .devServerReconfiguring(let id, _, _),
+             .gitChanges(let id), .fileBrowser(let id): id
+        }
+    }
+
+    var isDevServer: Bool {
+        switch self {
+        case .devServerConfiguring, .devServerRunning, .devServerReconfiguring: true
+        default: false
+        }
+    }
 }
 
 @MainActor
 @Observable
 final class BoardStore {
-    var boards: [Board] = []
+    var boards: [Board] = [] {
+        didSet { invalidateLookupCache() }
+    }
     var selectedBoardID: UUID?
     var selectedCardID: UUID?
     var draggedCardID: UUID?
     var focusRegion: FocusRegion = .sidebar
     var showDeleteConfirmation = false
+    var showKeyboardShortcuts = false
 
-    // Dev server state (FSM)
-    var devServerState: DevServerState = .idle
+    // Unified overlay state (FSM)
+    var overlayState: OverlayState = .none
 
-    // Git changes state
-    private(set) var gitChangesCardID: UUID?
+    // Tracks which card has an active Claude Code session
+    var activeAgentCardID: UUID?
+    var activeAgentBoardID: UUID?
 
     var onCardDeleted: ((UUID) -> Void)?
     weak var terminalManager: TerminalManager?
 
     private var saveTask: Task<Void, Never>?
+
+    // O(1) board index cache - invalidated when boards change
+    private var boardIndexCache: [UUID: Int]?
 
     var selectedBoard: Board? {
         boards.first { $0.id == selectedBoardID }
@@ -46,30 +77,34 @@ final class BoardStore {
         return selectedBoard?.cards.first { $0.id == cardID }
     }
 
+    func card(id: UUID) -> Card? {
+        boards.lazy.flatMap(\.cards).first { $0.id == id }
+    }
+
     // MARK: - Dev Server Computed Properties
 
     var showDevServer: Bool {
-        switch devServerState {
-        case .running, .reconfiguring: true
-        case .idle, .configuring: false
+        switch overlayState {
+        case .devServerRunning, .devServerReconfiguring: true
+        default: false
         }
     }
 
     var showDevServerConfig: Bool {
         get {
-            switch devServerState {
-            case .configuring, .reconfiguring: true
-            case .idle, .running: false
+            switch overlayState {
+            case .devServerConfiguring, .devServerReconfiguring: true
+            default: false
             }
         }
         set {
             // Sheet dismissed via swipe/cancel
             if !newValue {
-                switch devServerState {
-                case .configuring:
-                    devServerState = .idle
-                case .reconfiguring(let cardID, let setup, let dev):
-                    devServerState = .running(cardID: cardID, setup: setup, dev: dev)
+                switch overlayState {
+                case .devServerConfiguring:
+                    overlayState = .none
+                case .devServerReconfiguring(let cardID, let setup, let dev):
+                    overlayState = .devServerRunning(cardID: cardID, setup: setup, dev: dev)
                 default:
                     break
                 }
@@ -78,29 +113,30 @@ final class BoardStore {
     }
 
     var devServerCard: Card? {
-        switch devServerState {
-        case .configuring(let cardID), .running(let cardID, _, _), .reconfiguring(let cardID, _, _):
-            // Always get fresh card from board
+        switch overlayState {
+        case .devServerConfiguring(let cardID),
+             .devServerRunning(let cardID, _, _),
+             .devServerReconfiguring(let cardID, _, _):
             selectedBoard?.cards.first { $0.id == cardID }
-        case .idle:
+        default:
             nil
         }
     }
 
     var devServerSetupCommand: String? {
-        switch devServerState {
-        case .running(_, let setup, _), .reconfiguring(_, let setup, _):
+        switch overlayState {
+        case .devServerRunning(_, let setup, _), .devServerReconfiguring(_, let setup, _):
             setup
-        case .idle, .configuring:
+        default:
             nil
         }
     }
 
     var devServerDevCommand: String {
-        switch devServerState {
-        case .running(_, _, let dev), .reconfiguring(_, _, let dev):
+        switch overlayState {
+        case .devServerRunning(_, _, let dev), .devServerReconfiguring(_, _, let dev):
             dev
-        case .idle, .configuring:
+        default:
             ""
         }
     }
@@ -108,50 +144,50 @@ final class BoardStore {
     // MARK: - Dev Server Transitions
 
     func configureDevServer(for card: Card) {
-        devServerState = .configuring(cardID: card.id)
+        overlayState = .devServerConfiguring(cardID: card.id)
     }
 
     func startDevServerDirect(card: Card, setup: String?, dev: String) {
-        devServerState = .running(cardID: card.id, setup: setup, dev: dev)
+        overlayState = .devServerRunning(cardID: card.id, setup: setup, dev: dev)
     }
 
     func stopDevServer() {
-        devServerState = .idle
+        if overlayState.isDevServer { overlayState = .none }
     }
 
     func toggleDevServer() {
         guard let card = selectedCard, let board = selectedBoard else { return }
 
-        // Stop if running for this card
+        // Toggle off if already showing for this card
         if devServerCard?.id == card.id {
-            stopDevServer()
+            overlayState = .none
             return
         }
 
-        // Start dev server for selected card
+        // Open dev server (automatically closes any other overlay)
         if let config = board.devServerConfig {
-            startDevServerDirect(card: card, setup: config.setupCommand, dev: config.devCommand)
+            overlayState = .devServerRunning(cardID: card.id, setup: config.setupCommand, dev: config.devCommand)
         } else {
-            configureDevServer(for: card)
+            overlayState = .devServerConfiguring(cardID: card.id)
         }
     }
 
     func openReconfigure() {
-        guard case .running(let cardID, let setup, let dev) = devServerState else { return }
-        devServerState = .reconfiguring(cardID: cardID, setup: setup, dev: dev)
+        guard case .devServerRunning(let cardID, let setup, let dev) = overlayState else { return }
+        overlayState = .devServerReconfiguring(cardID: cardID, setup: setup, dev: dev)
     }
 
     func confirmDevServerConfig(setup: String?, dev: String) {
-        switch devServerState {
-        case .configuring(let cardID):
-            devServerState = .running(cardID: cardID, setup: setup, dev: dev)
-        case .reconfiguring(let cardID, _, _):
+        switch overlayState {
+        case .devServerConfiguring(let cardID):
+            overlayState = .devServerRunning(cardID: cardID, setup: setup, dev: dev)
+        case .devServerReconfiguring(let cardID, _, _):
             // Close view to trigger onDisappear (stops process), then restart
-            devServerState = .idle
+            overlayState = .none
             Task { @MainActor in
                 // Only restart if still idle (no other action changed state)
-                guard devServerState == .idle else { return }
-                devServerState = .running(cardID: cardID, setup: setup, dev: dev)
+                guard overlayState == .none else { return }
+                overlayState = .devServerRunning(cardID: cardID, setup: setup, dev: dev)
             }
         default:
             break
@@ -161,11 +197,24 @@ final class BoardStore {
     // MARK: - Git Changes Computed Properties
 
     var showGitChanges: Bool {
-        gitChangesCardID != nil
+        if case .gitChanges = overlayState { return true }
+        return false
     }
 
     var gitChangesCard: Card? {
-        guard let cardID = gitChangesCardID else { return nil }
+        guard case .gitChanges(let cardID) = overlayState else { return nil }
+        return selectedBoard?.cards.first { $0.id == cardID }
+    }
+
+    // MARK: - File Browser Computed Properties
+
+    var showFileBrowser: Bool {
+        if case .fileBrowser = overlayState { return true }
+        return false
+    }
+
+    var fileBrowserCard: Card? {
+        guard case .fileBrowser(let cardID) = overlayState else { return nil }
         return selectedBoard?.cards.first { $0.id == cardID }
     }
 
@@ -174,23 +223,37 @@ final class BoardStore {
     func toggleGitChanges() {
         guard let card = selectedCard else { return }
 
-        // Stop if showing for this card
-        if gitChangesCardID == card.id {
-            stopGitChanges()
+        if case .gitChanges(let cardID) = overlayState, cardID == card.id {
+            overlayState = .none
             return
         }
 
-        // Show git changes for selected card
-        gitChangesCardID = card.id
+        overlayState = .gitChanges(cardID: card.id)
     }
 
     func stopGitChanges() {
-        gitChangesCardID = nil
+        if case .gitChanges = overlayState { overlayState = .none }
+    }
+
+    // MARK: - File Browser Transitions
+
+    func toggleFileBrowser() {
+        guard let card = selectedCard else { return }
+
+        if case .fileBrowser(let cardID) = overlayState, cardID == card.id {
+            overlayState = .none
+            return
+        }
+
+        overlayState = .fileBrowser(cardID: card.id)
+    }
+
+    func stopFileBrowser() {
+        if case .fileBrowser = overlayState { overlayState = .none }
     }
 
     func stopOverlays() {
-        stopDevServer()
-        stopGitChanges()
+        overlayState = .none
     }
 
     init() {
@@ -215,9 +278,8 @@ final class BoardStore {
         let repoPath = board.repositoryPath
         let cardIDs = Set(board.cards.map(\.id))
 
-        // Stop overlays if showing for any card in this board
-        if let id = devServerCard?.id, cardIDs.contains(id) { stopDevServer() }
-        if let id = gitChangesCard?.id, cardIDs.contains(id) { stopGitChanges() }
+        // Stop overlay if showing for any card in this board
+        if let id = overlayState.cardID, cardIDs.contains(id) { overlayState = .none }
 
         for card in board.cards {
             onCardDeleted?(card.id)
@@ -267,9 +329,13 @@ final class BoardStore {
 
     // MARK: - Card Operations
 
-    func addCard(title: String, to boardID: UUID) {
+    func addCardWithAutoName(to boardID: UUID) {
         guard let i = boardIndex(for: boardID) else { return }
-        let card = Card(title: title, orderIndex: boards[i].nextOrderIndex)
+
+        let agent = boards[i].agent
+        let title = boards[i].nextAutoName(for: agent)
+        let card = Card(title: title, orderIndex: boards[i].nextOrderIndex, agent: agent)
+
         boards[i].cards.append(card)
         selectedCardID = card.id
         focusRegion = .cards
@@ -309,6 +375,12 @@ final class BoardStore {
         scheduleSave()
     }
 
+    func updateFileBrowserSession(_ cardID: UUID, in boardID: UUID, session: FileBrowserSessionState?) {
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        boards[bi].cards[ci].fileBrowserSession = session
+        scheduleSave()
+    }
+
     func requestDeleteSelectedCard() {
         guard selectedBoardID != nil, selectedCardID != nil else { return }
         showDeleteConfirmation = true
@@ -337,8 +409,7 @@ final class BoardStore {
             boards[i].cards(in: col).firstIndex { $0.id == cardID }
         }
 
-        if devServerCard?.id == cardID { stopDevServer() }
-        if gitChangesCard?.id == cardID { stopGitChanges() }
+        if overlayState.cardID == cardID { overlayState = .none }
 
         boards[i].cards.removeAll { $0.id == cardID }
         if draggedCardID == cardID { draggedCardID = nil }
@@ -496,8 +567,22 @@ final class BoardStore {
         }
     }
 
+    // MARK: - O(1) Lookup Cache
+
+    private func invalidateLookupCache() {
+        boardIndexCache = nil
+    }
+
     private func boardIndex(for id: UUID) -> Int? {
-        boards.firstIndex { $0.id == id }
+        if boardIndexCache == nil {
+            var cache: [UUID: Int] = [:]
+            cache.reserveCapacity(boards.count)
+            for (index, board) in boards.enumerated() {
+                cache[board.id] = index
+            }
+            boardIndexCache = cache
+        }
+        return boardIndexCache?[id]
     }
 
     private func cardIndices(cardID: UUID, boardID: UUID) -> (board: Int, card: Int)? {
@@ -532,10 +617,14 @@ final class BoardStore {
 
     private func scheduleSave() {
         saveTask?.cancel()
-        saveTask = Task {
+        saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            BoardStorage.save(boards)
+            guard let self else { return }
+            let snapshot = self.boards
+            DispatchQueue.global(qos: .utility).async {
+                BoardStorage.save(snapshot)
+            }
         }
     }
 }

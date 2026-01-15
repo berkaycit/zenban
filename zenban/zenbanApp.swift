@@ -27,6 +27,7 @@ struct zenbanApp: App {
     @State private var store = BoardStore()
     @State private var terminalManager = TerminalManager()
     @State private var devServerManager = DevServerManager()
+    @State private var terminalConfigObserver = TerminalConfigObserver()
 
     init() {
         NotificationCenter.default.addObserver(
@@ -36,6 +37,10 @@ struct zenbanApp: App {
         ) { [terminalManager, devServerManager] _ in
             terminalManager.terminateAllSessions()
             devServerManager.stopAllServers()
+
+            if UserDefaults.standard.bool(forKey: "cleanupSessionsOnQuit") {
+                TmuxSessionManager.shared.killAllZenbanSessionsSync()
+            }
         }
 
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
@@ -46,23 +51,36 @@ struct zenbanApp: App {
             if store.showDeleteConfirmation {
                 return event
             }
+
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if modifiers == [.command],
+               event.charactersIgnoringModifiers?.lowercased() == "w" {
+                // When file browser is open, close the tab; otherwise just consume the event
+                if store.showFileBrowser {
+                    NotificationCenter.default.post(name: .closeFileBrowserTab, object: nil)
+                }
+                return nil
+            }
+
             if let firstResponder = NSApp.keyWindow?.firstResponder,
                firstResponder is NSTextView {
                 return event
             }
 
-            // Enter to focus terminal (only if terminal doesn't have focus)
+            // Cmd+Shift+Enter to focus terminal (only if terminal doesn't have focus)
+            let enterModifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
             if event.keyCode == 36,
-               !event.modifierFlags.contains(.shift),
+               enterModifiers == [.command, .shift],
                let cardID = store.selectedCardID,
                !terminalManager.isTerminalFocused(for: cardID) {
                 terminalManager.focusTerminal(for: cardID)
                 return nil
             }
 
-            guard event.modifierFlags.contains(.shift) else { return event }
+            let navModifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            guard navModifiers == [.command, .shift] else { return event }
 
-            // Shift+Arrow for navigation
+            // Cmd+Shift+Arrow for navigation
             guard let key = ArrowKey(keyCode: event.keyCode) else {
                 return event
             }
@@ -100,13 +118,28 @@ struct zenbanApp: App {
                 .environment(store)
                 .environment(terminalManager)
                 .environment(devServerManager)
+                .navigationTitle("")
                 .onAppear {
                     setupCardDeletionHandler()
                     setupNotifications()
                 }
+                .task(id: terminalConfigObserver.version) {
+                    Ghostty.App.shared?.reloadConfig()
+                    await TmuxSessionManager.shared.updateConfig()
+                }
+                .onOpenURL { url in
+                    handleZenbanURL(url)
+                }
+                .handlesExternalEvents(preferring: Set(arrayLiteral: "main"), allowing: Set(arrayLiteral: "*"))
         }
+        .handlesExternalEvents(matching: Set(arrayLiteral: "*"))
         .commands {
             BoardCommands(store: store)
+        }
+
+        Settings {
+            SettingsView()
+                .environment(store)
         }
     }
 
@@ -132,6 +165,48 @@ struct zenbanApp: App {
         }
         NotificationService.shared.onAgentResumed = { [store] cardID, boardID in
             store.moveCard(cardID, to: .todo, in: boardID)
+        }
+    }
+
+    /// Handles zenban:// URL scheme for Claude Code hooks
+    private func handleZenbanURL(_ url: URL) {
+        switch url.host {
+        case "prompt-submitted":
+            guard let cardID = store.selectedCardID,
+                  let boardID = store.selectedBoardID,
+                  let card = store.card(id: cardID) else { return }
+
+            store.activeAgentCardID = cardID
+            store.activeAgentBoardID = boardID
+
+            if card.column != .todo {
+                store.moveCard(cardID, to: .todo, in: boardID)
+            }
+
+        case "notify":
+            guard let cardID = store.activeAgentCardID,
+                  let boardID = store.activeAgentBoardID,
+                  let card = store.card(id: cardID) else { return }
+
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            let body = components?.queryItems?.first { $0.name == "body" }?.value ?? "Task completed"
+
+            NotificationService.shared.showNotification(
+                title: card.title,
+                body: body,
+                cardID: cardID,
+                boardID: boardID
+            )
+
+            if card.column == .todo {
+                store.moveCard(cardID, to: .inProgress, in: boardID)
+            }
+
+            store.activeAgentCardID = nil
+            store.activeAgentBoardID = nil
+
+        default:
+            break
         }
     }
 }

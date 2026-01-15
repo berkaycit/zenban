@@ -76,17 +76,17 @@ struct DeleteConfirmationView: View {
     }
 }
 
-private struct ConfirmationButtonStyle: ButtonStyle {
+struct ConfirmationButtonStyle: ButtonStyle {
     let isSelected: Bool
     let isDestructive: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         let background: Color = {
             if configuration.isPressed {
-                return isDestructive ? .red.opacity(0.8) : .secondary.opacity(0.3)
+                return isDestructive ? .red.opacity(0.8) : Color.buttonGreen.opacity(0.8)
             }
             if isSelected {
-                return isDestructive ? .red : .accentColor
+                return isDestructive ? .red : .buttonGreen
             }
             return .secondary.opacity(0.2)
         }()
@@ -95,7 +95,7 @@ private struct ConfirmationButtonStyle: ButtonStyle {
             .padding(.vertical, 8)
             .padding(.horizontal, 16)
             .background(background)
-            .foregroundStyle(isDestructive && isSelected ? .white : (isDestructive ? .red : .primary))
+            .foregroundStyle(isSelected ? .white : (isDestructive ? .red : .buttonGreen))
             .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

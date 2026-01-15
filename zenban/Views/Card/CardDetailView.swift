@@ -43,7 +43,10 @@ struct CardDetailView: View {
     }
 
     private var board: Board? { store.board(for: boardID) }
-    private var hasRepository: Bool { board?.repositoryPath != nil }
+    private var isGitRepository: Bool {
+        guard let path = board?.repositoryPath else { return false }
+        return GitService.isGitRepository(path: path)
+    }
 
     private var cardInfoContent: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -87,7 +90,7 @@ struct CardDetailView: View {
 
                 // Quick actions
                 HStack(spacing: 12) {
-                    if hasRepository && card.worktreePath != nil {
+                    if isGitRepository && card.worktreePath != nil {
                         Button(action: { store.toggleGitChanges() }) {
                             Image(systemName: "arrow.triangle.branch")
                                 .font(.system(size: 15))
@@ -95,6 +98,14 @@ struct CardDetailView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
                         .help("View Changes")
+
+                        Button(action: { store.toggleFileBrowser() }) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 15))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("File Browser")
 
                         Button(action: startDevServer) {
                             Image(systemName: "play.circle")
@@ -135,7 +146,7 @@ struct CardDetailView: View {
                 Spacer()
 
                 // Worktree indicator
-                if hasRepository {
+                if isGitRepository {
                     worktreeIndicator
                 }
             }
