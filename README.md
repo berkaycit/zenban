@@ -39,7 +39,9 @@ Zenban automatically moves cards between columns based on Claude Code activity:
 
 ### Setup
 
-Add the following hooks to your `~/.claude/settings.json`:
+**Automatic:** In Zenban, go to **Zenban > Install Claude Code Hooks** to automatically configure the required hooks.
+
+**Manual:** Add the following hooks to your `~/.claude/settings.json`:
 
 ```json
 {
@@ -50,7 +52,7 @@ Add the following hooks to your `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "open 'zenban://prompt-submitted'"
+            "command": "[ -n \"$ZENBAN_TERMINAL\" ] && open 'zenban://prompt-submitted'"
           }
         ]
       }
@@ -61,7 +63,7 @@ Add the following hooks to your `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "open 'zenban://notify?body=Task%20Completed'"
+            "command": "[ -n \"$ZENBAN_TERMINAL\" ] && open 'zenban://notify?body=Task%20Completed'"
           }
         ]
       }
@@ -69,5 +71,7 @@ Add the following hooks to your `~/.claude/settings.json`:
   }
 }
 ```
+
+The `$ZENBAN_TERMINAL` environment variable is automatically set when Claude Code is launched from within Zenban. This ensures the hooks only trigger for sessions started from the Zenban terminal, not from other terminals or projects.
 
 This requires Zenban to be running for the URL scheme to work.

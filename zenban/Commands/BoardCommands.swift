@@ -2,8 +2,23 @@ import SwiftUI
 
 struct BoardCommands: Commands {
     let store: BoardStore
+    @State private var hooksInstalled = ClaudeHooksInstaller.checkInstallationStatus()
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Divider()
+            Button(hooksInstalled ? "Claude Code Hooks Installed" : "Install Claude Code Hooks...") {
+                let result = ClaudeHooksInstaller.install()
+                switch result {
+                case .installed, .alreadyInstalled:
+                    hooksInstalled = true
+                case .failed:
+                    break
+                }
+            }
+            .disabled(hooksInstalled)
+        }
+
         CommandGroup(after: .newItem) {
             Button("New Board") {
                 NotificationCenter.default.post(name: .newBoard, object: nil)
@@ -47,6 +62,13 @@ struct BoardCommands: Commands {
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
+        }
+
+        CommandGroup(replacing: .help) {
+            Button("Keyboard Shortcuts") {
+                store.showKeyboardShortcuts = true
+            }
+            .keyboardShortcut("/", modifiers: .command)
         }
     }
 }

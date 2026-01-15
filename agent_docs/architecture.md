@@ -48,6 +48,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `DevServerManager` | Dev server processes. Setup (npm install), port detection, WebView preview. 100KB output buffer. |
+| `ClaudeHooksInstaller` | Installs Claude Code hooks to ~/.claude/settings.json for Zenban URL scheme integration. |
 | `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). GitDiffViewModel for batch loading with LRU cache and content hash validation. |
 | `GitHistoryView` | Commit history list with pagination. Uses GitLogService for async loading. |
 | `GitLogService` | Actor for commit history and diff retrieval via libgit2 and ProcessExecutor. |
@@ -75,6 +76,6 @@ Board stores DevServerConfig. First run prompts for commands (auto-detected from
 
 ## Keyboard Shortcuts
 
-Cmd+Shift: N (new board), A (new card), D (delete card), S (dev server), X (git changes), F (file browser). Cmd+W closes file tab.
+Cmd+Shift: N (new board), A (new card), D (delete card), S (dev server), X (git changes), F (file browser). Cmd+W closes file tab. Cmd+/ opens shortcuts help.
 Shift+Arrow: Up/Down navigates cards/boards, Left/Right moves columns. Enter focuses terminal.
 FocusRegion tracks keyboard focus. NSEvent monitor in zenbanApp for app-wide capture.

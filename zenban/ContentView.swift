@@ -81,6 +81,9 @@ struct ContentView: View {
                 )
             }
         }
+        .sheet(isPresented: $store.showKeyboardShortcuts) {
+            KeyboardShortcutsView()
+        }
         .overlay {
             if store.showDeleteConfirmation, let card = store.selectedCard {
                 ZStack {

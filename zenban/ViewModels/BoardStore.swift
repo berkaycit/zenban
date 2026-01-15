@@ -47,6 +47,7 @@ final class BoardStore {
     var draggedCardID: UUID?
     var focusRegion: FocusRegion = .sidebar
     var showDeleteConfirmation = false
+    var showKeyboardShortcuts = false
 
     // Unified overlay state (FSM)
     var overlayState: OverlayState = .none
