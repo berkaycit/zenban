@@ -177,6 +177,31 @@ actor TmuxSessionManager {
         }
     }
 
+    /// Send keys to a tmux session
+    /// - Parameters:
+    ///   - paneId: The pane/card UUID string
+    ///   - keys: Keys to send (e.g., "C-c" for Ctrl+C)
+    ///   - execute: If true, sends Enter after keys to execute as command
+    nonisolated func sendKeys(paneId: String, keys: String, execute: Bool = false) {
+        guard let tmux = tmuxPath() else { return }
+
+        let sessionName = sessionPrefix + paneId
+        var args = ["send-keys", "-t", sessionName, keys]
+        if execute { args.append("Enter") }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tmux)
+        process.arguments = args
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            Self.logger.error("Failed to send keys to tmux session: \(sessionName)")
+        }
+    }
+
     /// Kill a specific tmux session
     func killSession(paneId: String) async {
         guard let tmux = tmuxPath() else {

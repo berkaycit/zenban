@@ -128,20 +128,20 @@ final class TerminalManager {
     func switchAgent(for cardID: UUID, to agent: Agent) {
         guard let terminalView = terminalViews[cardID] else { return }
 
-        // Send Ctrl+C twice to exit agent
-        terminalView.send(text: "\u{03}")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            terminalView.send(text: "\u{03}")
+        let paneId = cardID.uuidString
+
+        // Send Ctrl+C twice via tmux (more reliable than terminal surface)
+        TmuxSessionManager.shared.sendKeys(paneId: paneId, keys: "C-c")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            TmuxSessionManager.shared.sendKeys(paneId: paneId, keys: "C-c")
         }
 
-        // Clear terminal
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            terminalView.send(text: "clear\n")
-        }
+        // Update terminal state to reflect agent exit
+        terminalView.notifyAgentExited()
 
-        // Launch new agent
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-            terminalView.send(text: agent.launchCommand + "\n")
+        // Launch new agent (no clear needed - agents draw their own startup screens)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            TmuxSessionManager.shared.sendKeys(paneId: paneId, keys: agent.launchCommand, execute: true)
             terminalView.notifyAgentLaunched()
         }
     }

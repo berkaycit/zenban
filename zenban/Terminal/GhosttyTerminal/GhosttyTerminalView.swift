@@ -392,11 +392,6 @@ class GhosttyTerminalView: NSView {
 
     func send(text: String) {
         guard let surface = surface else { return }
-
-        if text.contains("\u{03}") {
-            transition(event: .agentExited)
-        }
-
         surface.sendText(text)
     }
 
@@ -434,6 +429,10 @@ class GhosttyTerminalView: NSView {
 
     func notifyNewMessageSent() {
         transition(event: .newMessageSent)
+    }
+
+    func notifyAgentExited() {
+        transition(event: .agentExited)
     }
 
     // MARK: - State Machine
