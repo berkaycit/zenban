@@ -37,7 +37,7 @@ struct GitHistoryView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Text("History")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
 
             Spacer()
 
