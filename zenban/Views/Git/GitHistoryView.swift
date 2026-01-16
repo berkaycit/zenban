@@ -115,11 +115,6 @@ struct GitHistoryView: View {
     private var commitsList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if selectedCommit != nil {
-                    workingChangesRow
-                    Divider()
-                }
-
                 ForEach(commits) { commit in
                     commitRow(commit)
                         .onAppear {
@@ -157,33 +152,6 @@ struct GitHistoryView: View {
                     .buttonStyle(.plain)
                 }
             }
-        }
-    }
-
-    private var workingChangesRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "pencil.circle")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 24)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Working Changes")
-                    .font(.system(size: 12, weight: .medium))
-
-                Text("View uncommitted changes")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onSelectCommit(nil)
         }
     }
 
