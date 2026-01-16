@@ -208,9 +208,6 @@ struct GitChangesView: View {
                     Text("Changes")
                         .font(.headline)
                 }
-            } else {
-                Text("History")
-                    .font(.headline)
             }
 
             Spacer()
