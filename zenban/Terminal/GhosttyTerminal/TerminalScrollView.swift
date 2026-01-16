@@ -7,7 +7,6 @@
 //
 
 import AppKit
-import Combine
 
 /// Wraps a Ghostty terminal view in an NSScrollView to provide native macOS scrollbar support.
 ///
@@ -26,14 +25,16 @@ class TerminalScrollView: NSView {
     let surfaceView: GhosttyTerminalView
     private var observers: [NSObjectProtocol] = []
     private var isLiveScrolling = false
+    private var isWaitingForScrollbar = false
 
     /// The last row position sent via scroll_to_row action. Used to avoid
     /// sending redundant actions when the user drags the scrollbar but stays
     /// on the same row.
     private var lastSentRow: Int?
 
-    init(contentSize: CGSize, surfaceView: GhosttyTerminalView) {
+    init(contentSize: CGSize, surfaceView: GhosttyTerminalView, hasScrollStateToRestore: Bool = false) {
         self.surfaceView = surfaceView
+        self.isWaitingForScrollbar = hasScrollStateToRestore
 
         // The scroll view is our outermost view that controls all our scrollbar
         // rendering and behavior.
@@ -66,6 +67,11 @@ class TerminalScrollView: NSView {
 
         // Apply initial scrollbar settings
         synchronizeAppearance()
+
+        // If restoring scroll state, hide terminal until first scrollbar update positions it correctly
+        if isWaitingForScrollbar {
+            surfaceView.alphaValue = 0
+        }
 
         // We listen for scroll events through bounds notifications on our NSClipView.
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -237,6 +243,19 @@ class TerminalScrollView: NSView {
         }
         surfaceView.scrollbar = scrollbar
         synchronizeScrollView()
+
+        // Reveal terminal on first scrollbar update (scroll position is now correct)
+        if isWaitingForScrollbar {
+            isWaitingForScrollbar = false
+            revealTerminal()
+        }
+    }
+
+    private func revealTerminal() {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            surfaceView.animator().alphaValue = 1.0
+        }
     }
 
     // MARK: - Calculations

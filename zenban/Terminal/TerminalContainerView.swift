@@ -70,7 +70,12 @@ struct TerminalContainerView: NSViewRepresentable {
                 scrollView.frame = hostView.bounds
                 scrollView.autoresizingMask = [.width, .height]
             } else {
-                let newScrollView = TerminalScrollView(contentSize: hostView.bounds.size, surfaceView: terminal)
+                let hasScrollStateToRestore = terminalManager.cachedScrollState(for: cardID) != nil
+                let newScrollView = TerminalScrollView(
+                    contentSize: hostView.bounds.size,
+                    surfaceView: terminal,
+                    hasScrollStateToRestore: hasScrollStateToRestore
+                )
                 newScrollView.frame = hostView.bounds
                 newScrollView.autoresizingMask = [.width, .height]
                 terminalManager.setScrollView(newScrollView, for: cardID)

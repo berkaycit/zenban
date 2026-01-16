@@ -18,6 +18,8 @@ final class TerminalManager {
     private var pendingCleanup: [UUID: GhosttyTerminalView] = [:]
     /// Tracks scheduled cleanup tasks for proper cancellation
     private var cleanupTasks: [UUID: Task<Void, Never>] = [:]
+    /// Cached scroll state for hibernated terminals (position + cell size for restoration)
+    private var cachedScrollStates: [UUID: (scrollbar: Ghostty.Action.Scrollbar, cellSize: NSSize)] = [:]
     weak var boardStore: BoardStore?
 
     var isTerminalAvailable: Bool { Ghostty.App.shared?.readiness == .ready }
@@ -103,6 +105,10 @@ final class TerminalManager {
         evictIfNeeded()
     }
 
+    func cachedScrollState(for cardID: UUID) -> (scrollbar: Ghostty.Action.Scrollbar, cellSize: NSSize)? {
+        cachedScrollStates[cardID]
+    }
+
     func killSessionForCard(_ cardID: UUID) async {
         if let terminalView = terminalViews[cardID] {
             terminalView.terminate()
@@ -111,6 +117,7 @@ final class TerminalManager {
         agentLaunchedForCard.remove(cardID)
         pendingWorktreeReady.removeValue(forKey: cardID)
         hibernatedCards.remove(cardID)
+        cachedScrollStates.removeValue(forKey: cardID)
         // Note: Do NOT remove from pendingCleanup here - the terminal must stay
         // alive temporarily to prevent dangling pointer crash from Ghostty callbacks
 
@@ -176,6 +183,7 @@ final class TerminalManager {
         hibernatedCards.removeAll()
         pendingCleanup.removeAll()
         cleanupTasks.removeAll()
+        cachedScrollStates.removeAll()
     }
 
     func focusTerminal(for cardID: UUID) {
@@ -194,6 +202,11 @@ final class TerminalManager {
     /// The tmux session is preserved, allowing restoration when switching back.
     func hibernateTerminal(for cardID: UUID) {
         guard let terminalView = terminalViews[cardID] else { return }
+
+        // Cache scroll state before hibernating for seamless restoration
+        if let scrollbar = terminalView.scrollbar, terminalView.cellSize.height > 0 {
+            cachedScrollStates[cardID] = (scrollbar, terminalView.cellSize)
+        }
 
         terminalView.terminate()
         cleanupTerminal(terminalView)

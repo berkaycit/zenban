@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add terminal scroll restoration on card switch
+- **Description**: TerminalManager caches scroll state (position + cell size) when hibernating terminals. TerminalScrollView hides terminal on wake until first scrollbar update positions it correctly, then fades in. Eliminates visible scroll animation when switching between cards with scrolled terminals.
+
 - **Summary**: Add Git History tab with fast diff loading
 - **Description**: GitChangesView now has two tabs: Changes and History. History tab shows paginated commit list (GitHistoryView) with diff panel. GitLogService actor fetches commits via libgit2 and diffs via non-blocking ProcessExecutor. DiffView refactored from lazy O(n^2) parsing to upfront O(n) single-pass parsing, eliminating DiffLineParser. New utilities: ProcessExecutor for async subprocess execution, RelativeDateFormatter for date display.
 
