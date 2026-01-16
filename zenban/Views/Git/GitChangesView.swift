@@ -621,7 +621,7 @@ struct GitChangesView: View {
                     .background(Color.black.opacity(0.02))
                 } else if let diff = historyFileDiffs[file.path] {
                     DiffView(diffOutput: diff, fontSize: 12, fontFamily: "Menlo")
-                        .frame(minHeight: 640, maxHeight: 640)
+                        .frame(minHeight: 812, maxHeight: 812)
                 }
             }
 
