@@ -35,7 +35,7 @@ To rebuild libghostty at a specific commit:
 
 Zenban automatically moves cards between columns based on Claude Code activity:
 - **User sends prompt** → Card moves to "To Do"
-- **Claude becomes idle** → Card moves to "In Review"
+- **Claude stops** → Card moves to "In Review"
 
 ### Setup
 
@@ -57,9 +57,9 @@ Zenban automatically moves cards between columns based on Claude Code activity:
         ]
       }
     ],
-    "Notification": [
+    "Stop": [
       {
-        "matcher": "idle_prompt",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",

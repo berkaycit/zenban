@@ -12,8 +12,8 @@ enum ClaudeHooksInstaller {
                 "command": "[ -n \"$ZENBAN_TERMINAL\" ] && open 'zenban://prompt-submitted'"
             ]]
         ]],
-        "Notification": [[
-            "matcher": "idle_prompt",
+        "Stop": [[
+            "matcher": "",
             "hooks": [[
                 "type": "command",
                 "command": "[ -n \"$ZENBAN_TERMINAL\" ] && open 'zenban://notify?body=Task%20Completed'"
@@ -32,7 +32,7 @@ enum ClaudeHooksInstaller {
         guard let hooks = settings["hooks"] as? [String: Any] else { return false }
 
         return hasRequiredHook(hooks, type: "UserPromptSubmit") &&
-               hasRequiredHook(hooks, type: "Notification")
+               hasRequiredHook(hooks, type: "Stop")
     }
 
     static func install() -> InstallResult {
