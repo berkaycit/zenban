@@ -190,41 +190,33 @@ struct GitHistoryView: View {
     private func commitRow(_ commit: GitCommit) -> some View {
         let isSelected = selectedCommit?.id == commit.id
 
-        return HStack(spacing: 10) {
-            Text(commit.shortHash)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 60, alignment: .leading)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(commit.message)
+                .font(.system(size: 12))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(commit.message)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            HStack(spacing: 8) {
+                Text(commit.author)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
 
-                HStack(spacing: 8) {
-                    Text(commit.author)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                Text(commit.relativeDate)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
 
-                    Text(commit.relativeDate)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-            }
+                Spacer()
 
-            Spacer()
-
-            HStack(spacing: 6) {
                 if commit.filesChanged > 0 {
-                    Text("\(commit.filesChanged)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-
-                    Image(systemName: "doc")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 2) {
+                        Text("\(commit.filesChanged)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "doc")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if commit.additions > 0 {
@@ -240,6 +232,7 @@ struct GitHistoryView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)

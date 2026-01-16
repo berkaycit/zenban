@@ -31,4 +31,48 @@ actor GitLogService {
         )
         return result.stdout
     }
+
+    func getCommitFiles(hash: String, at repoPath: String) async throws -> [CommitFileChange] {
+        let result = try await ProcessExecutor.shared.executeWithOutput(
+            executable: "/usr/bin/git",
+            arguments: ["show", "--format=", "--numstat", hash],
+            workingDirectory: repoPath
+        )
+
+        var files: [CommitFileChange] = []
+        let lines = result.stdout.split(separator: "\n", omittingEmptySubsequences: true)
+
+        for line in lines {
+            let parts = line.split(separator: "\t")
+            guard parts.count >= 3 else { continue }
+
+            let additions = Int(parts[0]) ?? 0
+            let deletions = Int(parts[1]) ?? 0
+            let path = String(parts[2])
+
+            files.append(CommitFileChange(
+                path: path,
+                additions: additions,
+                deletions: deletions
+            ))
+        }
+
+        return files
+    }
+
+    func getCommitFileDiff(hash: String, filePath: String, at repoPath: String) async throws -> String {
+        let result = try await ProcessExecutor.shared.executeWithOutput(
+            executable: "/usr/bin/git",
+            arguments: ["show", "--format=", hash, "--", filePath],
+            workingDirectory: repoPath
+        )
+        return result.stdout
+    }
+}
+
+struct CommitFileChange: Identifiable, Equatable {
+    var id: String { path }
+    let path: String
+    let additions: Int
+    let deletions: Int
 }

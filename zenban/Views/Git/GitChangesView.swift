@@ -32,6 +32,16 @@ struct GitChangesView: View {
     @State private var isHistoryDiffLoading = false
     @State private var historyDiffError: String?
 
+    // History files state
+    @State private var historyCommitFiles: [CommitFileChange] = []
+    @State private var expandedHistoryFiles: Set<String> = []
+    @State private var historyFileDiffs: [String: String] = [:]
+    @State private var loadingHistoryFileDiffs: Set<String> = []
+
+    // Panel widths for HStack layout (like DevServerView)
+    @State private var changesListWidth: CGFloat = 240
+    @State private var historyListWidth: CGFloat = 300
+
     // Task handles for cancellation
     @State private var loadChangesTask: Task<Void, any Error>?
     @State private var loadBranchesTask: Task<Void, any Error>?
@@ -79,6 +89,7 @@ struct GitChangesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .background(Color.cardBackground)
         .compositingGroup()
         .onAppear {
@@ -346,13 +357,41 @@ struct GitChangesView: View {
     }
 
     private var changesListView: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             changesListPanel
-                .frame(minWidth: 180, idealWidth: 200, maxWidth: 220)
+                .frame(width: changesListWidth)
+
+            panelResizeHandle(width: $changesListWidth, minWidth: 220, maxWidth: 280)
 
             diffDetailPanel
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private func panelResizeHandle(width: Binding<CGFloat>, minWidth: CGFloat, maxWidth: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .overlay(
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(width: 8)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                let newWidth = width.wrappedValue + value.translation.width
+                                width.wrappedValue = max(minWidth, min(maxWidth, newWidth))
+                            }
+                    )
+                    .onHover { hovering in
+                        if hovering {
+                            NSCursor.resizeLeftRight.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+            )
     }
 
     private var changesListPanel: some View {
@@ -446,7 +485,7 @@ struct GitChangesView: View {
     // MARK: - History Views
 
     private var historyContentSection: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             GitHistoryView(
                 worktreePath: worktreePath,
                 selectedCommit: selectedHistoryCommit,
@@ -454,7 +493,9 @@ struct GitChangesView: View {
                     selectedHistoryCommit = commit
                 }
             )
-            .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+            .frame(width: historyListWidth)
+
+            panelResizeHandle(width: $historyListWidth, minWidth: 320, maxWidth: 360)
 
             historyDiffPanel
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -499,14 +540,139 @@ struct GitChangesView: View {
 
     @ViewBuilder
     private var historyDiffContentSection: some View {
-        if isHistoryDiffLoading {
+        if isHistoryDiffLoading && historyCommitFiles.isEmpty {
             diffLoadingView
         } else if let error = historyDiffError {
             errorView(error) { loadHistoryDiff(for: selectedHistoryCommit) }
-        } else if historyDiffOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            noDiffView("No diff to display")
+        } else if historyCommitFiles.isEmpty {
+            noDiffView("No files changed")
         } else {
-            DiffView(diffOutput: historyDiffOutput, fontSize: 12, fontFamily: "Menlo")
+            historyFilesListView
+        }
+    }
+
+    private var historyFilesListView: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(historyCommitFiles) { file in
+                    historyFileRow(file)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func historyFileRow(_ file: CommitFileChange) -> some View {
+        let isExpanded = expandedHistoryFiles.contains(file.path)
+
+        VStack(spacing: 0) {
+            Button {
+                toggleHistoryFile(file)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+
+                    Image(systemName: fileIcon(for: file.path))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+
+                    Text(file.path)
+                        .font(.system(size: 14, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    Spacer()
+
+                    HStack(spacing: 4) {
+                        if file.additions > 0 {
+                            Text("+\(file.additions)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.green)
+                        }
+                        if file.deletions > 0 {
+                            Text("-\(file.deletions)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                let isLoading = loadingHistoryFileDiffs.contains(file.path)
+
+                if isLoading {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Loading diff...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.black.opacity(0.02))
+                } else if let diff = historyFileDiffs[file.path] {
+                    DiffView(diffOutput: diff, fontSize: 12, fontFamily: "Menlo")
+                        .frame(minHeight: 640, maxHeight: 640)
+                }
+            }
+
+            Divider()
+        }
+    }
+
+    private func fileIcon(for path: String) -> String {
+        let ext = (path as NSString).pathExtension.lowercased()
+        switch ext {
+        case "swift": return "swift"
+        case "js", "ts", "jsx", "tsx": return "chevron.left.forwardslash.chevron.right"
+        case "json": return "curlybraces"
+        case "md": return "doc.text"
+        case "css", "scss": return "paintbrush"
+        case "html": return "globe"
+        default: return "doc"
+        }
+    }
+
+    private func toggleHistoryFile(_ file: CommitFileChange) {
+        if expandedHistoryFiles.contains(file.path) {
+            expandedHistoryFiles.remove(file.path)
+        } else {
+            expandedHistoryFiles.insert(file.path)
+            if historyFileDiffs[file.path] == nil {
+                loadHistoryFileDiff(for: file)
+            }
+        }
+    }
+
+    private func loadHistoryFileDiff(for file: CommitFileChange) {
+        loadingHistoryFileDiffs.insert(file.path)
+
+        Task {
+            do {
+                let diff: String
+                if let commit = selectedHistoryCommit {
+                    diff = try await historyLogService.getCommitFileDiff(
+                        hash: commit.id,
+                        filePath: file.path,
+                        at: worktreePath
+                    )
+                } else {
+                    diff = try await GitService.getDiff(worktreePath: worktreePath, file: file.path)
+                }
+                historyFileDiffs[file.path] = diff
+            } catch {
+                historyFileDiffs[file.path] = "Failed to load diff: \(error.localizedDescription)"
+            }
+            loadingHistoryFileDiffs.remove(file.path)
         }
     }
 
@@ -706,18 +872,22 @@ struct GitChangesView: View {
         historyDiffTask?.cancel()
         historyDiffError = nil
         isHistoryDiffLoading = true
-        historyDiffOutput = ""
+        historyCommitFiles = []
+        expandedHistoryFiles = []
+        historyFileDiffs = [:]
 
         historyDiffTask = Task {
             do {
-                let output = if let commit {
-                    try await historyLogService.getCommitDiff(hash: commit.id, at: path)
+                if let commit {
+                    let files = try await historyLogService.getCommitFiles(hash: commit.id, at: path)
+                    guard !Task.isCancelled else { return }
+                    historyCommitFiles = files
                 } else {
-                    try await GitService.getDiff(worktreePath: path)
+                    // For working changes, use the branch changes
+                    historyCommitFiles = branchChanges.map { change in
+                        CommitFileChange(path: change.path, additions: change.additions, deletions: change.deletions)
+                    }
                 }
-
-                guard !Task.isCancelled else { return }
-                historyDiffOutput = output
                 isHistoryDiffLoading = false
             } catch {
                 guard !Task.isCancelled else { return }
