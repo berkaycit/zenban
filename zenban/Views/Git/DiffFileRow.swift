@@ -14,7 +14,7 @@ struct DiffFileRow: View {
             statusIcon
 
             Text(fileName)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 14, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
 

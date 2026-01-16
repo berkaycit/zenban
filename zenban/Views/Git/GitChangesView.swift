@@ -361,7 +361,7 @@ struct GitChangesView: View {
             changesListPanel
                 .frame(width: changesListWidth)
 
-            panelResizeHandle(width: $changesListWidth, minWidth: 220, maxWidth: 280)
+            panelResizeHandle(width: $changesListWidth, minWidth: 240, maxWidth: 280)
 
             diffDetailPanel
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
