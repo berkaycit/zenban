@@ -23,12 +23,12 @@ struct DiffFileRow: View {
             HStack(spacing: 6) {
                 if file.additions > 0 {
                     Text("+\(file.additions)")
-                        .font(.caption.monospaced())
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(.green)
                 }
                 if file.deletions > 0 {
                     Text("-\(file.deletions)")
-                        .font(.caption.monospaced())
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(.red)
                 }
             }

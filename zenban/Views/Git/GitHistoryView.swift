@@ -189,13 +189,13 @@ struct GitHistoryView: View {
 
                 if commit.additions > 0 {
                     Text("+\(commit.additions)")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(.green)
                 }
 
                 if commit.deletions > 0 {
                     Text("-\(commit.deletions)")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(.red)
                 }
             }
