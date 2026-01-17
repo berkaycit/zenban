@@ -37,8 +37,8 @@ struct CardDetailView: View {
     private var cardInfoSection: some View {
         ScrollView {
             cardInfoContent
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
         }
     }
 
@@ -49,7 +49,7 @@ struct CardDetailView: View {
     }
 
     private var cardInfoContent: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 16) {
             // Header: Title + Actions
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -164,6 +164,7 @@ struct CardDetailView: View {
                 Button(action: { action(item) }) {
                     Text(item.rawValue)
                         .font(.callout)
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(selected == item ? color(item) : Color.clear)
@@ -190,6 +191,8 @@ struct CardDetailView: View {
                 Text((path as NSString).lastPathComponent)
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
             } else {
                 Text("Creating...")
                     .font(.subheadline)

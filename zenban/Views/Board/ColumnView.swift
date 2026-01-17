@@ -44,7 +44,7 @@ struct ColumnView: View {
                 .padding(12)
             }
         }
-        .frame(width: 280)
+        .frame(minWidth: 180, idealWidth: 260, maxWidth: 300)
         .background(isTargeted ? Color.accentColor.opacity(0.1) : Color.columnBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(

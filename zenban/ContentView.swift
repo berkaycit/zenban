@@ -50,7 +50,7 @@ struct ContentView: View {
                     )
                 }
             }
-            .navigationSplitViewColumnWidth(min: 800, ideal: 900, max: 1000)
+            .navigationSplitViewColumnWidth(min: 600, ideal: 800, max: 1000)
         } detail: {
             // Card detail
             if let board = store.selectedBoard, let card = store.selectedCard {
@@ -68,7 +68,7 @@ struct ContentView: View {
             store.draggedCardID = nil
             store.stopOverlays()
         }
-        .frame(minWidth: 1500, minHeight: 600)
+        .frame(minWidth: 1200, minHeight: 600)
         .sheet(isPresented: $store.showDevServerConfig) {
             if let card = store.devServerCard,
                let worktreePath = card.worktreePath,
