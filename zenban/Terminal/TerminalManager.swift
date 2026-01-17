@@ -45,12 +45,17 @@ final class TerminalManager {
 
         // Clear pending state if user switched back quickly
         pendingCleanup.removeValue(forKey: cardID)
-        hibernatedCards.remove(cardID)
+        let wasHibernated = hibernatedCards.remove(cardID) != nil
 
         let isRestoringTmuxSession = TmuxSessionManager.shared.isTmuxAvailable()
             && TmuxSessionManager.shared.sessionExistsSync(paneId: cardID.uuidString)
+
         if isRestoringTmuxSession {
+            // tmux session exists, agent is already running
             agentLaunchedForCard.insert(cardID)
+        } else if wasHibernated {
+            // Card was hibernated but tmux session is gone - agent needs to be relaunched
+            agentLaunchedForCard.remove(cardID)
         }
 
         let board = boardStore?.board(for: boardID)
