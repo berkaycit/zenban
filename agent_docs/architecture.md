@@ -49,7 +49,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `DevServerManager` | Dev server processes. Setup (npm install), port detection, WebView preview. 100KB output buffer. |
 | `ClaudeHooksInstaller` | Installs Claude Code hooks to ~/.claude/settings.json for Zenban URL scheme integration. |
-| `DependencyCheckService` | Actor for checking/installing Homebrew and tmux. Startup check shows DependencySetupView modal if missing. |
+| `DependencyCheckService` | Actor for checking/installing dependencies (Homebrew, tmux required; gh, Claude CLI optional). Shows DependencySetupView modal on startup if required deps missing. |
 | `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). GitDiffViewModel for batch loading with LRU cache and content hash validation. |
 | `GitHistoryView` | Commit history list with pagination. Uses GitLogService for async loading. |
 | `GitLogService` | Actor for commit history and diff retrieval via libgit2 and ProcessExecutor. |

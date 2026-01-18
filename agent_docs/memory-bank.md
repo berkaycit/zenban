@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add optional gh and Claude CLI dependencies
+- **Description**: DependencyCheckService now tracks four dependencies: Homebrew and tmux (required), gh and Claude Code CLI (optional). Status struct has subscript for cleaner dependency lookup. Optional deps shown with "(Optional)" label in orange; required deps in red when missing. Dialog only auto-shows when required deps are missing. Claude CLI installed via npm with ProcessEnvironment for nvm support.
+
 - **Summary**: Add automatic dependency check and installer
 - **Description**: App now checks for Homebrew and tmux on startup and shows inline installer dialog if missing. DependencyCheckService actor handles detection and installation with real-time output streaming. DependencySetupView modal displays status, install progress, and skip option (persisted via UserDefaults). Integrated into app startup via BoardStore.checkDependencies() call.
 

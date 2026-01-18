@@ -273,7 +273,7 @@ final class BoardStore {
 
     func checkDependencies() {
         dependencyStatus = DependencyCheckService.shared.checkAll()
-        if let status = dependencyStatus, !status.allSatisfied,
+        if let status = dependencyStatus, !status.allRequired,
            !UserDefaults.standard.bool(forKey: Self.skipDependencyCheckKey) {
             showDependencySetup = true
         }

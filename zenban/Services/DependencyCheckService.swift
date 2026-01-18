@@ -2,7 +2,7 @@
 //  DependencyCheckService.swift
 //  zenban
 //
-//  Checks and installs required dependencies (Homebrew, tmux)
+//  Checks and installs runtime dependencies
 //
 
 import Foundation
@@ -19,14 +19,36 @@ actor DependencyCheckService {
         "/usr/local/bin/brew"      // Intel
     ]
 
+    private static let ghPaths = [
+        "/opt/homebrew/bin/gh",
+        "/usr/local/bin/gh"
+    ]
+
+    private static let claudePaths = [
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+        "/usr/bin/claude"
+    ]
+
     enum Dependency: String, CaseIterable {
         case homebrew = "Homebrew"
         case tmux = "tmux"
+        case gh = "GitHub CLI"
+        case claude = "Claude Code CLI"
 
         var description: String {
             switch self {
             case .homebrew: "Package manager for macOS"
             case .tmux: "Terminal session persistence"
+            case .gh: "Pull request creation"
+            case .claude: "AI commit messages"
+            }
+        }
+
+        var isRequired: Bool {
+            switch self {
+            case .homebrew, .tmux: true
+            case .gh, .claude: false
             }
         }
     }
@@ -34,8 +56,20 @@ actor DependencyCheckService {
     struct Status: Equatable {
         var homebrew: Bool
         var tmux: Bool
+        var gh: Bool
+        var claude: Bool
 
-        var allSatisfied: Bool { homebrew && tmux }
+        var allRequired: Bool { homebrew && tmux }
+        var allSatisfied: Bool { homebrew && tmux && gh && claude }
+
+        subscript(_ dependency: Dependency) -> Bool {
+            switch dependency {
+            case .homebrew: homebrew
+            case .tmux: tmux
+            case .gh: gh
+            case .claude: claude
+            }
+        }
     }
 
     private init() {}
@@ -43,11 +77,24 @@ actor DependencyCheckService {
     // MARK: - Dependency Checks
 
     nonisolated func checkAll() -> Status {
-        Status(homebrew: homebrewPath() != nil, tmux: TmuxSessionManager.shared.isTmuxAvailable())
+        Status(
+            homebrew: homebrewPath() != nil,
+            tmux: TmuxSessionManager.shared.isTmuxAvailable(),
+            gh: ghPath() != nil,
+            claude: claudePath() != nil
+        )
     }
 
     nonisolated func homebrewPath() -> String? {
         Self.homebrewPaths.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    nonisolated func ghPath() -> String? {
+        Self.ghPaths.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    nonisolated func claudePath() -> String? {
+        Self.claudePaths.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     // MARK: - Installation
@@ -92,7 +139,51 @@ actor DependencyCheckService {
         Self.logger.info("tmux installation completed")
     }
 
-    /// Install all missing dependencies in order
+    func installGh(outputHandler: @escaping @Sendable (String) -> Void) async throws {
+        guard let brewPath = homebrewPath() else {
+            throw DependencyError.homebrewRequired
+        }
+
+        Self.logger.info("Starting GitHub CLI installation")
+        outputHandler("Installing GitHub CLI...\n")
+
+        try await runInstallCommand(
+            command: brewPath,
+            arguments: ["install", "gh"],
+            outputHandler: outputHandler
+        )
+
+        guard ghPath() != nil else {
+            outputHandler("\nGitHub CLI installation may have failed. Please check the output above.\n")
+            throw DependencyError.installationFailed("GitHub CLI")
+        }
+        outputHandler("\nGitHub CLI installed successfully.\n")
+        Self.logger.info("GitHub CLI installation completed")
+    }
+
+    func installClaude(outputHandler: @escaping @Sendable (String) -> Void) async throws {
+        Self.logger.info("Starting Claude Code CLI installation")
+        outputHandler("Installing Claude Code CLI...\n")
+
+        // Use npm with node environment support
+        var env = ProcessEnvironment.buildWithNodeSupport()
+        env["NONINTERACTIVE"] = "1"
+
+        try await runInstallCommand(
+            command: "/bin/bash",
+            arguments: ["-c", "npm install -g @anthropic-ai/claude-code"],
+            environment: env,
+            outputHandler: outputHandler
+        )
+
+        guard claudePath() != nil else {
+            outputHandler("\nClaude Code CLI installation may have failed. Please check the output above.\n")
+            throw DependencyError.installationFailed("Claude Code CLI")
+        }
+        outputHandler("\nClaude Code CLI installed successfully.\n")
+        Self.logger.info("Claude Code CLI installation completed")
+    }
+
     func installMissing(outputHandler: @escaping @Sendable (String) -> Void) async throws {
         let status = checkAll()
 
@@ -103,6 +194,16 @@ actor DependencyCheckService {
 
         if !status.tmux {
             try await installTmux(outputHandler: outputHandler)
+            outputHandler("\n")
+        }
+
+        if !status.gh {
+            try await installGh(outputHandler: outputHandler)
+            outputHandler("\n")
+        }
+
+        if !status.claude {
+            try await installClaude(outputHandler: outputHandler)
         }
 
         let finalStatus = checkAll()
@@ -116,6 +217,7 @@ actor DependencyCheckService {
     private func runInstallCommand(
         command: String,
         arguments: [String],
+        environment: [String: String]? = nil,
         outputHandler: @escaping @Sendable (String) -> Void
     ) async throws {
         let process = Process()
@@ -123,7 +225,7 @@ actor DependencyCheckService {
         process.arguments = arguments
 
         // Set up environment for non-interactive installation
-        var env = ProcessInfo.processInfo.environment
+        var env = environment ?? ProcessInfo.processInfo.environment
         env["NONINTERACTIVE"] = "1"
         env["CI"] = "1"
         process.environment = env

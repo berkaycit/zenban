@@ -35,7 +35,8 @@ struct DependencySetupView: View {
                 ForEach(DependencyCheckService.Dependency.allCases, id: \.self) { dep in
                     DependencyRow(
                         dependency: dep,
-                        isInstalled: isInstalled(dep)
+                        isInstalled: isInstalled(dep),
+                        isRequired: dep.isRequired
                     )
                 }
             }
@@ -135,11 +136,7 @@ struct DependencySetupView: View {
     }
 
     private func isInstalled(_ dependency: DependencyCheckService.Dependency) -> Bool {
-        guard let status = store.dependencyStatus else { return false }
-        switch dependency {
-        case .homebrew: return status.homebrew
-        case .tmux: return status.tmux
-        }
+        store.dependencyStatus?[dependency] ?? false
     }
 
     private func installMissing() {
@@ -171,16 +168,24 @@ struct DependencySetupView: View {
 private struct DependencyRow: View {
     let dependency: DependencyCheckService.Dependency
     let isInstalled: Bool
+    let isRequired: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: isInstalled ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(isInstalled ? .green : .red)
+                .foregroundStyle(isInstalled ? .green : (isRequired ? .red : .orange))
                 .font(.title3)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(dependency.rawValue)
-                    .fontWeight(.medium)
+                HStack(spacing: 6) {
+                    Text(dependency.rawValue)
+                        .fontWeight(.medium)
+                    if !isRequired {
+                        Text("(Optional)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Text(dependency.description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
