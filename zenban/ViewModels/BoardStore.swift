@@ -48,6 +48,12 @@ final class BoardStore {
     var focusRegion: FocusRegion = .sidebar
     var showDeleteConfirmation = false
     var showKeyboardShortcuts = false
+    var showDependencySetup = false
+
+    // Dependency checking state
+    var dependencyStatus: DependencyCheckService.Status?
+    var isInstallingDependency = false
+    var installationOutput = ""
 
     // Unified overlay state (FSM)
     var overlayState: OverlayState = .none
@@ -259,6 +265,23 @@ final class BoardStore {
     init() {
         boards = BoardStorage.load()
         selectedBoardID = boards.first?.id
+    }
+
+    // MARK: - Dependency Management
+
+    private static let skipDependencyCheckKey = "skipDependencyCheck"
+
+    func checkDependencies() {
+        dependencyStatus = DependencyCheckService.shared.checkAll()
+        if let status = dependencyStatus, !status.allSatisfied,
+           !UserDefaults.standard.bool(forKey: Self.skipDependencyCheckKey) {
+            showDependencySetup = true
+        }
+    }
+
+    func skipDependencySetup() {
+        UserDefaults.standard.set(true, forKey: Self.skipDependencyCheckKey)
+        showDependencySetup = false
     }
 
     // MARK: - Board Operations

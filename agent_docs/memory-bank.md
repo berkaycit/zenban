@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add automatic dependency check and installer
+- **Description**: App now checks for Homebrew and tmux on startup and shows inline installer dialog if missing. DependencyCheckService actor handles detection and installation with real-time output streaming. DependencySetupView modal displays status, install progress, and skip option (persisted via UserDefaults). Integrated into app startup via BoardStore.checkDependencies() call.
+
 - **Summary**: Add terminal scroll restoration on card switch
 - **Description**: TerminalManager caches scroll state (position + cell size) when hibernating terminals. TerminalScrollView hides terminal on wake until first scrollbar update positions it correctly, then fades in. Eliminates visible scroll animation when switching between cards with scrolled terminals.
 

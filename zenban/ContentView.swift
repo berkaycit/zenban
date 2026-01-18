@@ -99,6 +99,16 @@ struct ContentView: View {
                 }
             }
         }
+        .overlay {
+            if store.showDependencySetup {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+
+                    DependencySetupView()
+                }
+            }
+        }
     }
 }
 

@@ -48,7 +48,7 @@ struct zenbanApp: App {
             if NSApp.keyWindow?.sheetParent != nil {
                 return event
             }
-            if store.showDeleteConfirmation {
+            if store.showDeleteConfirmation || store.showDependencySetup {
                 return event
             }
 
@@ -122,6 +122,7 @@ struct zenbanApp: App {
                 .onAppear {
                     setupCardDeletionHandler()
                     setupNotifications()
+                    store.checkDependencies()
                 }
                 .task(id: terminalConfigObserver.version) {
                     Ghostty.App.shared?.reloadConfig()
