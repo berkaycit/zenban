@@ -30,8 +30,7 @@ struct ClaudeService: AIProvider {
     // MARK: - Path Resolution
 
     private static var executablePath: String? {
-        ["/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/usr/bin/claude"]
-            .first { FileManager.default.fileExists(atPath: $0) }
+        DependencyCheckService.shared.claudePath()
     }
 
     // MARK: - CLI Execution
