@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Robust Claude CLI install with node support
+- **Description**: DependencyCheckService now auto-installs Node.js via Homebrew if npm is missing before installing Claude CLI. Added npmPath() and installNode() functions. ProcessEnvironment extended to detect volta and fnm node managers alongside nvm. New findExecutable() helper consolidates path-checking logic. GeneralSettingsView shows dependency status with check/install buttons.
+
 - **Summary**: Add optional gh and Claude CLI dependencies
 - **Description**: DependencyCheckService now tracks four dependencies: Homebrew and tmux (required), gh and Claude Code CLI (optional). Status struct has subscript for cleaner dependency lookup. Optional deps shown with "(Optional)" label in orange; required deps in red when missing. Dialog only auto-shows when required deps are missing. Claude CLI installed via npm with ProcessEnvironment for nvm support.
 

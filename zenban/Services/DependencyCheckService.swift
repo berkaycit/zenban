@@ -24,11 +24,51 @@ actor DependencyCheckService {
         "/usr/local/bin/gh"
     ]
 
+    private static let npmPaths = [
+        "/opt/homebrew/bin/npm",
+        "/usr/local/bin/npm",
+        "/usr/bin/npm"
+    ]
+
     private static let claudePaths = [
         "/opt/homebrew/bin/claude",
         "/usr/local/bin/claude",
         "/usr/bin/claude"
     ]
+
+    /// Finds executable by checking known paths first, then searching PATH
+    private static func findExecutable(_ name: String, knownPaths: [String]) -> String? {
+        if let path = knownPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return path
+        }
+        return findInPath(name)
+    }
+
+    /// Finds executable in PATH using `which` command with extended PATH (includes nvm/volta/fnm)
+    private static func findInPath(_ executable: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = [executable]
+        process.environment = ProcessEnvironment.buildWithNodeSupport()
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            if process.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !path.isEmpty {
+                    return path
+                }
+            }
+        } catch {}
+        return nil
+    }
 
     enum Dependency: String, CaseIterable {
         case homebrew = "Homebrew"
@@ -93,8 +133,12 @@ actor DependencyCheckService {
         Self.ghPaths.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    nonisolated func npmPath() -> String? {
+        Self.findExecutable("npm", knownPaths: Self.npmPaths)
+    }
+
     nonisolated func claudePath() -> String? {
-        Self.claudePaths.first { FileManager.default.isExecutableFile(atPath: $0) }
+        Self.findExecutable("claude", knownPaths: Self.claudePaths)
     }
 
     // MARK: - Installation
@@ -161,20 +205,60 @@ actor DependencyCheckService {
         Self.logger.info("GitHub CLI installation completed")
     }
 
+    func installNode(outputHandler: @escaping @Sendable (String) -> Void) async throws {
+        guard let brewPath = homebrewPath() else {
+            throw DependencyError.homebrewRequired
+        }
+
+        Self.logger.info("Starting Node.js installation")
+        outputHandler("Installing Node.js...\n")
+
+        try await runInstallCommand(
+            command: brewPath,
+            arguments: ["install", "node"],
+            outputHandler: outputHandler
+        )
+
+        guard npmPath() != nil else {
+            outputHandler("\nNode.js installation may have failed. Please check the output above.\n")
+            throw DependencyError.installationFailed("Node.js")
+        }
+        outputHandler("\nNode.js installed successfully.\n")
+        Self.logger.info("Node.js installation completed")
+    }
+
     func installClaude(outputHandler: @escaping @Sendable (String) -> Void) async throws {
         Self.logger.info("Starting Claude Code CLI installation")
+
+        // Step 1: Ensure npm is available (install Node.js if needed)
+        if npmPath() == nil {
+            outputHandler("Node.js/npm not found. Installing Node.js first...\n\n")
+            try await installNode(outputHandler: outputHandler)
+            outputHandler("\n")
+        }
+
+        // Step 2: Get npm path
+        guard let npm = npmPath() else {
+            outputHandler("Error: Could not find npm after Node.js installation.\n")
+            outputHandler("Please install Node.js manually and try again.\n")
+            throw DependencyError.installationFailed("Node.js")
+        }
+
+        // Step 3: Install Claude Code CLI using npm directly
         outputHandler("Installing Claude Code CLI...\n")
 
-        // Use npm with node environment support
         var env = ProcessEnvironment.buildWithNodeSupport()
         env["NONINTERACTIVE"] = "1"
 
         try await runInstallCommand(
-            command: "/bin/bash",
-            arguments: ["-c", "npm install -g @anthropic-ai/claude-code"],
+            command: npm,
+            arguments: ["install", "-g", "@anthropic-ai/claude-code"],
             environment: env,
             outputHandler: outputHandler
         )
+
+        // Step 4: Brief delay to allow filesystem to update
+        try await Task.sleep(for: .milliseconds(500))
 
         guard claudePath() != nil else {
             outputHandler("\nClaude Code CLI installation may have failed. Please check the output above.\n")
