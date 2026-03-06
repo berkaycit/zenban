@@ -8,23 +8,21 @@
 import AppKit
 import Metal
 import OSLog
-import SwiftUI
 
 /// Manages Metal rendering setup and configuration for Ghostty terminal
 @MainActor
 class GhosttyRenderingSetup {
     nonisolated private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "win.aizen.app", category: "GhosttyRendering")
 
-    // MARK: - Terminal Settings from AppStorage
+    // MARK: - Display ID
 
-    @AppStorage("terminalFontName") private var terminalFontName = "Menlo"
-    @AppStorage("terminalFontSize") private var terminalFontSize = 14.0
-    @AppStorage("terminalBackgroundColor") private var terminalBackgroundColor = "#1e1e2e"
-    @AppStorage("terminalForegroundColor") private var terminalForegroundColor = "#cdd6f4"
-    @AppStorage("terminalCursorColor") private var terminalCursorColor = "#f5e0dc"
-    @AppStorage("terminalSelectionBackground") private var terminalSelectionBackground = "#585b70"
-    @AppStorage("terminalPalette") private var terminalPalette = "#45475a,#f38ba8,#a6e3a1,#f9e2af,#89b4fa,#f5c2e7,#94e2d5,#a6adc8,#585b70,#f37799,#89d88b,#ebd391,#74a8fc,#f2aede,#6bd7ca,#bac2de"
-    private let sessionPersistence = true
+    /// Set the display ID on a surface for proper CVDisplayLink vsync.
+    /// Without this, the terminal can appear frozen after window moves or focus changes.
+    static func setDisplayID(for surface: ghostty_surface_t, window: NSWindow?) {
+        let screen = window?.screen ?? NSScreen.main
+        guard let screen = screen else { return }
+        ghostty_surface_set_display_id(surface, screen.displayID)
+    }
 
     // MARK: - Layer Setup
 
@@ -60,112 +58,147 @@ class GhosttyRenderingSetup {
         paneId: String? = nil,
         command: String? = nil
     ) -> ghostty_surface_t? {
-        // Configure surface with working directory
         var surfaceConfig = ghostty_surface_config_new()
 
-        // CRITICAL: Set platform information
         surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
         surfaceConfig.platform.macos.nsview = Unmanaged.passUnretained(view).toOpaque()
-
-        // Set userdata
         surfaceConfig.userdata = Unmanaged.passUnretained(view).toOpaque()
-
-        // Set scale factor for retina displays
         surfaceConfig.scale_factor = Double(window?.backingScaleFactor ?? 2.0)
 
-        // Set font size from Aizen settings
-        surfaceConfig.font_size = Float(terminalFontSize)
+        // Build environment variables
+        var env: [String: String] = [:]
+        env["ZENBAN_TERMINAL"] = "1"
 
-        // Set ZENBAN_TERMINAL env var to identify terminals running inside zenban
-        // This allows Claude Code hooks to detect if they're running from zenban or external terminal
-        let envVarKey = strdup("ZENBAN_TERMINAL")!
-        let envVarValue = strdup("1")!
-        var envVar = ghostty_env_var_s(key: envVarKey, value: envVarValue)
+        // Shell integration: inject ZDOTDIR wrapper for zsh shells
+        if let resourcesDir = Bundle.main.resourceURL?.path {
+            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+            let shellName = URL(fileURLWithPath: shell).lastPathComponent
+            if shellName == "zsh",
+               let zdotdir = Self.prepareZdotdir(from: resourcesDir) {
+                env["ZENBAN_SHELL_INTEGRATION"] = "1"
+                env["ZENBAN_SHELL_INTEGRATION_DIR"] = zdotdir
 
-        // Set working directory
+                let candidateZdotdir = ProcessInfo.processInfo.environment["ZDOTDIR"]
+                if let candidateZdotdir, !candidateZdotdir.isEmpty {
+                    var isGhosttyInjected = false
+                    if let ghosttyResources = ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"] {
+                        let ghosttyZdotdir = URL(fileURLWithPath: ghosttyResources)
+                            .appendingPathComponent("shell-integration/zsh").path
+                        isGhosttyInjected = (candidateZdotdir == ghosttyZdotdir)
+                    }
+                    if !isGhosttyInjected {
+                        env["ZENBAN_ZSH_ZDOTDIR"] = candidateZdotdir
+                    }
+                }
+
+                env["ZDOTDIR"] = zdotdir
+            }
+        }
+
+        // Convert env dict to ghostty_env_var_s array
+        var envVars: [ghostty_env_var_s] = []
+        var envStorage: [(UnsafeMutablePointer<CChar>, UnsafeMutablePointer<CChar>)] = []
+        envVars.reserveCapacity(env.count)
+        envStorage.reserveCapacity(env.count)
+        for (key, value) in env {
+            guard let keyPtr = strdup(key), let valuePtr = strdup(value) else { continue }
+            envStorage.append((keyPtr, valuePtr))
+            envVars.append(ghostty_env_var_s(key: keyPtr, value: valuePtr))
+        }
+
         var workingDirPtr: UnsafeMutablePointer<CChar>?
         var initialInputPtr: UnsafeMutablePointer<CChar>?
-        var commandPtr: UnsafeMutablePointer<CChar>?
 
         if let workingDir = strdup(worktreePath) {
             workingDirPtr = workingDir
             surfaceConfig.working_directory = UnsafePointer(workingDir)
         }
 
-        // Check if session persistence is enabled and tmux is available
-        var isRestoringTmuxSession = false
-        if sessionPersistence, let paneId = paneId, TmuxSessionManager.shared.isTmuxAvailable() {
-            // Check if we're restoring an existing tmux session
-            isRestoringTmuxSession = TmuxSessionManager.shared.sessionExistsSync(paneId: paneId)
-
-            // Use tmux for session persistence - set as the command directly
-            // This makes tmux the shell process, not something running inside a shell
-            let tmuxCommand = TmuxSessionManager.shared.attachOrCreateCommand(
-                paneId: paneId,
-                workingDirectory: worktreePath
-            )
-            if let cmd = strdup(tmuxCommand) {
-                commandPtr = cmd
-                surfaceConfig.command = UnsafePointer(cmd)
-                Self.logger.info("Using tmux persistence for pane: \(paneId), restoring: \(isRestoringTmuxSession)")
-            }
-        }
-
-        // Set initial_input if command provided (for presets)
-        // Skip if we're restoring an existing tmux session - the command was already run before
-        if let command = command, !command.isEmpty, !isRestoringTmuxSession {
+        if let command = command, !command.isEmpty {
             let inputWithNewline = command + "\n"
             if let input = strdup(inputWithNewline) {
                 initialInputPtr = input
                 surfaceConfig.initial_input = UnsafePointer(input)
-                Self.logger.info("Setting initial_input for preset: \(command)")
             }
         }
 
-        // Set environment variables (must be done with withUnsafeMutablePointer for pointer stability)
-        let cSurface: ghostty_surface_t? = withUnsafeMutablePointer(to: &envVar) { envPtr in
-            surfaceConfig.env_vars = envPtr
-            surfaceConfig.env_var_count = 1
-
-            // Create the surface
-            // NOTE: subprocess spawns during ghostty_surface_new, so size warnings may appear
-            // if view frame isn't set yet - this is unavoidable with current API
+        let cSurface: ghostty_surface_t? = envVars.withUnsafeMutableBufferPointer { buffer in
+            surfaceConfig.env_vars = buffer.baseAddress
+            surfaceConfig.env_var_count = buffer.count
             return ghostty_surface_new(ghosttyApp, &surfaceConfig)
         }
 
-        // Clean up allocated strings
-        free(envVarKey)
-        free(envVarValue)
-        if let wd = workingDirPtr {
-            free(wd)
+        // Free all allocated strings
+        for (keyPtr, valuePtr) in envStorage {
+            free(keyPtr)
+            free(valuePtr)
         }
-        if let input = initialInputPtr {
-            free(input)
-        }
-        if let cmd = commandPtr {
-            free(cmd)
-        }
+        if let wd = workingDirPtr { free(wd) }
+        if let input = initialInputPtr { free(input) }
 
         guard let cSurface else {
             Self.logger.error("ghostty_surface_new failed")
             return nil
         }
 
-        // Immediately set size after creation to minimize "small grid" warnings
         let scaledSize = view.convertToBacking(initialBounds.size.width > 0 ? initialBounds.size : NSSize(width: 800, height: 600))
-        ghostty_surface_set_size(
-            cSurface,
-            UInt32(scaledSize.width),
-            UInt32(scaledSize.height)
-        )
+        ghostty_surface_set_size(cSurface, UInt32(scaledSize.width), UInt32(scaledSize.height))
 
-        // Set content scale for retina displays
         let scale = window?.backingScaleFactor ?? 1.0
         ghostty_surface_set_content_scale(cSurface, scale, scale)
 
-        Self.logger.info("Ghostty surface created at: \(worktreePath)")
+        // Set display ID for CVDisplayLink vsync
+        Self.setDisplayID(for: cSurface, window: window)
 
+        Self.logger.info("Ghostty surface created at: \(worktreePath)")
         return cSurface
+    }
+
+    // MARK: - Shell Integration
+
+    /// Cached ZDOTDIR path (created once, reused across surfaces)
+    private static var cachedZdotdir: String?
+
+    /// Create a temp directory with dotfile symlinks pointing to bundled shell integration files.
+    /// Xcode strips dotfiles from bundles, so we store them without dots and symlink at runtime.
+    static func prepareZdotdir(from resourcesDir: String) -> String? {
+        if let cached = cachedZdotdir {
+            return cached
+        }
+
+        let fm = FileManager.default
+        let zdotdir = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("zenban-zdotdir")
+
+        try? fm.createDirectory(atPath: zdotdir, withIntermediateDirectories: true)
+
+        // Symlink dotfiles (stored without dots in bundle)
+        let dotMappings = [
+            ("zshenv", ".zshenv"),
+            ("zshrc", ".zshrc"),
+            ("zprofile", ".zprofile"),
+            ("zlogin", ".zlogin"),
+        ]
+
+        for (source, dotName) in dotMappings {
+            let sourcePath = (resourcesDir as NSString).appendingPathComponent(source)
+            let linkPath = (zdotdir as NSString).appendingPathComponent(dotName)
+            guard fm.fileExists(atPath: sourcePath) else { continue }
+            try? fm.removeItem(atPath: linkPath)
+            try? fm.createSymbolicLink(atPath: linkPath, withDestinationPath: sourcePath)
+        }
+
+        // Also symlink the integration script so ZENBAN_SHELL_INTEGRATION_DIR can find it
+        let integrationScript = "zenban-zsh-integration.zsh"
+        let scriptSource = (resourcesDir as NSString).appendingPathComponent(integrationScript)
+        let scriptLink = (zdotdir as NSString).appendingPathComponent(integrationScript)
+        if fm.fileExists(atPath: scriptSource) {
+            try? fm.removeItem(atPath: scriptLink)
+            try? fm.createSymbolicLink(atPath: scriptLink, withDestinationPath: scriptSource)
+        }
+
+        cachedZdotdir = zdotdir
+        return zdotdir
     }
 
     // MARK: - Appearance Observation
@@ -173,6 +206,7 @@ class GhosttyRenderingSetup {
     /// Setup observation for system appearance changes (light/dark mode)
     /// Implementation copied from Ghostty's SurfaceView_AppKit.swift
     func setupAppearanceObservation(for view: NSView, surface: Ghostty.Surface?) -> NSKeyValueObservation? {
+        var lastScheme: UInt32?
         return view.observe(\.effectiveAppearance, options: [.new, .initial]) { view, change in
             guard let appearance = change.newValue else { return }
             guard let surface = surface?.unsafeCValue else { return }
@@ -188,6 +222,10 @@ class GhosttyRenderingSetup {
             default:
                 scheme = GHOSTTY_COLOR_SCHEME_DARK
             }
+
+            // Skip redundant color scheme updates
+            guard lastScheme != scheme.rawValue else { return }
+            lastScheme = scheme.rawValue
 
             ghostty_surface_set_color_scheme(surface, scheme)
             Self.logger.debug("Color scheme updated to: \(scheme == GHOSTTY_COLOR_SCHEME_DARK ? "dark" : "light")")
@@ -224,6 +262,11 @@ class GhosttyRenderingSetup {
 
     /// Update Metal layer frame and Ghostty surface size
     func updateLayout(view: NSView, metalLayer: CAMetalLayer?, surface: ghostty_surface_t?, lastSize: inout CGSize) -> Bool {
+        // Wrap all layer property mutations to suppress implicit Core Animation
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+
         // Update Metal layer frame to match view bounds
         if let metalLayer = metalLayer {
             metalLayer.frame = view.bounds
@@ -261,5 +304,15 @@ class GhosttyRenderingSetup {
     /// Snap size to whole pixels (scaledSize is already in pixel units).
     func snapSizeToCell(surface: ghostty_surface_t, scaledSize: CGSize) -> CGSize {
         CGSize(width: floor(scaledSize.width), height: floor(scaledSize.height))
+    }
+}
+
+// MARK: - NSScreen Display ID
+
+extension NSScreen {
+    /// The CGDirectDisplayID for this screen, used for CVDisplayLink vsync.
+    var displayID: CGDirectDisplayID {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        return (deviceDescription[key] as? NSNumber)?.uint32Value ?? CGMainDisplayID()
     }
 }

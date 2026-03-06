@@ -17,11 +17,17 @@
 
 ## Terminal Integration
 
-- Embedded Ghostty terminal per card (Metal rendering)
+- Embedded Ghostty terminal per card (Metal rendering via GhosttyKit.xcframework)
+- Loads user's standard ghostty config from `~/.config/ghostty/config`
+- Direct shell execution (no tmux dependency)
+- Zsh shell integration via ZDOTDIR injection
 - Auto-launches selected agent when shell ready
 - OSC 133 shell integration for command detection
 - State machine: shell -> agentActive -> agentIdle
 - Ctrl+C detection for agent exit
+- Display ID management for CVDisplayLink vsync
+- Rich clipboard: selection pasteboard, image paste, URL shell escaping
+- Drag-and-drop file support
 
 ## Git Worktrees
 

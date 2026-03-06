@@ -1,0 +1,19 @@
+# vim:ft=zsh
+#
+# Compatibility shim: with the current integration model, zenban restores
+# ZDOTDIR in .zshenv so this file should never be reached. If it is, restore
+# ZDOTDIR and behave like vanilla zsh by sourcing the user's .zlogin.
+
+if [[ -n "${GHOSTTY_ZSH_ZDOTDIR+X}" ]]; then
+    builtin export ZDOTDIR="$GHOSTTY_ZSH_ZDOTDIR"
+    builtin unset GHOSTTY_ZSH_ZDOTDIR
+elif [[ -n "${ZENBAN_ZSH_ZDOTDIR+X}" ]]; then
+    builtin export ZDOTDIR="$ZENBAN_ZSH_ZDOTDIR"
+    builtin unset ZENBAN_ZSH_ZDOTDIR
+else
+    builtin unset ZDOTDIR
+fi
+
+builtin typeset _zenban_file="${ZDOTDIR-$HOME}/.zlogin"
+[[ ! -r "$_zenban_file" ]] || builtin source -- "$_zenban_file"
+builtin unset _zenban_file

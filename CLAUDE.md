@@ -42,7 +42,8 @@ The project uses Swift 6 concurrency features:
 
 ## Vendor Libraries
 
-- **Vendor/libghostty.a**: Pre-built Ghostty terminal emulator library. Statically linked via ghostty-bridging-header.h. The GhosttyTerminal/ module wraps the C API with Swift interfaces for surface management, input handling, and rendering.
+- **Vendor/GhosttyKit.xcframework**: Ghostty terminal emulator (built from source with `zig build -Demit-xcframework=true`). Contains macos-arm64_x86_64, ios-arm64, ios-arm64-simulator slices. Headers auto-discovered by Xcode; bridging header at `ghostty-bridging-header.h` imports `ghostty.h`. The `GhosttyTerminal/` module wraps the C API with Swift interfaces for surface management, input handling, and Metal rendering. Terminal loads user's standard ghostty config from `~/.config/ghostty/config`.
+- **Vendor/libgit2**: Pre-built libgit2 C library for git operations.
 
 ## When to Read Agent Docs
 

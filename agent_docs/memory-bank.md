@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Replace Ghostty implementation with cmux approach and remove tmux
+- **Description**: Replaced custom ghostty integration with cmux-style approach. Switched from libghostty.a to GhosttyKit.xcframework (built with `zig build -Demit-xcframework=true`). Removed all tmux dependency: deleted TmuxSessionManager, removed tmux from DependencyCheckService, TerminalManager, and settings UI. Ghostty.App now loads user's standard config from `~/.config/ghostty/config` with fallback. Added GhosttyPasteboardHelper for rich clipboard (selection pasteboard, image paste, URL shell escaping). Added zsh shell integration via ZDOTDIR injection (runtime symlinks for dotfiles since Xcode strips them). Performance optimizations: display ID management for CVDisplayLink vsync (ghostty_surface_set_display_id), CATransaction batching in updateLayout, color scheme caching, Ctrl key fast path bypassing IME. Bridging header simplified to `#import "ghostty.h"` (xcframework auto-discovers headers). GhosttyConfig.swift added for parsing user config files.
+
 - **Summary**: Robust Claude CLI install with node support
 - **Description**: DependencyCheckService now auto-installs Node.js via Homebrew if npm is missing before installing Claude CLI. Added npmPath() and installNode() functions. ProcessEnvironment extended to detect volta and fnm node managers alongside nvm. New findExecutable() helper consolidates path-checking logic. GeneralSettingsView shows dependency status with check/install buttons.
 

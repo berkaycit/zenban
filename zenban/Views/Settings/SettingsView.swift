@@ -18,7 +18,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .general: return "App info"
-        case .terminal: return "Font, theme, sessions"
+        case .terminal: return "Configuration"
         case .devServer: return "Setup and dev commands"
         }
     }

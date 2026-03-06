@@ -41,15 +41,14 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. O(1) board index lookup via lazy cache. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board/Card/Column` | Data models. Board has repositoryPath/agent/agentCounters. Card can override agent. Column has display name/color. Agent has autoNamePrefix for card naming. |
-| `TerminalManager` | Manages GhosttyTerminalView per card with LRU eviction (max 50). Hibernates on deselect. Auto-launches agent. |
-| `TmuxSessionManager` | Actor managing tmux sessions (zenban- prefix). Sync cleanup on app quit, async on card delete. |
-| `GhosttyTerminalView` | Terminal with state machine (shell/agentActive/agentIdle). OSC 133 for command detection. Ctrl+C exits agent. |
-| `GhosttyApp` | Singleton for Ghostty context. Routes actions, handles clipboard, reloads config on settings change. |
+| `TerminalManager` | Manages GhosttyTerminalView per card with LRU eviction (max 50). Hibernates on deselect. Auto-launches agent. Direct shell execution (no tmux). |
+| `GhosttyTerminalView` | Terminal with state machine (shell/agentActive/agentIdle). OSC 133 for command detection. Ctrl+C exits agent. Display ID management for CVDisplayLink vsync. |
+| `GhosttyApp` | Singleton for Ghostty context via GhosttyKit.xcframework. Loads user's standard ghostty config (`~/.config/ghostty/config`) with fallback. Routes actions, handles clipboard (including image paste), reloads config on appearance change. |
 | `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `DevServerManager` | Dev server processes. Setup (npm install), port detection, WebView preview. 100KB output buffer. |
 | `ClaudeHooksInstaller` | Installs Claude Code hooks to ~/.claude/settings.json for Zenban URL scheme integration. |
-| `DependencyCheckService` | Actor for checking/installing dependencies (Homebrew, tmux required; gh, Claude CLI optional). Shows DependencySetupView modal on startup if required deps missing. |
+| `DependencyCheckService` | Actor for checking/installing dependencies (Homebrew required; gh, Claude CLI optional). Shows DependencySetupView modal on startup if required deps missing. |
 | `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). GitDiffViewModel for batch loading with LRU cache and content hash validation. |
 | `GitHistoryView` | Commit history list with pagination. Uses GitLogService for async loading. |
 | `GitLogService` | Actor for commit history and diff retrieval via libgit2 and ProcessExecutor. |

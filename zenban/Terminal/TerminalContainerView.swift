@@ -43,7 +43,6 @@ struct TerminalContainerView: NSViewRepresentable {
         coordinator.loadTask = nil
 
         // Hibernate terminal to save memory
-        // Tmux keeps the process running in background
         if let cardID = coordinator.cardID,
            let terminalManager = coordinator.terminalManager {
             terminalManager.hibernateTerminal(for: cardID)

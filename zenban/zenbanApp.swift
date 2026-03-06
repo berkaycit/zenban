@@ -27,7 +27,6 @@ struct zenbanApp: App {
     @State private var store = BoardStore()
     @State private var terminalManager = TerminalManager()
     @State private var devServerManager = DevServerManager()
-    @State private var terminalConfigObserver = TerminalConfigObserver()
 
     init() {
         NotificationCenter.default.addObserver(
@@ -37,10 +36,6 @@ struct zenbanApp: App {
         ) { [terminalManager, devServerManager] _ in
             terminalManager.terminateAllSessions()
             devServerManager.stopAllServers()
-
-            if UserDefaults.standard.bool(forKey: "cleanupSessionsOnQuit") {
-                TmuxSessionManager.shared.killAllZenbanSessionsSync()
-            }
         }
 
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
@@ -124,10 +119,6 @@ struct zenbanApp: App {
                     setupNotifications()
                     store.checkDependencies()
                 }
-                .task(id: terminalConfigObserver.version) {
-                    Ghostty.App.shared?.reloadConfig()
-                    await TmuxSessionManager.shared.updateConfig()
-                }
                 .onOpenURL { url in
                     handleZenbanURL(url)
                 }
@@ -148,9 +139,7 @@ struct zenbanApp: App {
         terminalManager.boardStore = store
         store.terminalManager = terminalManager
         store.onCardDeleted = { [terminalManager, devServerManager] cardID in
-            Task {
-                await terminalManager.killSessionForCard(cardID)
-            }
+            terminalManager.killSessionForCard(cardID)
             devServerManager.stopServer(for: cardID)
         }
     }

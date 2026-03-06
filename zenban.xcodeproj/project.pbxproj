@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		114868812A9E4B9192F557FD /* libghostty.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1B5F5001E481458AA833EF64 /* libghostty.a */; };
+		114868812A9E4B9192F557FD /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1B5F5001E481458AA833EF64 /* GhosttyKit.xcframework */; };
 		12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */ = {isa = PBXBuildFile; productRef = 0F130FE69B3B46DE88340E02 /* CodeEditLanguages */; };
 		93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */ = {isa = PBXBuildFile; productRef = A67F2A020FCB4AB1B074837D /* CodeEditSymbols */; };
 		D7245E606E834A01AF59B435 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = 9149CD05B1074D1490C41427 /* CodeEditSourceEditor */; };
@@ -32,7 +32,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		1B5F5001E481458AA833EF64 /* libghostty.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libghostty.a; path = libghostty/lib/libghostty.a; sourceTree = "<group>"; };
+		1B5F5001E481458AA833EF64 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
 		23B6DAA62EFDA93600D5AB34 /* zenban.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = zenban.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DAB32EFDA93700D5AB34 /* zenbanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DABD2EFDA93700D5AB34 /* zenbanUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -78,7 +78,7 @@
 				12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */,
 				ECC201D4093342D8A219C1EA /* CodeEditTextView in Frameworks */,
 				93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */,
-				114868812A9E4B9192F557FD /* libghostty.a in Frameworks */,
+				114868812A9E4B9192F557FD /* GhosttyKit.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -123,7 +123,7 @@
 		34A65B16E2F644D6AE876491 /* Vendor */ = {
 			isa = PBXGroup;
 			children = (
-				1B5F5001E481458AA833EF64 /* libghostty.a */,
+				1B5F5001E481458AA833EF64 /* GhosttyKit.xcframework */,
 			);
 			path = Vendor;
 			sourceTree = "<group>";
@@ -276,6 +276,7 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
 
 /* Begin PBXSourcesBuildPhase section */
 		23B6DAA22EFDA93600D5AB34 /* Sources */ = {
@@ -451,7 +452,6 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"$(SRCROOT)/Vendor/libghostty/include",
 					"$(SRCROOT)/Vendor/libgit2/include",
 				);
 				INFOPLIST_FILE = zenban/Info.plist;
@@ -461,12 +461,10 @@
 					"@executable_path/../Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/Vendor/libghostty/lib",
 					"$(SRCROOT)/Vendor/libgit2/lib",
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
-					"-lghostty",
 					"-lc++",
 					"-lgit2",
 					"-lssh2",
@@ -527,7 +525,6 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"$(SRCROOT)/Vendor/libghostty/include",
 					"$(SRCROOT)/Vendor/libgit2/include",
 				);
 				INFOPLIST_FILE = zenban/Info.plist;
@@ -537,12 +534,10 @@
 					"@executable_path/../Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/Vendor/libghostty/lib",
 					"$(SRCROOT)/Vendor/libgit2/lib",
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
-					"-lghostty",
 					"-lc++",
 					"-lgit2",
 					"-lssh2",

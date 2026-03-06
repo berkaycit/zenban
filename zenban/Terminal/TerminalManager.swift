@@ -47,14 +47,7 @@ final class TerminalManager {
         pendingCleanup.removeValue(forKey: cardID)
         let wasHibernated = hibernatedCards.remove(cardID) != nil
 
-        let isRestoringTmuxSession = TmuxSessionManager.shared.isTmuxAvailable()
-            && TmuxSessionManager.shared.sessionExistsSync(paneId: cardID.uuidString)
-
-        if isRestoringTmuxSession {
-            // tmux session exists, agent is already running
-            agentLaunchedForCard.insert(cardID)
-        } else if wasHibernated {
-            // Card was hibernated but tmux session is gone - agent needs to be relaunched
+        if wasHibernated {
             agentLaunchedForCard.remove(cardID)
         }
 
@@ -73,7 +66,7 @@ final class TerminalManager {
 
         // Note: Ghostty handles shell startup internally via surface creation
         // We just need to send the agent command when ready
-        // Skip if agent was already launched (e.g., waking from hibernation or restoring tmux)
+        // Skip if agent was already launched (e.g., waking from hibernation)
         if let agentCommand = agentToLaunch?.launchCommand,
            !agentLaunchedForCard.contains(cardID) {
             terminalView.sendWhenReady(agentCommand + "\n")
@@ -114,7 +107,7 @@ final class TerminalManager {
         cachedScrollStates[cardID]
     }
 
-    func killSessionForCard(_ cardID: UUID) async {
+    func killSessionForCard(_ cardID: UUID) {
         if let terminalView = terminalViews[cardID] {
             terminalView.terminate()
         }
@@ -123,31 +116,22 @@ final class TerminalManager {
         pendingWorktreeReady.removeValue(forKey: cardID)
         hibernatedCards.remove(cardID)
         cachedScrollStates.removeValue(forKey: cardID)
-        // Note: Do NOT remove from pendingCleanup here - the terminal must stay
-        // alive temporarily to prevent dangling pointer crash from Ghostty callbacks
-
-        // Kill associated tmux session
-        await TmuxSessionManager.shared.killSession(paneId: cardID.uuidString)
     }
 
     func switchAgent(for cardID: UUID, to agent: Agent) {
         guard let terminalView = terminalViews[cardID] else { return }
 
-        let paneId = cardID.uuidString
-
-        // Send Ctrl+C twice via tmux (more reliable than terminal surface)
-        TmuxSessionManager.shared.sendKeys(paneId: paneId, keys: "C-c")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            TmuxSessionManager.shared.sendKeys(paneId: paneId, keys: "C-c")
+        // Send Ctrl+C twice directly via terminal surface
+        terminalView.send(text: "\u{03}")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak terminalView] in
+            terminalView?.send(text: "\u{03}")
         }
 
-        // Update terminal state to reflect agent exit
         terminalView.notifyAgentExited()
 
-        // Launch new agent (no clear needed - agents draw their own startup screens)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            TmuxSessionManager.shared.sendKeys(paneId: paneId, keys: agent.launchCommand, execute: true)
-            terminalView.notifyAgentLaunched()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak terminalView] in
+            terminalView?.send(text: agent.launchCommand + "\n")
+            terminalView?.notifyAgentLaunched()
         }
     }
 
@@ -204,7 +188,7 @@ final class TerminalManager {
     // MARK: - Hibernation
 
     /// Hibernate a terminal to save memory.
-    /// The tmux session is preserved, allowing restoration when switching back.
+    /// The terminal process is terminated and resources freed.
     func hibernateTerminal(for cardID: UUID) {
         guard let terminalView = terminalViews[cardID] else { return }
 
@@ -279,9 +263,7 @@ final class TerminalManager {
                 scheduleCleanup(terminal, for: oldest)
             }
             scrollViews.removeValue(forKey: oldest)
-            if !TmuxSessionManager.shared.isTmuxAvailable() {
-                agentLaunchedForCard.remove(oldest)
-            }
+            agentLaunchedForCard.remove(oldest)
         }
     }
 

@@ -1,31 +1,51 @@
 # Zenban
 
-A macOS application built with SwiftUI.
+A macOS kanban board application with integrated terminal, built with SwiftUI.
 
 ## Requirements
 
 - macOS 15.6+
 - Xcode 26.2+
 - Swift 5.0+
-- Zig (for building libghostty): `brew install zig`
 
 ## Building from Source
 
+### 1. Build GhosttyKit.xcframework
+
+Zenban uses Ghostty as its embedded terminal emulator. You need to build the xcframework from the [Ghostty](https://github.com/ghostty-org/ghostty) source:
+
 ```bash
-git clone https://github.com/berkaycit/zenban.git
-cd zenban
+# Clone ghostty (if you don't have it)
+git clone https://github.com/ghostty-org/ghostty.git
+cd ghostty
 
-# Build libghostty (universal arm64 + x86_64)
-./scripts/build-libghostty.sh
+# Build the xcframework (requires zig: brew install zig)
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  zig build -Demit-xcframework=true -Doptimize=ReleaseFast
 
-# Open in Xcode and build
+# Copy to Vendor/
+cp -R macos/GhosttyKit.xcframework /path/to/zenban/Vendor/
+```
+
+### 2. Build Zenban
+
+```bash
 open zenban.xcodeproj
+# Build and run (Cmd+R)
 ```
 
-To rebuild libghostty at a specific commit:
+Or from the command line:
 ```bash
-./scripts/build-libghostty.sh <commit-sha>
+xcodebuild -project zenban.xcodeproj -scheme zenban -configuration Debug build
 ```
+
+## Terminal Configuration
+
+Zenban loads your standard Ghostty configuration from `~/.config/ghostty/config`. All terminal settings (font, theme, colors, keybindings) are configured there -- no separate settings UI in Zenban.
+
+If no Ghostty config exists or it has errors, Zenban falls back to default settings.
+
+Shell integration is injected automatically for zsh shells via ZDOTDIR override.
 
 ## Bundle Identifier
 
@@ -34,8 +54,8 @@ To rebuild libghostty at a specific commit:
 ## Claude Code Integration
 
 Zenban automatically moves cards between columns based on Claude Code activity:
-- **User sends prompt** → Card moves to "To Do"
-- **Claude stops** → Card moves to "In Review"
+- **User sends prompt** -> Card moves to "To Do"
+- **Claude stops** -> Card moves to "In Review"
 
 ### Setup
 

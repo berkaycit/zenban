@@ -103,7 +103,7 @@ class GhosttyTerminalView: NSView {
     ///   - worktreePath: Working directory for the terminal session
     ///   - ghosttyApp: The shared Ghostty app instance (C pointer)
     ///   - appWrapper: The Ghostty.App wrapper for surface tracking (optional)
-    ///   - paneId: Unique identifier for this pane (used for tmux session persistence)
+    ///   - paneId: Unique identifier for this pane
     ///   - command: Optional command to run instead of default shell
     init(frame: NSRect, worktreePath: String, ghosttyApp: ghostty_app_t, appWrapper: Ghostty.App? = nil, paneId: String? = nil, command: String? = nil) {
         self.worktreePath = worktreePath
@@ -238,6 +238,7 @@ class GhosttyTerminalView: NSView {
             hasBeenFocused = true
             if let surface = surface?.unsafeCValue {
                 ghostty_surface_set_focus(surface, true)
+                GhosttyRenderingSetup.setDisplayID(for: surface, window: window)
             }
         }
         return result
@@ -268,8 +269,11 @@ class GhosttyTerminalView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        // Single refresh when view moves to window
         if window != nil {
+            // Re-assert display ID when window changes (screen may differ)
+            if let surface = surface?.unsafeCValue {
+                GhosttyRenderingSetup.setDisplayID(for: surface, window: window)
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.forceRefresh()
             }
@@ -505,11 +509,13 @@ class GhosttyTerminalView: NSView {
     }
 
     /// Force the terminal surface to refresh/redraw
-    /// Useful after tmux reattaches or when view becomes visible
     func forceRefresh() {
         guard let surface = surface?.unsafeCValue else { return }
 
-        // Force a size update to trigger tmux redraw
+        // Re-assert display ID to ensure CVDisplayLink is targeting correct screen
+        GhosttyRenderingSetup.setDisplayID(for: surface, window: window)
+
+        // Force a size update to trigger redraw
         let scaledSize = convertToBacking(bounds.size)
         ghostty_surface_set_size(
             surface,

@@ -59,6 +59,9 @@ class GhosttyInputHandler {
         }
 
         if !handled {
+            // Ctrl-modified keys should not go through IME/interpretKeyEvents
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if flags.contains(.control) { return }
             interpretKeyEvents([event])
         }
     }
