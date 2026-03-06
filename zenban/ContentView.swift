@@ -68,6 +68,11 @@ struct ContentView: View {
             store.draggedCardID = nil
             store.stopOverlays()
         }
+        .onChange(of: columnVisibility) {
+            if columnVisibility != .all {
+                columnVisibility = .all
+            }
+        }
         .frame(minWidth: 1200, minHeight: 600)
         .sheet(isPresented: $store.showDevServerConfig) {
             if let card = store.devServerCard,
