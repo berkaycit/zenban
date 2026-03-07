@@ -116,6 +116,35 @@ final class TerminalController {
         false
     }
 
+    nonisolated static func shouldReplaceStatusEntry(
+        current: SidebarStatusEntry?,
+        key: String,
+        value: String,
+        icon: String?,
+        color: String?,
+        url: URL?,
+        priority: Int,
+        format: SidebarMetadataFormat
+    ) -> Bool {
+        guard let current else { return true }
+        return current.key != key ||
+            current.value != value ||
+            current.icon != icon ||
+            current.color != color ||
+            current.url != url ||
+            current.priority != priority ||
+            current.format != format
+    }
+
+    nonisolated static func shouldReplaceProgress(
+        current: SidebarProgressState?,
+        value: Double,
+        label: String?
+    ) -> Bool {
+        guard let current else { return true }
+        return current.value != value || current.label != label
+    }
+
     private func configurePortScanner() {
         PortScanner.shared.onPortsUpdated = { workspaceId, panelId, ports in
             Task { @MainActor in
@@ -184,6 +213,26 @@ final class TerminalController {
         switch parsed.command {
         case "ping", "system.ping":
             return "PONG\n"
+        case "notify_target":
+            return handleNotifyTarget(parsed)
+        case "clear_notifications":
+            return handleClearNotifications(parsed)
+        case "set_status":
+            return handleSetStatus(parsed)
+        case "clear_status":
+            return handleClearStatus(parsed)
+        case "list_status":
+            return handleListStatus(parsed)
+        case "log":
+            return handleLog(parsed)
+        case "clear_log":
+            return handleClearLog(parsed)
+        case "list_log":
+            return handleListLog(parsed)
+        case "set_progress":
+            return handleSetProgress(parsed)
+        case "clear_progress":
+            return handleClearProgress(parsed)
         case "report_pwd":
             return handleReportPWD(parsed)
         case "report_tty":
@@ -296,6 +345,204 @@ final class TerminalController {
         return "OK\n"
     }
 
+    private func handleNotifyTarget(_ parsed: ParsedCommand) -> String {
+        guard parsed.positional.count >= 2,
+              let workspaceId = UUID(uuidString: parsed.positional[0]),
+              let panelId = UUID(uuidString: parsed.positional[1]),
+              let workspace = workspace(tabId: workspaceId),
+              workspace.panels[panelId] != nil else {
+            return "ERR invalid_args\n"
+        }
+
+        let payload = parsed.positional.dropFirst(2).joined(separator: " ")
+        let (title, subtitle, body) = Self.parseNotificationPayload(payload)
+        TerminalNotificationStore.shared.addNotification(
+            tabId: workspace.id,
+            surfaceId: panelId,
+            title: title,
+            subtitle: subtitle,
+            body: body
+        )
+        return "OK\n"
+    }
+
+    private func handleClearNotifications(_ parsed: ParsedCommand) -> String {
+        if let tabId = parsed.tabId {
+            if let panelId = parsed.panelId {
+                TerminalNotificationStore.shared.clearNotifications(forTabId: tabId, surfaceId: panelId)
+            } else {
+                TerminalNotificationStore.shared.clearNotifications(forTabId: tabId)
+            }
+            return "OK\n"
+        }
+
+        TerminalNotificationStore.shared.clearAll()
+        return "OK\n"
+    }
+
+    private func handleSetStatus(_ parsed: ParsedCommand) -> String {
+        guard parsed.positional.count >= 2,
+              let workspace = workspace(parsed: parsed) else {
+            return "ERR invalid_args\n"
+        }
+
+        let key = parsed.positional[0]
+        let value = parsed.positional.dropFirst().joined(separator: " ")
+        let icon = Self.normalizedOptionValue(parsed.options["icon"])
+        let color = Self.normalizedOptionValue(parsed.options["color"])
+
+        let formatRaw = Self.normalizedOptionValue(parsed.options["format"]) ?? SidebarMetadataFormat.plain.rawValue
+        guard let format = SidebarMetadataFormat(rawValue: formatRaw.lowercased()) else {
+            return "ERR invalid_format\n"
+        }
+
+        let priority = Int(Self.normalizedOptionValue(parsed.options["priority"]) ?? "") ?? 0
+        let url: URL?
+        if let rawURL = Self.normalizedOptionValue(parsed.options["url"] ?? parsed.options["link"]) {
+            guard let parsedURL = URL(string: rawURL) else {
+                return "ERR invalid_url\n"
+            }
+            url = parsedURL
+        } else {
+            url = nil
+        }
+
+        guard Self.shouldReplaceStatusEntry(
+            current: workspace.statusEntries[key],
+            key: key,
+            value: value,
+            icon: icon,
+            color: color,
+            url: url,
+            priority: priority,
+            format: format
+        ) else {
+            return "OK\n"
+        }
+
+        workspace.statusEntries[key] = SidebarStatusEntry(
+            key: key,
+            value: value,
+            icon: icon,
+            color: color,
+            url: url,
+            priority: priority,
+            format: format,
+            timestamp: Date()
+        )
+        return "OK\n"
+    }
+
+    private func handleClearStatus(_ parsed: ParsedCommand) -> String {
+        guard let key = parsed.positional.first,
+              let workspace = workspace(parsed: parsed) else {
+            return "ERR invalid_args\n"
+        }
+
+        _ = workspace.statusEntries.removeValue(forKey: key)
+        return "OK\n"
+    }
+
+    private func handleListStatus(_ parsed: ParsedCommand) -> String {
+        guard let workspace = workspace(parsed: parsed) else {
+            return "ERR invalid_args\n"
+        }
+
+        let lines = workspace.sidebarStatusEntriesInDisplayOrder().map { entry in
+            Self.sidebarMetadataLine(entry)
+        }
+        return lines.isEmpty ? "No status entries\n" : lines.joined(separator: "\n") + "\n"
+    }
+
+    private func handleLog(_ parsed: ParsedCommand) -> String {
+        guard !parsed.positional.isEmpty,
+              let workspace = workspace(parsed: parsed) else {
+            return "ERR invalid_args\n"
+        }
+
+        let message = parsed.positional.joined(separator: " ")
+        let levelRaw = Self.normalizedOptionValue(parsed.options["level"]) ?? SidebarLogLevel.info.rawValue
+        guard let level = SidebarLogLevel(rawValue: levelRaw.lowercased()) else {
+            return "ERR invalid_level\n"
+        }
+
+        workspace.logEntries.append(
+            SidebarLogEntry(
+                message: message,
+                level: level,
+                source: Self.normalizedOptionValue(parsed.options["source"]),
+                timestamp: Date()
+            )
+        )
+        let configuredLimit = UserDefaults.standard.object(forKey: "sidebarMaxLogEntries") as? Int ?? 50
+        let limit = max(1, min(500, configuredLimit))
+        if workspace.logEntries.count > limit {
+            workspace.logEntries.removeFirst(workspace.logEntries.count - limit)
+        }
+        return "OK\n"
+    }
+
+    private func handleClearLog(_ parsed: ParsedCommand) -> String {
+        guard let workspace = workspace(parsed: parsed) else {
+            return "ERR invalid_args\n"
+        }
+
+        workspace.logEntries.removeAll()
+        return "OK\n"
+    }
+
+    private func handleListLog(_ parsed: ParsedCommand) -> String {
+        guard let workspace = workspace(parsed: parsed) else {
+            return "ERR invalid_args\n"
+        }
+
+        let limit = Int(Self.normalizedOptionValue(parsed.options["limit"]) ?? "")
+        let entries: [SidebarLogEntry]
+        if let limit, limit >= 0 {
+            entries = Array(workspace.logEntries.suffix(limit))
+        } else {
+            entries = workspace.logEntries
+        }
+
+        guard !entries.isEmpty else {
+            return "No log entries\n"
+        }
+
+        let lines = entries.map { entry in
+            if let source = entry.source, !source.isEmpty {
+                return "[\(source)] [\(entry.level.rawValue)] \(entry.message)"
+            }
+            return "[\(entry.level.rawValue)] \(entry.message)"
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    private func handleSetProgress(_ parsed: ParsedCommand) -> String {
+        guard let valueRaw = parsed.positional.first,
+              let value = Double(valueRaw),
+              let workspace = workspace(parsed: parsed) else {
+            return "ERR invalid_args\n"
+        }
+
+        let clamped = min(1.0, max(0.0, value))
+        let label = Self.normalizedOptionValue(parsed.options["label"])
+        guard Self.shouldReplaceProgress(current: workspace.progress, value: clamped, label: label) else {
+            return "OK\n"
+        }
+
+        workspace.progress = SidebarProgressState(value: clamped, label: label)
+        return "OK\n"
+    }
+
+    private func handleClearProgress(_ parsed: ParsedCommand) -> String {
+        guard let workspace = workspace(parsed: parsed) else {
+            return "ERR invalid_args\n"
+        }
+
+        workspace.progress = nil
+        return "OK\n"
+    }
+
     private func handleOpenURL(_ parsed: ParsedCommand) -> String {
         guard let urlString = parsed.positional.first,
               let url = URL(string: urlString) else {
@@ -349,6 +596,13 @@ final class TerminalController {
         return "OK\n"
     }
 
+    private func workspace(parsed: ParsedCommand) -> Workspace? {
+        if let tabId = parsed.tabId {
+            return workspace(tabId: tabId)
+        }
+        return activeWorkspace()
+    }
+
     private func workspace(tabId: UUID) -> Workspace? {
         guard let tabManager = AppDelegate.shared?.tabManagerFor(tabId: tabId) else {
             return nil
@@ -356,8 +610,18 @@ final class TerminalController {
         return tabManager.tabs.first(where: { $0.id == tabId })
     }
 
+    private func activeWorkspace() -> Workspace? {
+        guard let tabManager = activeTabManager else { return nil }
+        if let selectedTabId = tabManager.selectedTabId,
+           let workspace = tabManager.tabs.first(where: { $0.id == selectedTabId }) {
+            return workspace
+        }
+        return tabManager.tabs.first
+    }
+
     private struct ParsedCommand {
         let command: String
+        let rawArguments: String
         let positional: [String]
         let options: [String: String]
 
@@ -368,16 +632,31 @@ final class TerminalController {
     }
 
     private func parseCommand(_ request: String) -> ParsedCommand {
-        let tokens = Self.tokenizeArgs(request)
-        guard let command = tokens.first else {
-            return ParsedCommand(command: "", positional: [], options: [:])
+        let split = Self.splitCommand(request)
+        guard !split.command.isEmpty else {
+            return ParsedCommand(command: "", rawArguments: "", positional: [], options: [:])
         }
+
+        let tokens = Self.tokenizeArgs(split.rawArguments)
 
         var positional: [String] = []
         var options: [String: String] = [:]
-        var index = 1
+        var index = 0
+        var stopParsingOptions = false
         while index < tokens.count {
             let token = tokens[index]
+            if stopParsingOptions {
+                positional.append(token)
+                index += 1
+                continue
+            }
+
+            if token == "--" {
+                stopParsingOptions = true
+                index += 1
+                continue
+            }
+
             if token.hasPrefix("--") {
                 if let eqIndex = token.firstIndex(of: "=") {
                     let key = String(token[token.index(token.startIndex, offsetBy: 2)..<eqIndex])
@@ -398,7 +677,18 @@ final class TerminalController {
             index += 1
         }
 
-        return ParsedCommand(command: command, positional: positional, options: options)
+        return ParsedCommand(command: split.command, rawArguments: split.rawArguments, positional: positional, options: options)
+    }
+
+    private nonisolated static func splitCommand(_ request: String) -> (command: String, rawArguments: String) {
+        let trimmed = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let spaceIndex = trimmed.firstIndex(where: \.isWhitespace) else {
+            return (trimmed, "")
+        }
+
+        let command = String(trimmed[..<spaceIndex])
+        let rawArguments = String(trimmed[spaceIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (command, rawArguments)
     }
 
     private nonisolated static func tokenizeArgs(_ args: String) -> [String] {
@@ -569,6 +859,37 @@ final class TerminalController {
     private nonisolated static func decodeBase64Payload(_ value: String) -> String? {
         guard let data = Data(base64Encoded: value) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    private nonisolated static func normalizedOptionValue(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private nonisolated static func parseNotificationPayload(_ payload: String) -> (String, String, String) {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return ("Notification", "", "") }
+
+        let parts = trimmed.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+        let title = parts.indices.contains(0) ? parts[0].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let subtitle = parts.indices.contains(1) && parts.count > 2
+            ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            : ""
+        let body = parts.count > 2
+            ? parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
+            : (parts.indices.contains(1) ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : "")
+        return (title.isEmpty ? "Notification" : title, subtitle, body)
+    }
+
+    private nonisolated static func sidebarMetadataLine(_ entry: SidebarStatusEntry) -> String {
+        var line = "\(entry.key)=\(entry.value)"
+        if let icon = entry.icon { line += " icon=\(icon)" }
+        if let color = entry.color { line += " color=\(color)" }
+        if let url = entry.url { line += " url=\(url.absoluteString)" }
+        if entry.priority != 0 { line += " priority=\(entry.priority)" }
+        if entry.format != .plain { line += " format=\(entry.format.rawValue)" }
+        return line
     }
 
     private nonisolated static func claudeHookSummary(from payload: String?) -> (subtitle: String, body: String) {

@@ -37,10 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var activeCardID: UUID?
 
     var tabManager: TabManager? {
-        if let activeCardID, let context = contextsByCardID[activeCardID] {
-            return context.tabManager
+        guard let activeCardID, let context = contextsByCardID[activeCardID] else {
+            return nil
         }
-        return contextsByCardID.values.first?.tabManager
+        return context.tabManager
     }
 
     override init() {
@@ -83,14 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let context = contextsByCardID.removeValue(forKey: cardID) else { return }
         cardIDByWorkspaceID.removeValue(forKey: context.cardID)
         if activeCardID == cardID {
-            if let replacementID = contextsByCardID.keys.sorted(by: { $0.uuidString < $1.uuidString }).first,
-               let replacement = contextsByCardID[replacementID] {
-                activeCardID = replacementID
-                TerminalController.shared.setActiveTabManager(replacement.tabManager)
-            } else {
-                activeCardID = nil
-                TerminalController.shared.setActiveTabManager(nil)
-            }
+            clearActiveCard()
         }
     }
 
@@ -100,14 +93,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TerminalController.shared.setActiveTabManager(contextsByCardID[cardID]?.tabManager)
     }
 
+    func clearActiveCard() {
+        activeCardID = nil
+        TerminalController.shared.setActiveTabManager(nil)
+    }
+
     func deactivateCard(_ cardID: UUID) {
         guard activeCardID == cardID else { return }
-        if let replacement = contextsByCardID.keys.first(where: { $0 != cardID }) {
-            activateCard(replacement)
-        } else {
-            activeCardID = nil
-            TerminalController.shared.setActiveTabManager(nil)
-        }
+        clearActiveCard()
     }
 
     func tabManagerFor(windowId: UUID) -> TabManager? {

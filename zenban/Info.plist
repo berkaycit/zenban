@@ -27,6 +27,26 @@
 			<key>UTTypeTagSpecification</key>
 			<dict/>
 		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Bonsplit Tab Transfer</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.splittabbar.tabtransfer</string>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>cmux Sidebar Tab Reorder</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.cmux.sidebar-tab-reorder</string>
+		</dict>
 	</array>
 </dict>
 </plist>

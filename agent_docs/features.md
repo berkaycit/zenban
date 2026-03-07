@@ -18,7 +18,7 @@
 ## Terminal Integration
 
 - Embedded terminal now uses cmux's Ghostty host stack, including `Workspace`, `TabManager`, Bonsplit splits, browser panels, and find/search state inside the card detail area
-- Each card is treated as a cmux workspace: card IDs are exported as `CMUX_WORKSPACE_ID`/`CMUX_TAB_ID`, terminal panels export `CMUX_SURFACE_ID`, and inactive cards keep their terminal/split state alive
+- Each card is treated as a cmux workspace: card IDs are exported as `CMUX_WORKSPACE_ID`/`CMUX_TAB_ID`, terminal panels export `CMUX_SURFACE_ID`, and card switches use a selected+retiring handoff so old Ghostty/browser portals are hidden before the previous card unmounts
 - Runtime/resources are copied from `clone/cmux` with a build phase that recreates cmux's `ghostty`, `terminfo`, `shell-integration`, and `bin` bundle layout
 - Ghostty reads the user's standard config files and receives the same app/surface color-scheme updates cmux uses, so theme resolution now matches cmux behavior
 - Bundled `cmux`, `claude`, and `open` helpers are in `Resources/bin`, and local socket control is started by the app so shell integration can report pwd/tty/git/pr state back into the active card workspace

@@ -748,7 +748,7 @@ class GhosttyApp {
                 lastReportedUptime: lastScrollLagReportUptime,
                 cooldown: scrollLagReportCooldownSeconds
             ) {
-                if TelemetrySettings.enabledForCurrentLaunch {
+                if TelemetrySettings.enabledForCurrentLaunch, SentrySDK.isEnabled {
                     SentrySDK.capture(message: "Scroll lag detected") { scope in
                         scope.setLevel(.warning)
                         scope.setContext(value: [
@@ -831,12 +831,16 @@ class GhosttyApp {
         runtimeConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
         runtimeConfig.supports_selection_clipboard = true
         runtimeConfig.wakeup_cb = { userdata in
+            guard let appState = GhosttyApp.appInstance(from: userdata) else { return }
             DispatchQueue.main.async {
-                GhosttyApp.shared.tick()
+                appState.tick()
             }
         }
         runtimeConfig.action_cb = { app, target, action in
-            return GhosttyApp.shared.handleAction(target: target, action: action)
+            guard let appState = GhosttyApp.appInstance(from: ghostty_app_userdata(app)) else {
+                return false
+            }
+            return appState.handleAction(target: target, action: action)
         }
         runtimeConfig.read_clipboard_cb = { userdata, location, state in
             // Read clipboard
@@ -971,7 +975,7 @@ class GhosttyApp {
 
         #if os(macOS)
         if let app {
-            ghostty_app_set_focus(app, NSApp.isActive)
+            ghostty_app_set_focus(app, NSApp?.isActive ?? false)
         }
 
         appObservers.append(NotificationCenter.default.addObserver(
@@ -1439,6 +1443,11 @@ class GhosttyApp {
     private static func callbackContext(from userdata: UnsafeMutableRawPointer?) -> GhosttySurfaceCallbackContext? {
         guard let userdata else { return nil }
         return Unmanaged<GhosttySurfaceCallbackContext>.fromOpaque(userdata).takeUnretainedValue()
+    }
+
+    private static func appInstance(from userdata: UnsafeMutableRawPointer?) -> GhosttyApp? {
+        guard let userdata else { return nil }
+        return Unmanaged<GhosttyApp>.fromOpaque(userdata).takeUnretainedValue()
     }
 
     private func handleAction(target: ghostty_target_s, action: ghostty_action_s) -> Bool {
@@ -6705,8 +6714,20 @@ struct GhosttyTerminalView: NSViewRepresentable {
         var desiredShowsUnreadNotificationRing: Bool = false
         var desiredPortalZPriority: Int = 0
         var lastBoundHostId: ObjectIdentifier?
+        var lastAppliedPortalZPriority: Int?
+        var lastAppliedPortalBindingGeneration: UInt64?
         var lastPaneDropZone: DropZone?
         weak var hostedView: GhosttySurfaceScrollView?
+        private var pendingPortalPassRevision: UInt64 = 0
+
+        func schedulePortalPass(_ block: @escaping () -> Void) {
+            pendingPortalPassRevision &+= 1
+            let revision = pendingPortalPassRevision
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.pendingPortalPassRevision == revision else { return }
+                block()
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -6721,6 +6742,58 @@ struct GhosttyTerminalView: NSViewRepresentable {
         // already attached elsewhere, do not mutate visibility/active state here.
         if isBoundToCurrentHost { return true }
         return !hostedViewHasSuperview
+    }
+
+    private static func schedulePortalPass(
+        coordinator: Coordinator,
+        host: HostContainerView,
+        hostedView: GhosttySurfaceScrollView,
+        generation: Int,
+        expectedSurfaceId: UUID,
+        expectedGeneration: UInt64
+    ) {
+        coordinator.schedulePortalPass { [weak host, weak hostedView, weak coordinator] in
+            guard let host, let hostedView, let coordinator else { return }
+            guard coordinator.attachGeneration == generation else { return }
+            guard host.window != nil else { return }
+
+            let hostId = ObjectIdentifier(host)
+            let isBoundToCurrentHost = TerminalWindowPortalRegistry.isHostedView(hostedView, boundTo: host)
+            let needsBind =
+                coordinator.lastBoundHostId != hostId ||
+                hostedView.superview == nil ||
+                !isBoundToCurrentHost ||
+                coordinator.lastAppliedPortalZPriority != coordinator.desiredPortalZPriority ||
+                coordinator.lastAppliedPortalBindingGeneration != expectedGeneration
+
+            if needsBind {
+                TerminalWindowPortalRegistry.bind(
+                    hostedView: hostedView,
+                    to: host,
+                    visibleInUI: coordinator.desiredIsVisibleInUI,
+                    zPriority: coordinator.desiredPortalZPriority,
+                    expectedSurfaceId: expectedSurfaceId,
+                    expectedGeneration: expectedGeneration
+                )
+
+                if TerminalWindowPortalRegistry.isHostedView(hostedView, boundTo: host) {
+                    coordinator.lastBoundHostId = hostId
+                    coordinator.lastAppliedPortalZPriority = coordinator.desiredPortalZPriority
+                    coordinator.lastAppliedPortalBindingGeneration = expectedGeneration
+                }
+            } else {
+                coordinator.lastBoundHostId = hostId
+            }
+
+            TerminalWindowPortalRegistry.updateEntryVisibility(
+                for: hostedView,
+                visibleInUI: coordinator.desiredIsVisibleInUI
+            )
+            TerminalWindowPortalRegistry.synchronizeForAnchor(host)
+            hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
+            hostedView.setActive(coordinator.desiredIsActive)
+            hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
+        }
     }
 
     func makeNSView(context: Context) -> NSView {
@@ -6814,48 +6887,37 @@ struct GhosttyTerminalView: NSViewRepresentable {
         if let host = hostContainer {
             host.onDidMoveToWindow = { [weak host, weak hostedView, weak coordinator] in
                 guard let host, let hostedView, let coordinator else { return }
-                guard coordinator.attachGeneration == generation else { return }
-                guard host.window != nil else { return }
-                TerminalWindowPortalRegistry.bind(
+                Self.schedulePortalPass(
+                    coordinator: coordinator,
+                    host: host,
                     hostedView: hostedView,
-                    to: host,
-                    visibleInUI: coordinator.desiredIsVisibleInUI,
-                    zPriority: coordinator.desiredPortalZPriority,
+                    generation: generation,
                     expectedSurfaceId: portalExpectedSurfaceId,
                     expectedGeneration: portalExpectedGeneration
                 )
-                coordinator.lastBoundHostId = ObjectIdentifier(host)
-                hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
-                hostedView.setActive(coordinator.desiredIsActive)
-                hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
             }
             host.onGeometryChanged = { [weak host, weak hostedView, weak coordinator] in
                 guard let host, let hostedView, let coordinator else { return }
                 guard coordinator.attachGeneration == generation else { return }
-                guard coordinator.lastBoundHostId == ObjectIdentifier(host) else { return }
-                if host.window != nil,
-                   !TerminalWindowPortalRegistry.isHostedView(hostedView, boundTo: host) {
 #if DEBUG
+                if host.window != nil,
+                   coordinator.lastBoundHostId == ObjectIdentifier(host),
+                   !TerminalWindowPortalRegistry.isHostedView(hostedView, boundTo: host) {
                     dlog(
                         "ws.hostState.rebindOnGeometry surface=\(terminalSurface.id.uuidString.prefix(5)) " +
                         "reason=portalEntryMissing visible=\(coordinator.desiredIsVisibleInUI ? 1 : 0) " +
                         "active=\(coordinator.desiredIsActive ? 1 : 0) z=\(coordinator.desiredPortalZPriority)"
                     )
-#endif
-                    TerminalWindowPortalRegistry.bind(
-                        hostedView: hostedView,
-                        to: host,
-                        visibleInUI: coordinator.desiredIsVisibleInUI,
-                        zPriority: coordinator.desiredPortalZPriority,
-                        expectedSurfaceId: portalExpectedSurfaceId,
-                        expectedGeneration: portalExpectedGeneration
-                    )
-                    coordinator.lastBoundHostId = ObjectIdentifier(host)
-                    hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
-                    hostedView.setActive(coordinator.desiredIsActive)
-                    hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
                 }
-                TerminalWindowPortalRegistry.synchronizeForAnchor(host)
+#endif
+                Self.schedulePortalPass(
+                    coordinator: coordinator,
+                    host: host,
+                    hostedView: hostedView,
+                    generation: generation,
+                    expectedSurfaceId: portalExpectedSurfaceId,
+                    expectedGeneration: portalExpectedGeneration
+                )
             }
 
             if host.window != nil {
@@ -6867,17 +6929,15 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     previousDesiredShowsUnreadNotificationRing != showsUnreadNotificationRing ||
                     previousDesiredPortalZPriority != portalZPriority
                 if shouldBindNow {
-                    TerminalWindowPortalRegistry.bind(
+                    Self.schedulePortalPass(
+                        coordinator: coordinator,
+                        host: host,
                         hostedView: hostedView,
-                        to: host,
-                        visibleInUI: coordinator.desiredIsVisibleInUI,
-                        zPriority: coordinator.desiredPortalZPriority,
+                        generation: generation,
                         expectedSurfaceId: portalExpectedSurfaceId,
                         expectedGeneration: portalExpectedGeneration
                     )
-                    coordinator.lastBoundHostId = hostId
                 }
-                TerminalWindowPortalRegistry.synchronizeForAnchor(host)
             } else {
                 // Bind is deferred until host moves into a window. Update the
                 // existing portal entry's visibleInUI now so that any portal sync
@@ -6934,6 +6994,8 @@ struct GhosttyTerminalView: NSViewRepresentable {
         coordinator.desiredShowsUnreadNotificationRing = false
         coordinator.desiredPortalZPriority = 0
         coordinator.lastBoundHostId = nil
+        coordinator.lastAppliedPortalZPriority = nil
+        coordinator.lastAppliedPortalBindingGeneration = nil
         let hostedView = coordinator.hostedView
 #if DEBUG
         if let hostedView {

@@ -126,7 +126,7 @@ enum TelemetrySettings {
 }
 
 func sentryBreadcrumb(_ message: String, category: String = "ui", data: [String: Any]? = nil) {
-    guard TelemetrySettings.enabledForCurrentLaunch else { return }
+    guard TelemetrySettings.enabledForCurrentLaunch, SentrySDK.isEnabled else { return }
     let crumb = Breadcrumb(level: .info, category: category)
     crumb.message = message
     crumb.data = data

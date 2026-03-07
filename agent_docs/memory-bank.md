@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add cmux-style card handoff for Ghostty
+- **Description**: Replaced the terminal section's direct single-card host with a persistent `CardWorkspaceDeckView` that mirrors cmux workspace switching at the card level. Card changes now keep only the selected and retiring workspaces mounted, activate the new card immediately, and explicitly hide retiring terminal/browser portals before unmounting. `TerminalManager` now owns deferred cross-card unfocus and portal-hide helpers so rapid card switching no longer leaves stale Ghostty content visible.
+
 - **Summary**: Replace card terminal host with cmux workspace stack
 - **Description**: Zenban now mounts cmux's Ghostty host stack per card by importing the Bonsplit-based workspace/tab manager layer into `zenban/CmuxParity` and mapping `card.id` directly to cmux workspace identity. Added a local socket controller plus bundled `Resources/bin/cmux` helper so shell integration, `claude`, and `open` wrappers can talk to the in-app workspace using cmux-style env vars. Verified with a successful Debug build and bundle inspection showing `claude`, `cmux`, and `open` inside `zenban.app/Contents/Resources/bin`.
 

@@ -21,6 +21,7 @@ final class TerminalManager {
     private var records: [UUID: WorkspaceRecord] = [:]
     private var agentLaunchedForCard: Set<UUID> = []
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
+    private var pendingCardUnfocusTarget: (cardID: UUID, panelID: UUID)?
 
     weak var boardStore: BoardStore?
 
@@ -102,6 +103,40 @@ final class TerminalManager {
         AppDelegate.shared?.deactivateCard(cardID)
     }
 
+    func clearActiveWorkspace() {
+        AppDelegate.shared?.clearActiveCard()
+    }
+
+    func startCardHandoff(from oldCardID: UUID, to newCardID: UUID) {
+        activateWorkspace(for: newCardID)
+
+        guard let oldRecord = records[oldCardID],
+              let focusedPanelID = oldRecord.workspace.focusedPanelId,
+              oldRecord.workspace.panels[focusedPanelID] != nil else {
+            completePendingCardUnfocus(selectedCardID: newCardID)
+            return
+        }
+
+        replacePendingCardUnfocusTarget(
+            with: (cardID: oldCardID, panelID: focusedPanelID),
+            selectedCardID: newCardID
+        )
+    }
+
+    func completeCardHandoff(retiringCardID: UUID?, selectedCardID: UUID?, reason _: String) {
+        if let retiringCardID {
+            hidePortalViews(for: retiringCardID)
+        }
+
+        completePendingCardUnfocus(selectedCardID: selectedCardID)
+    }
+
+    func hidePortalViews(for cardID: UUID) {
+        guard let record = records[cardID] else { return }
+        record.workspace.hideAllTerminalPortalViews()
+        record.workspace.hideAllBrowserPortalViews()
+    }
+
     func killSessionForCard(_ cardID: UUID) {
         resetWorkspace(for: cardID)
         agentLaunchedForCard.remove(cardID)
@@ -109,6 +144,10 @@ final class TerminalManager {
     }
 
     func resetWorkspace(for cardID: UUID) {
+        hidePortalViews(for: cardID)
+        if pendingCardUnfocusTarget?.cardID == cardID {
+            pendingCardUnfocusTarget = nil
+        }
         guard let record = records.removeValue(forKey: cardID) else { return }
         AppDelegate.shared?.unregister(cardID: cardID)
         record.workspace.teardownAllPanels()
@@ -169,6 +208,55 @@ final class TerminalManager {
 
     func allRecords() -> [WorkspaceRecord] {
         Array(records.values)
+    }
+
+    private func completePendingCardUnfocus(selectedCardID: UUID?) {
+        guard let pending = pendingCardUnfocusTarget else { return }
+
+        guard Self.shouldUnfocusPendingCard(
+            pendingCardID: pending.cardID,
+            selectedCardID: selectedCardID
+        ) else {
+            pendingCardUnfocusTarget = nil
+            return
+        }
+
+        pendingCardUnfocusTarget = nil
+
+        guard let record = records[pending.cardID],
+              let panel = record.workspace.panels[pending.panelID] else {
+            return
+        }
+
+        panel.unfocus()
+    }
+
+    private func replacePendingCardUnfocusTarget(
+        with next: (cardID: UUID, panelID: UUID),
+        selectedCardID: UUID?
+    ) {
+        if let current = pendingCardUnfocusTarget,
+           current.cardID == next.cardID,
+           current.panelID == next.panelID {
+            return
+        }
+
+        if let current = pendingCardUnfocusTarget {
+            if Self.shouldUnfocusPendingCard(
+                pendingCardID: current.cardID,
+                selectedCardID: selectedCardID
+            ),
+               let record = records[current.cardID],
+               let panel = record.workspace.panels[current.panelID] {
+                panel.unfocus()
+            }
+        }
+
+        pendingCardUnfocusTarget = next
+    }
+
+    private static func shouldUnfocusPendingCard(pendingCardID: UUID, selectedCardID: UUID?) -> Bool {
+        selectedCardID != pendingCardID
     }
 
     private func targetTerminalPanel(for cardID: UUID) -> TerminalPanel? {
