@@ -198,6 +198,10 @@ class GhosttyTerminalView: NSView {
         if let wrapper = ghosttyAppWrapper {
             self.surfaceReference = wrapper.registerSurface(cSurface)
         }
+
+        // Apply the OS color scheme immediately so the surface picks the
+        // correct light/dark theme variant from the config.
+        applySurfaceColorScheme()
     }
 
     /// Setup mouse tracking area for the entire view
@@ -223,9 +227,59 @@ class GhosttyTerminalView: NSView {
         appearanceObservation = renderingSetup.setupAppearanceObservation(for: self, surface: surface)
     }
 
+    /// The last color scheme sent to the surface, used to avoid redundant calls.
+    private var appliedColorScheme: ghostty_color_scheme_e?
+    private var runtimeBackgroundOpacity: Double?
+
+    /// Derive the OS color scheme from the view's effective appearance and
+    /// forward it to the Ghostty surface so it picks the correct theme variant.
+    private func applySurfaceColorScheme(force: Bool = false) {
+        guard let surface = surface?.unsafeCValue else { return }
+        let appearanceScheme = GhosttyConfig.currentColorSchemePreference(
+            appAppearance: effectiveAppearance
+        )
+        let config = GhosttyConfig.load(preferredColorScheme: appearanceScheme)
+        let resolvedScheme = config.resolvedColorSchemePreference(fallback: appearanceScheme)
+        let scheme: ghostty_color_scheme_e
+        switch resolvedScheme {
+        case .dark:
+            scheme = GHOSTTY_COLOR_SCHEME_DARK
+        case .light:
+            scheme = GHOSTTY_COLOR_SCHEME_LIGHT
+        }
+        if !force, let applied = appliedColorScheme, applied == scheme {
+            return
+        }
+        ghostty_surface_set_color_scheme(surface, scheme)
+        appliedColorScheme = scheme
+    }
+
     private func setupFrameObservation() {
         // We rely on layout() + updateLayout to resize the surface.
         self.postsFrameChangedNotifications = false
+    }
+
+    func handleRuntimeConfigChange(
+        backgroundColor: NSColor?,
+        backgroundOpacity: Double?
+    ) {
+        runtimeBackgroundOpacity = backgroundOpacity
+
+        if let backgroundColor {
+            let alpha = min(1.0, max(0.0, backgroundOpacity ?? 1.0))
+            let resolvedColor = backgroundColor.withAlphaComponent(alpha)
+            layer?.backgroundColor = resolvedColor.cgColor
+        }
+
+        applySurfaceColorScheme(force: true)
+        forceRefresh()
+    }
+
+    func handleRuntimeColorChange(backgroundColor: NSColor) {
+        let alpha = min(1.0, max(0.0, runtimeBackgroundOpacity ?? 1.0))
+        let resolvedColor = backgroundColor.withAlphaComponent(alpha)
+        layer?.backgroundColor = resolvedColor.cgColor
+        forceRefresh()
     }
 
     // MARK: - NSView Overrides
@@ -269,6 +323,11 @@ class GhosttyTerminalView: NSView {
         renderingSetup.updateBackingProperties(view: self, surface: surface?.unsafeCValue, window: window)
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applySurfaceColorScheme()
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
@@ -280,6 +339,9 @@ class GhosttyTerminalView: NSView {
             if let surface = surface?.unsafeCValue {
                 GhosttyRenderingSetup.setDisplayID(for: surface, window: window)
             }
+            // Re-apply color scheme every time the view enters a window so the
+            // correct light/dark theme variant is always active.
+            applySurfaceColorScheme(force: true)
             DispatchQueue.main.async { [weak self] in
                 self?.forceRefresh()
             }

@@ -7,8 +7,20 @@ Each item should follow this format:
 
 ## List
 
-- **Summary**: Replace Ghostty implementation with cmux approach and remove tmux
-- **Description**: Replaced custom ghostty integration with cmux-style approach. Switched from libghostty.a to GhosttyKit.xcframework (built with `zig build -Demit-xcframework=true`). Removed all tmux dependency: deleted TmuxSessionManager, removed tmux from DependencyCheckService, TerminalManager, and settings UI. Ghostty.App now loads user's standard config from `~/.config/ghostty/config` with fallback. Added GhosttyPasteboardHelper for rich clipboard (selection pasteboard, image paste, URL shell escaping). Added zsh shell integration via ZDOTDIR injection (runtime symlinks for dotfiles since Xcode strips them). Performance optimizations: display ID management for CVDisplayLink vsync (ghostty_surface_set_display_id), CATransaction batching in updateLayout, color scheme caching, Ctrl key fast path bypassing IME. Bridging header simplified to `#import "ghostty.h"` (xcframework auto-discovers headers). GhosttyConfig.swift added for parsing user config files.
+- **Summary**: Finalize cmux-based Ghostty integration
+- **Description**: Completed the cmux-aligned Ghostty import so Zenban now packages Ghostty resources with the same bundle layout, reads the user's standard Ghostty config, and syncs macOS appearance into the Ghostty app before surfaces render. Added runtime handling for Ghostty config/color change actions so terminal backgrounds stay aligned with the resolved theme. Removed temporary backup/debug artifacts after verifying the terminal now renders the correct theme.
+
+- **Summary**: Align Ghostty bundle layout with cmux
+- **Description**: Moved Zenban's Ghostty resource packaging to the same cmux-style bundle structure by copying repo-root `ghostty`, `terminfo`, and shell-integration assets with an Xcode script phase. Switched runtime config loading back to standard Ghostty user config files, wired Zenban to the cmux shell-integration scripts, and made terminal theme selection respect `window-theme` from the user's config. Verified with a successful Debug build and bundle inspection showing `ghostty/themes`, `terminfo`, and cmux shell integration files in the app resources.
+
+- **Summary**: Restore Ghostty from cmux runtime
+- **Description**: Re-enabled the embedded terminal by restoring Zenban's card-based Ghostty adapter layer and wiring it back into the app target. Copied `GhosttyKit.xcframework` plus Ghostty resource files from `clone/cmux`, replaced the config parser with the cmux version, and aligned environment setup with cmux's resource resolution logic. Verified with a successful Debug build using Xcode's full toolchain.
+
+- **Summary**: Remove legacy terminal backend
+- **Description**: Deleted the previous embedded terminal implementation, resources, vendor artifacts, build script, and project wiring. `TerminalManager` and terminal settings now act as placeholders so the app stays buildable while the replacement backend is prepared. Documentation was updated to reflect that the embedded terminal is temporarily disabled pending a cmux-based import.
+
+- **Summary**: Replace terminal backend with cmux approach and remove tmux
+- **Description**: Replaced the custom embedded terminal integration with a cmux-style approach. Switched from a vendored static archive to an xcframework-based backend. Removed all tmux dependency: deleted TmuxSessionManager, removed tmux from DependencyCheckService, TerminalManager, and settings UI. The app-level terminal wrapper now loads the user's standard config with fallback, adds rich clipboard support, and injects zsh shell integration via ZDOTDIR. Performance optimizations included display ID management for CVDisplayLink vsync, CATransaction batching in layout, color scheme caching, and a Ctrl key fast path bypassing IME.
 
 - **Summary**: Robust Claude CLI install with node support
 - **Description**: DependencyCheckService now auto-installs Node.js via Homebrew if npm is missing before installing Claude CLI. Added npmPath() and installNode() functions. ProcessEnvironment extended to detect volta and fnm node managers alongside nvm. New findExecutable() helper consolidates path-checking logic. GeneralSettingsView shows dependency status with check/install buttons.
@@ -26,7 +38,7 @@ Each item should follow this format:
 - **Description**: GitChangesView now has two tabs: Changes and History. History tab shows paginated commit list (GitHistoryView) with diff panel. GitLogService actor fetches commits via libgit2 and diffs via non-blocking ProcessExecutor. DiffView refactored from lazy O(n^2) parsing to upfront O(n) single-pass parsing, eliminating DiffLineParser. New utilities: ProcessExecutor for async subprocess execution, RelativeDateFormatter for date display.
 
 - **Summary**: Add Claude Code task completion notifications via URL scheme
-- **Description**: Zenban now receives notifications when Claude Code finishes tasks. Registered `zenban://` URL scheme in Info.plist. Claude Code Stop hook calls `open 'zenban://notify?body=...'` which triggers SwiftUI `.onOpenURL`. Handler shows macOS notification with card title and moves card from To Do to In Review. Also added DESKTOP_NOTIFICATION handler in Ghostty.App for future OSC 9 support.
+- **Description**: Zenban now receives notifications when Claude Code finishes tasks. Registered `zenban://` URL scheme in Info.plist. Claude Code Stop hook calls `open 'zenban://notify?body=...'` which triggers SwiftUI `.onOpenURL`. Handler shows macOS notification with card title and moves card from To Do to In Review. Also added a DESKTOP_NOTIFICATION handler in the previous terminal backend for future OSC 9 support.
 
 - **Summary**: Optimize AI commit message generation for large diffs
 - **Description**: generateCommitMessage() now uses smart summarization for large changesets (>200 lines). When threshold exceeded, createSummarizedDiff() builds condensed context: top 30 files listed with +/- stats, top 8 non-binary files fetched in parallel via withTaskGroup, snippets truncated to 300 chars. Binary/generated files (30+ extensions, lock files, .min.js) auto-skipped via shouldSkipFile(). Performance: O(n log n) sort, O(1) dictionary lookup for snippets, array join instead of string concatenation. Timeout reduced from 60s to 30s via new .commitMessage config. Prompt updated to handle both full diff and summarized formats.
@@ -35,7 +47,7 @@ Each item should follow this format:
 - **Description**: DevServerManager now captures browser console messages (log, warn, error, info, debug) via WebView JS injection. OutputLine struct with OutputSource enum replaces raw string buffers for better error/warning categorization. Separate stdout/stderr pipes with partial line buffering prevent mid-line cuts. DevServerView displays colored output based on source type. WebViewContainer injects console override script and communicates via WKScriptMessageHandler.
 
 - **Summary**: Add drag-and-drop file support to terminal
-- **Description**: GhosttyTerminalView now accepts file drops via NSDraggingDestination protocol. Dropped files have their paths shell-escaped and sent to terminal as text. Supports multiple files, paths with spaces, and special characters. Enables dragging screenshots/files to Claude CLI.
+- **Description**: The previous terminal view now accepts file drops via NSDraggingDestination protocol. Dropped files have their paths shell-escaped and sent to terminal as text. Supports multiple files, paths with spaces, and special characters. Enables dragging screenshots/files to Claude CLI.
 
 - **Summary**: Unify overlay state with OverlayState FSM
 - **Description**: Replaced separate devServerState, gitChangesCardID, and fileBrowserCardID with single OverlayState enum. Overlays are now mutually exclusive - opening one automatically closes others. Added Cmd+Shift+F shortcut for file browser. OverlayState includes cardID and isDevServer helpers for cleaner delete/cleanup logic.
@@ -47,10 +59,10 @@ Each item should follow this format:
 - **Description**: GitDiffViewModel now supports batch loading via loadAllDiffs() which fetches all file diffs in a single git call and parses them with DiffParser.splitDiffByFile(). GitDiffCache simplified to store [DiffLine] directly with single-file invalidation. DiffView gains scroll tracking (onFileVisible callback), file navigation (scrollToFile), and onOpenFile callback. GitChangesView uses batch loading after fetching file list for faster diff display.
 
 - **Summary**: Add terminal hibernation and LRU eviction
-- **Description**: TerminalManager now hibernates terminals when cards are deselected to save memory (tmux preserves sessions in background). LRU cache limits active terminals to 50, evicting least recently used. TerminalContainerView triggers hibernation in dismantleNSView. Scroll views are cached separately for faster restoration. Delayed cleanup prevents dangling pointer crashes during Ghostty surface teardown.
+- **Description**: TerminalManager now hibernates terminals when cards are deselected to save memory (tmux preserves sessions in background). LRU cache limits active terminals to 50, evicting least recently used. TerminalContainerView triggers hibernation in dismantleNSView. Scroll views are cached separately for faster restoration. Delayed cleanup prevents dangling pointer crashes during terminal surface teardown.
 
-- **Summary**: Migrate terminal from SwiftTerm to Ghostty
-- **Description**: Replaced SwiftTerm terminal emulator with Ghostty. Removed LocalPackages/SwiftTerm and LocalPackages/GhosttySwift in favor of vendored libghostty.a static library. New GhosttyTerminal/ module contains Swift wrappers: GhosttyTerminalView (NSView-based terminal), Ghostty.App (singleton app context), Ghostty.Surface (terminal surface management), plus input handling (Key, KeyEvent, MouseEvent, Mods, Input). TerminalManager and TerminalContainerView updated for new API.
+- **Summary**: Migrate terminal from SwiftTerm to a native backend
+- **Description**: Replaced SwiftTerm with a native terminal backend. Removed the old local terminal packages in favor of a vendored terminal archive. A new terminal module added NSView-based rendering, shared app context management, terminal surface management, and input handling types. TerminalManager and TerminalContainerView were updated for the new API.
 
 - **Summary**: Move GitChangesView to board area with toggle
 - **Description**: GitChangesView relocated from CardDetailView overlay to ContentView board area (like DevServerView). New Cmd+Shift+X keyboard shortcut toggles the view. BoardStore tracks gitChangesCardID state with toggleGitChanges/stopGitChanges methods. New stopOverlays() method consolidates cleanup of dev server and git changes on board switch or card/board deletion.

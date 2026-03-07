@@ -1,6 +1,6 @@
 # Zenban
 
-A macOS kanban board application with integrated terminal, built with SwiftUI.
+A macOS kanban board application built with SwiftUI.
 
 ## Requirements
 
@@ -10,24 +10,7 @@ A macOS kanban board application with integrated terminal, built with SwiftUI.
 
 ## Building from Source
 
-### 1. Build GhosttyKit.xcframework
-
-Zenban uses Ghostty as its embedded terminal emulator. You need to build the xcframework from the [Ghostty](https://github.com/ghostty-org/ghostty) source:
-
-```bash
-# Clone ghostty (if you don't have it)
-git clone https://github.com/ghostty-org/ghostty.git
-cd ghostty
-
-# Build the xcframework (requires zig: brew install zig)
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-  zig build -Demit-xcframework=true -Doptimize=ReleaseFast
-
-# Copy to Vendor/
-cp -R macos/GhosttyKit.xcframework /path/to/zenban/Vendor/
-```
-
-### 2. Build Zenban
+### 1. Build Zenban
 
 ```bash
 open zenban.xcodeproj
@@ -39,13 +22,11 @@ Or from the command line:
 xcodebuild -project zenban.xcodeproj -scheme zenban -configuration Debug build
 ```
 
-## Terminal Configuration
+## Terminal Status
 
-Zenban loads your standard Ghostty configuration from `~/.config/ghostty/config`. All terminal settings (font, theme, colors, keybindings) are configured there -- no separate settings UI in Zenban.
+Embedded Ghostty is enabled. Zenban ships the Ghostty runtime and resource layout copied from the `cmux` project, packages them with the `Copy Ghostty Resources` build phase, and reads the user's standard Ghostty config files.
 
-If no Ghostty config exists or it has errors, Zenban falls back to default settings.
-
-Shell integration is injected automatically for zsh shells via ZDOTDIR override.
+Each card terminal starts in its board or worktree directory, reuses suspended surfaces when switching cards, and now stays in sync with Ghostty light/dark theme selection driven by macOS appearance and `window-theme`.
 
 ## Bundle Identifier
 

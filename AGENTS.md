@@ -4,7 +4,7 @@
 - `zenban/`: main macOS app target (SwiftUI app entry, Views, ViewModels, Models, Services, Storage, Terminal).
 - `zenbanTests/`: unit tests using Swift Testing.
 - `zenbanUITests/`: UI tests using XCTest.
-- `Vendor/`: vendored static libraries (libghostty.a for terminal rendering).
+- `Vendor/`: vendored native libraries.
 - `agent_docs/`: architecture and conventions references for larger changes.
 - `aizen/`: related app and vendor code; treat as a separate module with its own docs.
 
@@ -28,12 +28,15 @@
 - Name tests `*Tests.swift` or `*UITests.swift` and add regression coverage near the feature.
 
 ## Commit & Pull Request Guidelines
-- Commits are short, imperative, sentence case (e.g., "Add Ghostty", "Update ...", "Fix ..."). Use "Revert ..." for rollbacks.
+- Commits are short, imperative, sentence case (e.g., "Add terminal backend", "Update ...", "Fix ..."). Use "Revert ..." for rollbacks.
 - PRs should include a clear summary, test commands run, and screenshots for UI changes.
 
 ## Vendor Libraries
-- `Vendor/libghostty.a`: Pre-built Ghostty terminal emulator library, statically linked via ghostty-bridging-header.h.
-- `zenban/Terminal/GhosttyTerminal/`: Swift wrappers for Ghostty C API (surface management, input handling, Metal rendering).
+- `Vendor/libgit2/`: Pre-built libgit2 and related libraries for git operations.
+- `Vendor/GhosttyKit.xcframework/`: Ghostty runtime copied from `clone/cmux`.
+- `Resources/ghostty`, `Resources/shell-integration`, `Resources/terminfo-overlay`, `ghostty/zig-out/share/`: Ghostty assets copied from `clone/cmux` and packaged by the `Copy Ghostty Resources` build phase.
+- `zenban/Terminal/`: Embedded terminal integration layer.
+- `zenban/Terminal/GhosttyTerminal/`: Card-based Ghostty adapter layer for Zenban, including app/surface color-scheme sync with Ghostty.
 
 ## Swift Concurrency
 

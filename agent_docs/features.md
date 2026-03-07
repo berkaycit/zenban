@@ -17,22 +17,16 @@
 
 ## Terminal Integration
 
-- Embedded Ghostty terminal per card (Metal rendering via GhosttyKit.xcframework)
-- Loads user's standard ghostty config from `~/.config/ghostty/config`
-- Direct shell execution (no tmux dependency)
-- Zsh shell integration via ZDOTDIR injection
-- Auto-launches selected agent when shell ready
-- OSC 133 shell integration for command detection
-- State machine: shell -> agentActive -> agentIdle
-- Ctrl+C detection for agent exit
-- Display ID management for CVDisplayLink vsync
-- Rich clipboard: selection pasteboard, image paste, URL shell escaping
-- Drag-and-drop file support
+- Embedded Ghostty terminal is active again
+- Runtime/resources are copied from `clone/cmux` with a build phase that recreates cmux's `ghostty`, `terminfo`, and `shell-integration` bundle layout
+- Ghostty now reads the user's standard config files (`~/.config/ghostty/config` and Ghostty app-support fallbacks) instead of a Zenban-specific bundled preset
+- Zenban pushes macOS appearance into the Ghostty app and each surface so `theme=light:...,dark:...` and `window-theme` resolve the same way they do in cmux
+- Terminal reuses suspended surfaces when switching cards
 
 ## Git Worktrees
 
 - Each card gets its own git worktree (branch: card/uuid)
-- Terminal starts in worktree directory
+- Embedded terminal starts in the card worktree directory
 - View Changes button opens diff view
 - Worktrees cleaned up on card/board deletion
 
@@ -63,7 +57,6 @@
 | Cmd+Shift+X | Toggle Git Changes |
 | Shift+Arrow Up/Down | Navigate cards/boards |
 | Shift+Arrow Left/Right | Navigate columns |
-| Enter | Focus terminal |
 
 ## Data Storage
 

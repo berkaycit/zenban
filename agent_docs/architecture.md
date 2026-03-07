@@ -15,8 +15,7 @@ zenban/
 │   ├── DevServer/   # Dev server preview with WebView
 │   ├── Settings/    # Unified settings (General, Terminal, Dev Server)
 │   └── Components/  # Reusable UI components
-├── Terminal/        # Embedded terminal per card
-│   └── GhosttyTerminal/  # Ghostty integration (Metal rendering, input handling)
+├── Terminal/        # Embedded Ghostty terminal layer
 ├── Services/        # App-wide services (notifications, git, AI providers)
 ├── Utilities/       # Shared helpers (ProcessExecutor, RelativeDateFormatter)
 ├── Commands/        # Menu keyboard shortcuts
@@ -41,9 +40,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. O(1) board index lookup via lazy cache. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board/Card/Column` | Data models. Board has repositoryPath/agent/agentCounters. Card can override agent. Column has display name/color. Agent has autoNamePrefix for card naming. |
-| `TerminalManager` | Manages GhosttyTerminalView per card with LRU eviction (max 50). Hibernates on deselect. Auto-launches agent. Direct shell execution (no tmux). |
-| `GhosttyTerminalView` | Terminal with state machine (shell/agentActive/agentIdle). OSC 133 for command detection. Ctrl+C exits agent. Display ID management for CVDisplayLink vsync. |
-| `GhosttyApp` | Singleton for Ghostty context via GhosttyKit.xcframework. Loads user's standard ghostty config (`~/.config/ghostty/config`) with fallback. Routes actions, handles clipboard (including image paste), reloads config on appearance change. |
+| `TerminalManager` | Card-scoped terminal lifecycle manager. Reuses suspended Ghostty surfaces, launches agents, and keeps worktree terminals alive across card switches. Ghostty runtime/resources are packaged from the repo-root cmux import (`ghostty/zig-out/share`, `Resources/ghostty`, `Resources/shell-integration`, `Resources/terminfo-overlay`) via the `Copy Ghostty Resources` build phase. |
 | `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `DevServerManager` | Dev server processes. Setup (npm install), port detection, WebView preview. 100KB output buffer. |
@@ -56,7 +53,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 
 ## Board Creation
 
-Three options: existing directory, create new repo (git init), or empty. Agent (Claude/Codex/Gemini) auto-runs on terminal open.
+Three options: existing directory, create new repo (git init), or empty. Agent (Claude/Codex/Gemini) auto-runs in the embedded Ghostty terminal on first open.
 
 ## Card Creation
 
@@ -65,10 +62,6 @@ Cards auto-named by agent prefix (cc-1, codex-1, gemini-1). Per-board counters p
 ## Card Worktrees
 
 For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Terminal starts in worktree. Cleanup prunes stale entries, best-effort branch deletion.
-
-## Terminal Agent Detection
-
-State machine: shell -> agentActive -> agentIdle. OSC 133 D triggers idle, Ctrl+C exits to shell. hasBeenFocused guard prevents false positives.
 
 ## Dev Server Preview
 

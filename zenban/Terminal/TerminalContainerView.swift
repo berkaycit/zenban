@@ -5,7 +5,6 @@ struct TerminalContainerView: NSViewRepresentable {
     let cardID: UUID
     let boardID: UUID
     let cardTitle: String
-    var backgroundColor: SwiftUI.Color = SwiftUI.Color(red: 0.1, green: 0.1, blue: 0.12)
     @Environment(TerminalManager.self) private var terminalManager
 
     func makeCoordinator() -> Coordinator {
@@ -15,26 +14,28 @@ struct TerminalContainerView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let hostView = NSView()
         hostView.wantsLayer = true
-        hostView.layer?.backgroundColor = NSColor(backgroundColor).cgColor
+        let initialBackground = resolvedBackgroundColor(for: hostView.effectiveAppearance)
+        hostView.layer?.backgroundColor = initialBackground.cgColor
 
         // Store references for hibernation in dismantleNSView
         context.coordinator.terminalManager = terminalManager
         context.coordinator.cardID = cardID
 
         context.coordinator.loadTask = Task { @MainActor in
-            await loadTerminal(into: hostView, coordinator: context.coordinator, backgroundColor: backgroundColor)
+            await loadTerminal(into: hostView, coordinator: context.coordinator)
         }
 
         return hostView
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        nsView.layer?.backgroundColor = NSColor(backgroundColor).cgColor
+        let resolvedBackgroundColor = resolvedBackgroundColor(for: nsView.effectiveAppearance)
+        nsView.layer?.backgroundColor = resolvedBackgroundColor.cgColor
         if let scrollView = context.coordinator.scrollView {
             scrollView.frame = nsView.bounds
         }
         if let terminal = context.coordinator.terminalView {
-            terminal.layer?.backgroundColor = NSColor(backgroundColor).cgColor
+            terminal.layer?.backgroundColor = resolvedBackgroundColor.cgColor
         }
     }
 
@@ -56,13 +57,13 @@ struct TerminalContainerView: NSViewRepresentable {
     }
 
     @MainActor
-    private func loadTerminal(into hostView: NSView, coordinator: Coordinator, backgroundColor: SwiftUI.Color) async {
+    private func loadTerminal(into hostView: NSView, coordinator: Coordinator) async {
         do {
             let terminal = try await terminalManager.terminalView(for: cardID, boardID: boardID, cardTitle: cardTitle)
 
             try Task.checkCancellation()
 
-            terminal.layer?.backgroundColor = NSColor(backgroundColor).cgColor
+            terminal.layer?.backgroundColor = resolvedBackgroundColor(for: hostView.effectiveAppearance).cgColor
             terminal.frame = hostView.bounds
 
             let scrollView: TerminalScrollView
@@ -100,5 +101,11 @@ struct TerminalContainerView: NSViewRepresentable {
         var scrollView: TerminalScrollView?
         weak var terminalManager: TerminalManager?
         var cardID: UUID?
+    }
+
+    private func resolvedBackgroundColor(for appearance: NSAppearance?) -> NSColor {
+        let colorScheme = GhosttyConfig.currentColorSchemePreference(appAppearance: appearance)
+        let config = GhosttyConfig.load(preferredColorScheme: colorScheme)
+        return config.backgroundColor.withAlphaComponent(config.backgroundOpacity)
     }
 }

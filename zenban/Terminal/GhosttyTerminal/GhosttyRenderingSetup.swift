@@ -81,28 +81,38 @@ class GhosttyRenderingSetup {
         env["ZENBAN_TERMINAL"] = "1"
 
         // Shell integration: inject ZDOTDIR wrapper for zsh shells
-        if let resourcesDir = Bundle.main.resourceURL?.path {
-            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            let shellName = URL(fileURLWithPath: shell).lastPathComponent
-            if shellName == "zsh",
-               let zdotdir = Self.prepareZdotdir(from: resourcesDir) {
-                env["ZENBAN_SHELL_INTEGRATION"] = "1"
-                env["ZENBAN_SHELL_INTEGRATION_DIR"] = zdotdir
+        if let integrationDir = Bundle.main.resourceURL?
+            .appendingPathComponent("shell-integration")
+            .path {
+            env["CMUX_SHELL_INTEGRATION"] = "1"
+            env["CMUX_SHELL_INTEGRATION_DIR"] = integrationDir
 
-                let candidateZdotdir = ProcessInfo.processInfo.environment["ZDOTDIR"]
+            let shell = (env["SHELL"]?.isEmpty == false ? env["SHELL"] : nil)
+                ?? getenv("SHELL").map { String(cString: $0) }
+                ?? ProcessInfo.processInfo.environment["SHELL"]
+                ?? "/bin/zsh"
+            let shellName = URL(fileURLWithPath: shell).lastPathComponent
+            if shellName == "zsh" {
+                let candidateZdotdir = (env["ZDOTDIR"]?.isEmpty == false ? env["ZDOTDIR"] : nil)
+                    ?? getenv("ZDOTDIR").map { String(cString: $0) }
+                    ?? (ProcessInfo.processInfo.environment["ZDOTDIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["ZDOTDIR"] : nil)
+
                 if let candidateZdotdir, !candidateZdotdir.isEmpty {
                     var isGhosttyInjected = false
-                    if let ghosttyResources = ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"] {
+                    let ghosttyResources = (env["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? env["GHOSTTY_RESOURCES_DIR"] : nil)
+                        ?? getenv("GHOSTTY_RESOURCES_DIR").map { String(cString: $0) }
+                        ?? (ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"] : nil)
+                    if let ghosttyResources {
                         let ghosttyZdotdir = URL(fileURLWithPath: ghosttyResources)
                             .appendingPathComponent("shell-integration/zsh").path
                         isGhosttyInjected = (candidateZdotdir == ghosttyZdotdir)
                     }
                     if !isGhosttyInjected {
-                        env["ZENBAN_ZSH_ZDOTDIR"] = candidateZdotdir
+                        env["CMUX_ZSH_ZDOTDIR"] = candidateZdotdir
                     }
                 }
 
-                env["ZDOTDIR"] = zdotdir
+                env["ZDOTDIR"] = integrationDir
             }
         }
 
@@ -165,53 +175,6 @@ class GhosttyRenderingSetup {
         return cSurface
     }
 
-    // MARK: - Shell Integration
-
-    /// Cached ZDOTDIR path (created once, reused across surfaces)
-    private static var cachedZdotdir: String?
-
-    /// Create a temp directory with dotfile symlinks pointing to bundled shell integration files.
-    /// Xcode strips dotfiles from bundles, so we store them without dots and symlink at runtime.
-    static func prepareZdotdir(from resourcesDir: String) -> String? {
-        if let cached = cachedZdotdir {
-            return cached
-        }
-
-        let fm = FileManager.default
-        let zdotdir = (NSTemporaryDirectory() as NSString)
-            .appendingPathComponent("zenban-zdotdir")
-
-        try? fm.createDirectory(atPath: zdotdir, withIntermediateDirectories: true)
-
-        // Symlink dotfiles (stored without dots in bundle)
-        let dotMappings = [
-            ("zshenv", ".zshenv"),
-            ("zshrc", ".zshrc"),
-            ("zprofile", ".zprofile"),
-            ("zlogin", ".zlogin"),
-        ]
-
-        for (source, dotName) in dotMappings {
-            let sourcePath = (resourcesDir as NSString).appendingPathComponent(source)
-            let linkPath = (zdotdir as NSString).appendingPathComponent(dotName)
-            guard fm.fileExists(atPath: sourcePath) else { continue }
-            try? fm.removeItem(atPath: linkPath)
-            try? fm.createSymbolicLink(atPath: linkPath, withDestinationPath: sourcePath)
-        }
-
-        // Also symlink the integration script so ZENBAN_SHELL_INTEGRATION_DIR can find it
-        let integrationScript = "zenban-zsh-integration.zsh"
-        let scriptSource = (resourcesDir as NSString).appendingPathComponent(integrationScript)
-        let scriptLink = (zdotdir as NSString).appendingPathComponent(integrationScript)
-        if fm.fileExists(atPath: scriptSource) {
-            try? fm.removeItem(atPath: scriptLink)
-            try? fm.createSymbolicLink(atPath: scriptLink, withDestinationPath: scriptSource)
-        }
-
-        cachedZdotdir = zdotdir
-        return zdotdir
-    }
-
     // MARK: - Appearance Observation
 
     /// Setup observation for system appearance changes (light/dark mode)
@@ -222,16 +185,19 @@ class GhosttyRenderingSetup {
             guard let appearance = change.newValue else { return }
             guard let surface = surface?.unsafeCValue else { return }
 
+            let appearanceScheme = GhosttyConfig.currentColorSchemePreference(
+                appAppearance: appearance
+            )
+            let config = GhosttyConfig.load(preferredColorScheme: appearanceScheme)
+            let resolvedScheme = config.resolvedColorSchemePreference(
+                fallback: appearanceScheme
+            )
             let scheme: ghostty_color_scheme_e
-            switch (appearance.name) {
-            case .aqua, .vibrantLight:
+            switch resolvedScheme {
+            case .dark:
+                scheme = GHOSTTY_COLOR_SCHEME_DARK
+            case .light:
                 scheme = GHOSTTY_COLOR_SCHEME_LIGHT
-
-            case .darkAqua, .vibrantDark:
-                scheme = GHOSTTY_COLOR_SCHEME_DARK
-
-            default:
-                scheme = GHOSTTY_COLOR_SCHEME_DARK
             }
 
             // Skip redundant color scheme updates

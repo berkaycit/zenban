@@ -157,9 +157,12 @@ class TerminalScrollView: NSView {
     // MARK: - Scrolling
 
     private func synchronizeAppearance() {
-        // Update scroller appearance based on terminal background
-        let hasLightBackground = scrollView.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
-        scrollView.appearance = NSAppearance(named: hasLightBackground ? .aqua : .darkAqua)
+        let colorScheme = GhosttyConfig.currentColorSchemePreference(appAppearance: scrollView.effectiveAppearance)
+        let hasLightBackground = GhosttyConfig.load(preferredColorScheme: colorScheme).backgroundColor.isLightColor
+        // Do not override the view hierarchy appearance; that can pin the
+        // terminal subtree to light mode and break Ghostty's theme switching.
+        scrollView.appearance = nil
+        scrollView.scrollerKnobStyle = hasLightBackground ? .dark : .light
         updateTrackingAreas()
     }
 
