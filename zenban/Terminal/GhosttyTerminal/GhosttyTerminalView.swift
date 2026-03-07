@@ -412,6 +412,33 @@ class GhosttyTerminalView: NSView {
         ghostty_surface_request_close(surface)
     }
 
+    /// Suspend the terminal - stops rendering but keeps the process alive.
+    /// Used when the terminal's card is deselected.
+    func suspend() {
+        if let surface = surface?.unsafeCValue {
+            ghostty_surface_set_focus(surface, false)
+            ghostty_surface_set_occlusion(surface, true)
+        }
+
+        // Shrink Metal drawables to release GPU memory (~11MB per terminal).
+        // Drawables are restored via layout() when the view re-enters a window.
+        if let metalLayer = layer as? CAMetalLayer {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            metalLayer.drawableSize = CGSize(width: 1, height: 1)
+            CATransaction.commit()
+        }
+        lastSurfaceSize = CGSize(width: 1, height: 1)
+    }
+
+    /// Resume a suspended terminal - re-enables rendering.
+    /// Display ID, focus, and drawable size are restored by viewDidMoveToWindow/layout.
+    func resume() {
+        if let surface = surface?.unsafeCValue {
+            ghostty_surface_set_occlusion(surface, false)
+        }
+    }
+
     // MARK: - Signal Handlers (called from Ghostty.App)
 
     func handleCommandFinished() {

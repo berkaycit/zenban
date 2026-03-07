@@ -13,12 +13,11 @@ final class TerminalManager {
     private let maxTerminals = 50
     private var agentLaunchedForCard: Set<UUID> = []
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
-    private var hibernatedCards: Set<UUID> = []
     /// Terminals pending cleanup - kept alive until surface is freed
     private var pendingCleanup: [UUID: GhosttyTerminalView] = [:]
     /// Tracks scheduled cleanup tasks for proper cancellation
     private var cleanupTasks: [UUID: Task<Void, Never>] = [:]
-    /// Cached scroll state for hibernated terminals (position + cell size for restoration)
+    /// Cached scroll state for suspended terminals (position + cell size for restoration)
     private var cachedScrollStates: [UUID: (scrollbar: Ghostty.Action.Scrollbar, cellSize: NSSize)] = [:]
     weak var boardStore: BoardStore?
 
@@ -36,20 +35,16 @@ final class TerminalManager {
     }
 
     func terminalView(for cardID: UUID, boardID: UUID, cardTitle: String) async throws -> GhosttyTerminalView {
-        // Check if terminal exists in active cache
+        // Check if terminal exists in active cache (may be suspended)
         if let existingView = terminalViews[cardID] {
             existingView.cardTitle = cardTitle
             touch(cardID)
+            existingView.resume()
             return existingView
         }
 
         // Clear pending state if user switched back quickly
         pendingCleanup.removeValue(forKey: cardID)
-        let wasHibernated = hibernatedCards.remove(cardID) != nil
-
-        if wasHibernated {
-            agentLaunchedForCard.remove(cardID)
-        }
 
         let board = boardStore?.board(for: boardID)
         let card = board?.cards.first { $0.id == cardID }
@@ -114,7 +109,6 @@ final class TerminalManager {
         removeTerminal(for: cardID)
         agentLaunchedForCard.remove(cardID)
         pendingWorktreeReady.removeValue(forKey: cardID)
-        hibernatedCards.remove(cardID)
         cachedScrollStates.removeValue(forKey: cardID)
     }
 
@@ -169,7 +163,6 @@ final class TerminalManager {
         accessOrder.removeAll()
         agentLaunchedForCard.removeAll()
         pendingWorktreeReady.removeAll()
-        hibernatedCards.removeAll()
         pendingCleanup.removeAll()
         cleanupTasks.removeAll()
         cachedScrollStates.removeAll()
@@ -185,27 +178,19 @@ final class TerminalManager {
         return terminalView.window?.firstResponder === terminalView
     }
 
-    // MARK: - Hibernation
+    // MARK: - Suspension
 
-    /// Hibernate a terminal to save memory.
-    /// The terminal process is terminated and resources freed.
-    func hibernateTerminal(for cardID: UUID) {
+    /// Suspend a terminal when its card is deselected.
+    /// The terminal process stays alive; rendering is paused via occlusion.
+    func suspendTerminal(for cardID: UUID) {
         guard let terminalView = terminalViews[cardID] else { return }
 
-        // Cache scroll state before hibernating for seamless restoration
+        // Cache scroll state for potential restoration
         if let scrollbar = terminalView.scrollbar, terminalView.cellSize.height > 0 {
             cachedScrollStates[cardID] = (scrollbar, terminalView.cellSize)
         }
 
-        terminalView.terminate()
-        cleanupTerminal(terminalView)
-        scheduleCleanup(terminalView, for: cardID)
-
-        terminalViews.removeValue(forKey: cardID)
-        scrollViews.removeValue(forKey: cardID)
-        accessOrder.removeAll { $0 == cardID }
-
-        hibernatedCards.insert(cardID)
+        terminalView.suspend()
     }
 
     // MARK: - Private Helpers

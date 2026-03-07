@@ -42,13 +42,15 @@ struct TerminalContainerView: NSViewRepresentable {
         coordinator.loadTask?.cancel()
         coordinator.loadTask = nil
 
-        // Hibernate terminal to save memory
+        // Detach views from host but keep alive in TerminalManager
+        nsView.subviews.forEach { $0.removeFromSuperview() }
+
+        // Suspend terminal rendering (process stays alive)
         if let cardID = coordinator.cardID,
            let terminalManager = coordinator.terminalManager {
-            terminalManager.hibernateTerminal(for: cardID)
+            terminalManager.suspendTerminal(for: cardID)
         }
 
-        // Clear references
         coordinator.terminalView = nil
         coordinator.scrollView = nil
     }
