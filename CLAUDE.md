@@ -44,8 +44,10 @@ The project uses Swift 6 concurrency features:
 
 - **Vendor/libgit2**: Pre-built libgit2 C library for git operations.
 - **Vendor/GhosttyKit.xcframework**: Ghostty runtime copied from `clone/cmux`.
-- **Resources/ghostty**, **Resources/shell-integration**, **Resources/terminfo-overlay**, **ghostty/zig-out/share**: cmux-sourced Ghostty assets bundled by the `Copy Ghostty Resources` build phase.
-- **zenban/Terminal/GhosttyTerminal**: Zenban adapter layer around embedded Ghostty, including app/surface color-scheme sync with macOS appearance.
+- **vendor/bonsplit**: Local cmux-derived package for split panes and workspace chrome.
+- **Resources/ghostty**, **Resources/shell-integration**, **Resources/terminfo-overlay**, **Resources/bin**, **ghostty/zig-out/share**: cmux-sourced Ghostty assets and helpers bundled by the `Copy Ghostty Resources` build phase.
+- **zenban/CmuxParity**: cmux host-side workspace stack, notification store, and local socket controller.
+- **zenban/Terminal/GhosttyTerminal**: Ghostty-backed terminal surface implementation used by the cmux host layer.
 
 ## When to Read Agent Docs
 

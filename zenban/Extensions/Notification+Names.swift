@@ -10,13 +10,4 @@ extension Notification.Name {
 
     // Dev server
     static let reloadDevServer = Notification.Name("reloadDevServer")
-
-    // Ghostty terminal
-    static let ghosttyDidUpdateScrollbar = Notification.Name("win.aizen.app.ghostty.didUpdateScrollbar")
-    static let ghosttyDidUpdateCellSize = Notification.Name("win.aizen.app.ghostty.didUpdateCellSize")
-    static let ghosttyDidSetTitle = Notification.Name("win.aizen.app.ghostty.didSetTitle")
-    static let ghosttyConfigDidReload = Notification.Name("win.aizen.app.ghostty.configDidReload")
-    static let ScrollbarKey = ghosttyDidUpdateScrollbar.rawValue + ".scrollbar"
-    static let CellSizeKey = ghosttyDidUpdateCellSize.rawValue + ".cellSize"
-    static let TitleKey = ghosttyDidSetTitle.rawValue + ".title"
 }

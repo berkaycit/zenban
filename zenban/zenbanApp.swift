@@ -24,6 +24,7 @@ private enum ArrowKey {
 
 @main
 struct zenbanApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = BoardStore()
     @State private var terminalManager = TerminalManager()
     @State private var devServerManager = DevServerManager()
@@ -150,6 +151,7 @@ struct zenbanApp: App {
     private func setupCardDeletionHandler() {
         terminalManager.boardStore = store
         store.terminalManager = terminalManager
+        appDelegate.terminalManager = terminalManager
         store.onCardDeleted = { [terminalManager, devServerManager] cardID in
             terminalManager.killSessionForCard(cardID)
             devServerManager.stopServer(for: cardID)

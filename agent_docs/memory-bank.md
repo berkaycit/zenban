@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Replace card terminal host with cmux workspace stack
+- **Description**: Zenban now mounts cmux's Ghostty host stack per card by importing the Bonsplit-based workspace/tab manager layer into `zenban/CmuxParity` and mapping `card.id` directly to cmux workspace identity. Added a local socket controller plus bundled `Resources/bin/cmux` helper so shell integration, `claude`, and `open` wrappers can talk to the in-app workspace using cmux-style env vars. Verified with a successful Debug build and bundle inspection showing `claude`, `cmux`, and `open` inside `zenban.app/Contents/Resources/bin`.
+
 - **Summary**: Port cmux host-side Ghostty contract
 - **Description**: Extended Zenban's Ghostty host layer to mirror cmux more closely by exporting cmux-style surface/workspace environment variables with card IDs, bundling cmux `Resources/bin` wrappers, and handling additional Ghostty actions such as reload-config, open-url, key-sequence, and key-table updates. The terminal view now tracks runtime background overrides and cmux-style keybinding routing so theme and shortcut behavior line up better with cmux. Verified with a successful Debug build and bundle inspection showing `Resources/bin/claude` and `Resources/bin/open` in the app.
 

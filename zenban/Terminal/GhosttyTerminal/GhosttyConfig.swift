@@ -13,7 +13,6 @@ struct GhosttyConfig {
     var fontFamily: String = "Menlo"
     var fontSize: CGFloat = 12
     var theme: String?
-    var windowTheme: String?
     var workingDirectory: String?
     var scrollbackLimit: Int = 10000
     var unfocusedSplitOpacity: Double = 0.7
@@ -50,34 +49,17 @@ struct GhosttyConfig {
         return backgroundColor.darken(by: isLightBackground ? 0.08 : 0.4)
     }
 
-    var colorSchemeOverride: ColorSchemePreference? {
-        guard let windowTheme else { return nil }
-        switch windowTheme.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "dark":
-            return .dark
-        case "light":
-            return .light
-        default:
-            return nil
-        }
-    }
-
-    func resolvedColorSchemePreference(
-        fallback preferredColorScheme: ColorSchemePreference
-    ) -> ColorSchemePreference {
-        colorSchemeOverride ?? preferredColorScheme
-    }
-
     static func load(
         preferredColorScheme: ColorSchemePreference? = nil,
-        useCache: Bool = true
+        useCache: Bool = true,
+        loadFromDisk: (_ preferredColorScheme: ColorSchemePreference) -> GhosttyConfig = Self.loadFromDisk
     ) -> GhosttyConfig {
         let resolvedColorScheme = preferredColorScheme ?? currentColorSchemePreference()
         if useCache, let cached = cachedLoad(for: resolvedColorScheme) {
             return cached
         }
 
-        let loaded = loadFromDisk(preferredColorScheme: resolvedColorScheme)
+        let loaded = loadFromDisk(resolvedColorScheme)
         if useCache {
             storeCachedLoad(loaded, for: resolvedColorScheme)
         }
@@ -122,17 +104,13 @@ struct GhosttyConfig {
             }
         }
 
-        let resolvedColorScheme = config.resolvedColorSchemePreference(
-            fallback: preferredColorScheme
-        )
-
         // Load theme if specified
         if let themeName = config.theme {
             config.loadTheme(
                 themeName,
                 environment: ProcessInfo.processInfo.environment,
                 bundleResourceURL: Bundle.main.resourceURL,
-                preferredColorScheme: resolvedColorScheme
+                preferredColorScheme: preferredColorScheme
             )
         }
 
@@ -161,8 +139,6 @@ struct GhosttyConfig {
                     }
                 case "theme":
                     theme = value
-                case "window-theme":
-                    windowTheme = value
                 case "working-directory":
                     workingDirectory = value
                 case "scrollback-limit":
@@ -435,9 +411,7 @@ struct GhosttyConfig {
 
     private static func readConfigFile(at path: String) -> String? {
         let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: path) else {
-            return nil
-        }
+        guard fileManager.fileExists(atPath: path) else { return nil }
 
         if let attributes = try? fileManager.attributesOfItem(atPath: path) {
             if let type = attributes[.type] as? FileAttributeType, type != .typeRegular {
@@ -448,10 +422,7 @@ struct GhosttyConfig {
             }
         }
 
-        guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
-            return nil
-        }
-        return contents
+        return try? String(contentsOfFile: path, encoding: .utf8)
     }
 }
 

@@ -34,9 +34,12 @@
 ## Vendor Libraries
 - `Vendor/libgit2/`: Pre-built libgit2 and related libraries for git operations.
 - `Vendor/GhosttyKit.xcframework/`: Ghostty runtime copied from `clone/cmux`.
+- `vendor/bonsplit/`: Local Swift package copied from `clone/cmux` for the split/workspace host UI.
 - `Resources/ghostty`, `Resources/shell-integration`, `Resources/terminfo-overlay`, `ghostty/zig-out/share/`: Ghostty assets copied from `clone/cmux` and packaged by the `Copy Ghostty Resources` build phase.
-- `zenban/Terminal/`: Embedded terminal integration layer.
-- `zenban/Terminal/GhosttyTerminal/`: Card-based Ghostty adapter layer for Zenban, including app/surface color-scheme sync with Ghostty.
+- `Resources/bin/`: Bundled `cmux`, `claude`, and `open` helpers copied into the app bundle for socket/browser/Claude integration.
+- `zenban/CmuxParity/`: cmux-derived workspace host layer (`Workspace`, `TabManager`, panels, notification store, socket controller).
+- `zenban/Terminal/`: Card-to-workspace adapter layer that maps Zenban cards onto the cmux host stack.
+- `zenban/Terminal/GhosttyTerminal/`: Ghostty-backed terminal surface implementation used by the cmux host layer.
 
 ## Swift Concurrency
 

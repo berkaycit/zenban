@@ -9,6 +9,9 @@
 /* Begin PBXBuildFile section */
 		114868812A9E4B9192F557FD /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1B5F5001E481458AA833EF64 /* GhosttyKit.xcframework */; };
 		12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */ = {isa = PBXBuildFile; productRef = 0F130FE69B3B46DE88340E02 /* CodeEditLanguages */; };
+		23873D682F5C5D2200E09513 /* Bonsplit in Frameworks */ = {isa = PBXBuildFile; productRef = 8F10A100B000C000D000E203 /* Bonsplit */; };
+		8F10A100B000C000D000E001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 8F10A100B000C000D000E201 /* Sentry */; };
+		8F10A100B000C000D000E002 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 8F10A100B000C000D000E202 /* MarkdownUI */; };
 		93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */ = {isa = PBXBuildFile; productRef = A67F2A020FCB4AB1B074837D /* CodeEditSymbols */; };
 		D7245E606E834A01AF59B435 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = 9149CD05B1074D1490C41427 /* CodeEditSourceEditor */; };
 		ECC201D4093342D8A219C1EA /* CodeEditTextView in Frameworks */ = {isa = PBXBuildFile; productRef = 1B6E2133151B4B8A9DE213DC /* CodeEditTextView */; };
@@ -74,8 +77,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				23873D682F5C5D2200E09513 /* Bonsplit in Frameworks */,
 				D7245E606E834A01AF59B435 /* CodeEditSourceEditor in Frameworks */,
 				12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */,
+				8F10A100B000C000D000E001 /* Sentry in Frameworks */,
+				8F10A100B000C000D000E002 /* MarkdownUI in Frameworks */,
 				ECC201D4093342D8A219C1EA /* CodeEditTextView in Frameworks */,
 				93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */,
 				114868812A9E4B9192F557FD /* GhosttyKit.xcframework in Frameworks */,
@@ -153,6 +159,9 @@
 				0F130FE69B3B46DE88340E02 /* CodeEditLanguages */,
 				1B6E2133151B4B8A9DE213DC /* CodeEditTextView */,
 				A67F2A020FCB4AB1B074837D /* CodeEditSymbols */,
+				8F10A100B000C000D000E201 /* Sentry */,
+				8F10A100B000C000D000E202 /* MarkdownUI */,
+				8F10A100B000C000D000E203 /* Bonsplit */,
 			);
 			productName = zenban;
 			productReference = 23B6DAA62EFDA93600D5AB34 /* zenban.app */;
@@ -241,6 +250,9 @@
 				D0A1B2C3D4E5F60718293A4E /* XCLocalSwiftPackageReference "Packages/CodeEditLanguages" */,
 				D0A1B2C3D4E5F60718293A4C /* XCLocalSwiftPackageReference "Packages/CodeEditTextView" */,
 				D0A1B2C3D4E5F60718293A4D /* XCLocalSwiftPackageReference "Packages/CodeEditSymbols" */,
+				8F10A100B000C000D000E101 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
+				8F10A100B000C000D000E102 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				8F10A100B000C000D000E103 /* XCLocalSwiftPackageReference "vendor/bonsplit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23B6DAA72EFDA93600D5AB34 /* Products */;
@@ -716,6 +728,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		8F10A100B000C000D000E103 /* XCLocalSwiftPackageReference "vendor/bonsplit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = vendor/bonsplit;
+		};
 		D0A1B2C3D4E5F60718293A4B /* XCLocalSwiftPackageReference "Packages/CodeEditSourceEditor" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/CodeEditSourceEditor;
@@ -734,6 +750,25 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		8F10A100B000C000D000E101 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.3.0;
+			};
+		};
+		8F10A100B000C000D000E102 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		0F130FE69B3B46DE88340E02 /* CodeEditLanguages */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -744,6 +779,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D0A1B2C3D4E5F60718293A4C /* XCLocalSwiftPackageReference "Packages/CodeEditTextView" */;
 			productName = CodeEditTextView;
+		};
+		8F10A100B000C000D000E201 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8F10A100B000C000D000E101 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
+		8F10A100B000C000D000E202 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8F10A100B000C000D000E102 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
+		};
+		8F10A100B000C000D000E203 /* Bonsplit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8F10A100B000C000D000E103 /* XCLocalSwiftPackageReference "vendor/bonsplit" */;
+			productName = Bonsplit;
 		};
 		9149CD05B1074D1490C41427 /* CodeEditSourceEditor */ = {
 			isa = XCSwiftPackageProductDependency;
