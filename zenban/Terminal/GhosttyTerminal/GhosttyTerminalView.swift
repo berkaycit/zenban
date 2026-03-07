@@ -61,6 +61,12 @@ class GhosttyTerminalView: NSView {
     /// Whether terminal has been focused (prevents false positives on init)
     private var hasBeenFocused = false
 
+    private var surfaceCreated = false
+
+    private var pendingTextBuffer: String = ""
+    private var textFlushWork: DispatchWorkItem?
+    private var titleFlushWork: DispatchWorkItem?
+
     // MARK: - State Machine
 
     enum TerminalState: Equatable {
@@ -123,9 +129,7 @@ class GhosttyTerminalView: NSView {
         self.inputHandler = GhosttyInputHandler(view: self, surface: nil)
 
         setupLayer()
-        setupSurface()
         setupTrackingArea()
-        setupAppearanceObservation()
         setupFrameObservation()
         registerForDraggedTypes([.fileURL])
 
@@ -141,21 +145,19 @@ class GhosttyTerminalView: NSView {
     }
 
     deinit {
-        // Unregister from validity registry (thread-safe, can be called from deinit)
         Ghostty.App.unregisterTerminalView(self)
 
-        // Surface cleanup happens via Surface's deinit
-        // Note: Cannot access @MainActor properties in deinit
-        // Tracking areas are automatically cleaned up by NSView
-        // Appearance observation is automatically invalidated
-
-        // Surface reference cleanup needs to happen on main actor
-        // We capture the values before the Task to avoid capturing self
+        let surfaceToClose = self.surface
         let wrapper = self.ghosttyAppWrapper
         let ref = self.surfaceReference
         if let wrapper = wrapper, let ref = ref {
             Task { @MainActor in
+                surfaceToClose?.markClosed()
                 wrapper.unregisterSurface(ref)
+            }
+        } else {
+            Task { @MainActor in
+                surfaceToClose?.markClosed()
             }
         }
     }
@@ -270,7 +272,11 @@ class GhosttyTerminalView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
-            // Re-assert display ID when window changes (screen may differ)
+            if !surfaceCreated {
+                surfaceCreated = true
+                setupSurface()
+                setupAppearanceObservation()
+            }
             if let surface = surface?.unsafeCValue {
                 GhosttyRenderingSetup.setDisplayID(for: surface, window: window)
             }
@@ -399,15 +405,51 @@ class GhosttyTerminalView: NSView {
         surface.sendText(text)
     }
 
+    func queueText(_ text: String) {
+        pendingTextBuffer.append(text)
+        textFlushWork?.cancel()
+
+        if pendingTextBuffer.count >= 4096 {
+            flushTextBuffer()
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            self?.flushTextBuffer()
+        }
+        textFlushWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016, execute: work)
+    }
+
+    private func flushTextBuffer() {
+        guard !pendingTextBuffer.isEmpty else { return }
+        let text = pendingTextBuffer
+        pendingTextBuffer = ""
+        textFlushWork = nil
+        surface?.sendText(text)
+    }
+
+    func debounceTitleChange(_ title: String) {
+        guard surface?.lifecycleState == .live else { return }
+        titleFlushWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.titleFlushWork = nil
+            self?.onTitleChange?(title)
+        }
+        titleFlushWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.033, execute: work)
+    }
+
     func sendWhenReady(_ command: String) {
         if isShellReady {
-            send(text: command)
+            queueText(command)
         } else {
             pendingCommand = command
         }
     }
 
     func terminate() {
+        surface?.beginClose()
         guard let surface = surface?.unsafeCValue else { return }
         ghostty_surface_request_close(surface)
     }
@@ -497,12 +539,14 @@ class GhosttyTerminalView: NSView {
     }
 
     private func triggerTaskCompleted() {
+        guard surface?.lifecycleState == .live else { return }
         guard hasBeenFocused else { return }
         guard let cardID = cardID, let boardID = boardID else { return }
         onTaskCompleted?(cardID, boardID)
     }
 
     private func triggerAgentResumed() {
+        guard surface?.lifecycleState == .live else { return }
         guard let cardID = cardID, let boardID = boardID else { return }
         onAgentResumed?(cardID, boardID)
     }
@@ -511,7 +555,7 @@ class GhosttyTerminalView: NSView {
         guard let command = pendingCommand else { return }
         pendingCommand = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.send(text: command)
+            self?.queueText(command)
         }
     }
 
@@ -648,7 +692,7 @@ extension GhosttyTerminalView {
         let escapedPaths = urls.map { shellEscapedPath($0.path) }
         let text = escapedPaths.joined(separator: " ")
 
-        send(text: text)
+        queueText(text)
         return true
     }
 

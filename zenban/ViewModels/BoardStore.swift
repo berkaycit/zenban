@@ -69,13 +69,17 @@ final class BoardStore {
 
     // O(1) board index cache - invalidated when boards change
     private var boardIndexCache: [UUID: Int]?
+    private var _sortedBoardsCache: [Board]?
 
     var selectedBoard: Board? {
         boards.first { $0.id == selectedBoardID }
     }
 
     var sortedBoards: [Board] {
-        boards.sorted { $0.isPinned && !$1.isPinned }
+        if let cached = _sortedBoardsCache { return cached }
+        let sorted = boards.sorted { $0.isPinned && !$1.isPinned }
+        _sortedBoardsCache = sorted
+        return sorted
     }
 
     var selectedCard: Card? {
@@ -594,6 +598,7 @@ final class BoardStore {
 
     private func invalidateLookupCache() {
         boardIndexCache = nil
+        _sortedBoardsCache = nil
     }
 
     private func boardIndex(for id: UUID) -> Int? {

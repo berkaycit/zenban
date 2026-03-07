@@ -9,7 +9,7 @@ final class TerminalManager {
 
     private var terminalViews: [UUID: GhosttyTerminalView] = [:]
     private var scrollViews: [UUID: TerminalScrollView] = [:]
-    private var accessOrder: [UUID] = []
+    private var accessTimestamps: [UUID: CFAbsoluteTime] = [:]
     private let maxTerminals = 50
     private var agentLaunchedForCard: Set<UUID> = []
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
@@ -160,7 +160,7 @@ final class TerminalManager {
         }
         terminalViews.removeAll()
         scrollViews.removeAll()
-        accessOrder.removeAll()
+        accessTimestamps.removeAll()
         agentLaunchedForCard.removeAll()
         pendingWorktreeReady.removeAll()
         pendingCleanup.removeAll()
@@ -191,6 +191,18 @@ final class TerminalManager {
         }
 
         terminalView.suspend()
+    }
+
+    func suspendAllTerminals() {
+        for (_, terminalView) in terminalViews {
+            terminalView.suspend()
+        }
+    }
+
+    func resumeAllTerminals() {
+        for (_, terminalView) in terminalViews {
+            terminalView.resume()
+        }
     }
 
     // MARK: - Private Helpers
@@ -235,13 +247,13 @@ final class TerminalManager {
     }
 
     private func touch(_ cardID: UUID) {
-        accessOrder.removeAll { $0 == cardID }
-        accessOrder.append(cardID)
+        accessTimestamps[cardID] = CFAbsoluteTimeGetCurrent()
     }
 
     private func evictIfNeeded() {
-        while terminalViews.count > maxTerminals, let oldest = accessOrder.first {
-            accessOrder.removeFirst()
+        while terminalViews.count > maxTerminals {
+            guard let oldest = accessTimestamps.min(by: { $0.value < $1.value })?.key else { break }
+            accessTimestamps.removeValue(forKey: oldest)
             if let terminal = terminalViews.removeValue(forKey: oldest) {
                 terminal.terminate()
                 cleanupTerminal(terminal)
@@ -258,7 +270,7 @@ final class TerminalManager {
             scheduleCleanup(terminal, for: cardID)
         }
         scrollViews.removeValue(forKey: cardID)
-        accessOrder.removeAll { $0 == cardID }
+        accessTimestamps.removeValue(forKey: cardID)
     }
 
     /// Keep terminal alive temporarily to prevent dangling pointer crash.

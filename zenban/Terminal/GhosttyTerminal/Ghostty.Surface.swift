@@ -10,6 +10,26 @@ extension Ghostty {
             let value: ghostty_surface_t
         }
 
+        enum LifecycleState: Sendable {
+            case live
+            case closing
+            case closed
+        }
+
+        @MainActor
+        private(set) var lifecycleState: LifecycleState = .live
+
+        @MainActor
+        func beginClose() {
+            guard lifecycleState == .live else { return }
+            lifecycleState = .closing
+        }
+
+        @MainActor
+        func markClosed() {
+            lifecycleState = .closed
+        }
+
         /// Read the underlying C value for this surface. This is unsafe because the value will be
         /// freed when the Surface class is deinitialized.
         var unsafeCValue: ghostty_surface_t {

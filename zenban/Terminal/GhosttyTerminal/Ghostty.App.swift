@@ -159,6 +159,7 @@ extension Ghostty {
         private static let validTerminalViewsLock = NSLock()
 
         private var lastKnownAppearance: NSAppearance.Name?
+        private var appearanceCoalesceWork: DispatchWorkItem?
 
         init() {
             // Configure environment before init
@@ -243,11 +244,12 @@ extension Ghostty {
             guard currentAppearance != lastKnownAppearance else { return }
             lastKnownAppearance = currentAppearance
 
-            // Appearance changes are handled by per-surface KVO observers
-            // that call ghostty_surface_set_color_scheme directly.
-            // Only do a full config reload if the theme might have changed
-            // (e.g., ghostty config uses conditional dark/light themes).
-            reloadConfig()
+            appearanceCoalesceWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.reloadConfig()
+            }
+            appearanceCoalesceWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.033, execute: work)
         }
 
         deinit {}

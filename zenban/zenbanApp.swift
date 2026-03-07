@@ -38,6 +38,18 @@ struct zenbanApp: App {
             devServerManager.stopAllServers()
         }
 
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeOcclusionStateNotification,
+            object: nil,
+            queue: .main
+        ) { [terminalManager] _ in
+            if NSApplication.shared.occlusionState.contains(.visible) {
+                terminalManager.resumeAllTerminals()
+            } else {
+                terminalManager.suspendAllTerminals()
+            }
+        }
+
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
             // Skip if inside a sheet, dialog, or text field
             if NSApp.keyWindow?.sheetParent != nil {

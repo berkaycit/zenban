@@ -16,12 +16,23 @@ class GhosttyRenderingSetup {
 
     // MARK: - Display ID
 
+    private var lastDisplayID: UInt32 = 0
+
     /// Set the display ID on a surface for proper CVDisplayLink vsync.
     /// Without this, the terminal can appear frozen after window moves or focus changes.
     static func setDisplayID(for surface: ghostty_surface_t, window: NSWindow?) {
         let screen = window?.screen ?? NSScreen.main
         guard let screen = screen else { return }
         ghostty_surface_set_display_id(surface, screen.displayID)
+    }
+
+    func setDisplayID(for surface: ghostty_surface_t, window: NSWindow?) {
+        let screen = window?.screen ?? NSScreen.main
+        guard let screen = screen else { return }
+        let displayID = screen.displayID
+        guard displayID != lastDisplayID else { return }
+        lastDisplayID = displayID
+        ghostty_surface_set_display_id(surface, displayID)
     }
 
     // MARK: - Layer Setup
@@ -41,7 +52,7 @@ class GhosttyRenderingSetup {
         // IMPORTANT: Set layer before wantsLayer for proper Metal initialization
         view.layer = metalLayer
         view.wantsLayer = true
-        view.layerContentsRedrawPolicy = .duringViewResize
+        view.layerContentsRedrawPolicy = .onSetNeedsDisplay
 
         Self.logger.debug("Metal layer configured")
     }
@@ -234,6 +245,11 @@ class GhosttyRenderingSetup {
 
     // MARK: - Scale and Size Updates
 
+    private var lastPixelWidth: UInt32 = 0
+    private var lastPixelHeight: UInt32 = 0
+    private var lastXScale: CGFloat = 0
+    private var lastYScale: CGFloat = 0
+
     /// Update Metal layer content scale and surface scale factors
     func updateBackingProperties(view: NSView, surface: ghostty_surface_t?, window: NSWindow?) {
         guard let surface = surface else { return }
@@ -250,14 +266,20 @@ class GhosttyRenderingSetup {
         let fbFrame = view.convertToBacking(view.frame)
         let xScale = fbFrame.size.width / view.frame.size.width
         let yScale = fbFrame.size.height / view.frame.size.height
-        ghostty_surface_set_content_scale(surface, xScale, yScale)
+        if abs(xScale - lastXScale) >= 0.001 || abs(yScale - lastYScale) >= 0.001 {
+            lastXScale = xScale
+            lastYScale = yScale
+            ghostty_surface_set_content_scale(surface, xScale, yScale)
+        }
 
         // Update surface size (framebuffer dimensions changed)
-        ghostty_surface_set_size(
-            surface,
-            UInt32(fbFrame.size.width),
-            UInt32(fbFrame.size.height)
-        )
+        let pixelWidth = UInt32(fbFrame.size.width)
+        let pixelHeight = UInt32(fbFrame.size.height)
+        if pixelWidth != lastPixelWidth || pixelHeight != lastPixelHeight {
+            lastPixelWidth = pixelWidth
+            lastPixelHeight = pixelHeight
+            ghostty_surface_set_size(surface, pixelWidth, pixelHeight)
+        }
     }
 
     /// Update Metal layer frame and Ghostty surface size
