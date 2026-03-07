@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Port cmux host-side Ghostty contract
+- **Description**: Extended Zenban's Ghostty host layer to mirror cmux more closely by exporting cmux-style surface/workspace environment variables with card IDs, bundling cmux `Resources/bin` wrappers, and handling additional Ghostty actions such as reload-config, open-url, key-sequence, and key-table updates. The terminal view now tracks runtime background overrides and cmux-style keybinding routing so theme and shortcut behavior line up better with cmux. Verified with a successful Debug build and bundle inspection showing `Resources/bin/claude` and `Resources/bin/open` in the app.
+
 - **Summary**: Finalize cmux-based Ghostty integration
 - **Description**: Completed the cmux-aligned Ghostty import so Zenban now packages Ghostty resources with the same bundle layout, reads the user's standard Ghostty config, and syncs macOS appearance into the Ghostty app before surfaces render. Added runtime handling for Ghostty config/color change actions so terminal backgrounds stay aligned with the resolved theme. Removed temporary backup/debug artifacts after verifying the terminal now renders the correct theme.
 

@@ -32,6 +32,11 @@ class GhosttyTerminalView: NSView {
     var cardID: UUID?
     var boardID: UUID?
     var cardTitle: String = ""
+    private var runtimeBackgroundColor: NSColor?
+    private var backgroundColor: NSColor?
+    private var keySequence: [ghostty_input_trigger_s] = []
+    private var keyTables: [String] = []
+    private var lastPerformKeyEvent: TimeInterval?
 
     /// Callback invoked when the terminal process exits
     var onProcessExit: (() -> Void)?
@@ -60,6 +65,7 @@ class GhosttyTerminalView: NSView {
 
     /// Whether terminal has been focused (prevents false positives on init)
     private var hasBeenFocused = false
+    private var shouldRestoreFirstResponder = false
 
     private var surfaceCreated = false
 
@@ -91,6 +97,15 @@ class GhosttyTerminalView: NSView {
     var scrollbar: Ghostty.Action.Scrollbar?
 
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "win.aizen.app", category: "GhosttyTerminal")
+
+    private var workspaceID: UUID? { cardID }
+
+    private var surfaceID: UUID? {
+        if let paneId, let uuid = UUID(uuidString: paneId) {
+            return uuid
+        }
+        return cardID
+    }
 
     // MARK: - Handler Components
 
@@ -167,6 +182,7 @@ class GhosttyTerminalView: NSView {
     /// Configure the Metal-backed layer for terminal rendering
     private func setupLayer() {
         renderingSetup.setupLayer(for: self)
+        applySurfaceBackground()
     }
 
     /// Create and configure the Ghostty surface
@@ -182,6 +198,9 @@ class GhosttyTerminalView: NSView {
             worktreePath: worktreePath,
             initialBounds: bounds,
             window: window,
+            workspaceID: workspaceID,
+            surfaceID: surfaceID,
+            boardID: boardID,
             paneId: paneId,
             command: initialCommand
         ) else {
@@ -201,6 +220,7 @@ class GhosttyTerminalView: NSView {
 
         // Apply the OS color scheme immediately so the surface picks the
         // correct light/dark theme variant from the config.
+        applySurfaceBackground()
         applySurfaceColorScheme()
     }
 
@@ -230,6 +250,20 @@ class GhosttyTerminalView: NSView {
     /// The last color scheme sent to the surface, used to avoid redundant calls.
     private var appliedColorScheme: ghostty_color_scheme_e?
     private var runtimeBackgroundOpacity: Double?
+
+    private func resolvedSurfaceBackgroundColor() -> NSColor {
+        let appearanceScheme = GhosttyConfig.currentColorSchemePreference(
+            appAppearance: effectiveAppearance
+        )
+        let config = GhosttyConfig.load(preferredColorScheme: appearanceScheme)
+        let baseColor = backgroundColor ?? runtimeBackgroundColor ?? config.backgroundColor
+        let alpha = min(1.0, max(0.0, runtimeBackgroundOpacity ?? config.backgroundOpacity))
+        return baseColor.withAlphaComponent(alpha)
+    }
+
+    func applySurfaceBackground() {
+        layer?.backgroundColor = resolvedSurfaceBackgroundColor().cgColor
+    }
 
     /// Derive the OS color scheme from the view's effective appearance and
     /// forward it to the Ghostty surface so it picks the correct theme variant.
@@ -264,21 +298,17 @@ class GhosttyTerminalView: NSView {
         backgroundOpacity: Double?
     ) {
         runtimeBackgroundOpacity = backgroundOpacity
-
-        if let backgroundColor {
-            let alpha = min(1.0, max(0.0, backgroundOpacity ?? 1.0))
-            let resolvedColor = backgroundColor.withAlphaComponent(alpha)
-            layer?.backgroundColor = resolvedColor.cgColor
-        }
+        runtimeBackgroundColor = backgroundColor
+        self.backgroundColor = nil
+        applySurfaceBackground()
 
         applySurfaceColorScheme(force: true)
         forceRefresh()
     }
 
     func handleRuntimeColorChange(backgroundColor: NSColor) {
-        let alpha = min(1.0, max(0.0, runtimeBackgroundOpacity ?? 1.0))
-        let resolvedColor = backgroundColor.withAlphaComponent(alpha)
-        layer?.backgroundColor = resolvedColor.cgColor
+        self.backgroundColor = backgroundColor
+        applySurfaceBackground()
         forceRefresh()
     }
 
@@ -288,13 +318,100 @@ class GhosttyTerminalView: NSView {
         return true
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard let surface = surface?.unsafeCValue else { return false }
+
+        if hasMarkedText(),
+           !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
+            return false
+        }
+
+        let bindingFlags: ghostty_binding_flags_e? = {
+            var keyEvent = event.ghosttyKeyEvent(event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS)
+            let text = event.characters ?? ""
+            var flags = ghostty_binding_flags_e(0)
+            let isBinding = text.withCString { ptr in
+                keyEvent.text = ptr
+                return ghostty_surface_key_is_binding(surface, keyEvent, &flags)
+            }
+            return isBinding ? flags : nil
+        }()
+
+        if let bindingFlags {
+            let isConsumed = (bindingFlags.rawValue & GHOSTTY_BINDING_FLAGS_CONSUMED.rawValue) != 0
+            let isAll = (bindingFlags.rawValue & GHOSTTY_BINDING_FLAGS_ALL.rawValue) != 0
+            let isPerformable = (bindingFlags.rawValue & GHOSTTY_BINDING_FLAGS_PERFORMABLE.rawValue) != 0
+
+            if isConsumed && !isAll && !isPerformable && keySequence.isEmpty && keyTables.isEmpty {
+                if let menu = NSApp.mainMenu, menu.performKeyEquivalent(with: event) {
+                    return true
+                }
+            }
+
+            keyDown(with: event)
+            return true
+        }
+
+        let equivalent: String
+        switch event.charactersIgnoringModifiers {
+        case "\r":
+            guard event.modifierFlags.contains(.control) else { return false }
+            equivalent = "\r"
+
+        case "/":
+            guard event.modifierFlags.contains(.control),
+                  event.modifierFlags.isDisjoint(with: [.shift, .command, .option]) else {
+                return false
+            }
+            equivalent = "_"
+
+        default:
+            if !event.modifierFlags.contains(.command) {
+                lastPerformKeyEvent = nil
+                return false
+            }
+
+            if let lastPerformKeyEvent {
+                self.lastPerformKeyEvent = nil
+                if lastPerformKeyEvent == event.timestamp {
+                    equivalent = event.characters ?? ""
+                    break
+                }
+            }
+
+            lastPerformKeyEvent = event.timestamp
+            return false
+        }
+
+        guard let finalEvent = NSEvent.keyEvent(
+            with: .keyDown,
+            location: event.locationInWindow,
+            modifierFlags: event.modifierFlags,
+            timestamp: event.timestamp,
+            windowNumber: event.windowNumber,
+            context: nil,
+            characters: equivalent,
+            charactersIgnoringModifiers: equivalent,
+            isARepeat: event.isARepeat,
+            keyCode: event.keyCode
+        ) else {
+            return false
+        }
+
+        keyDown(with: finalEvent)
+        return true
+    }
+
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         if result {
             hasBeenFocused = true
             if let surface = surface?.unsafeCValue {
+                shouldRestoreFirstResponder = false
                 ghostty_surface_set_focus(surface, true)
                 GhosttyRenderingSetup.setDisplayID(for: surface, window: window)
+            } else {
+                shouldRestoreFirstResponder = true
             }
         }
         return result
@@ -325,6 +442,7 @@ class GhosttyTerminalView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        applySurfaceBackground()
         applySurfaceColorScheme()
     }
 
@@ -341,9 +459,11 @@ class GhosttyTerminalView: NSView {
             }
             // Re-apply color scheme every time the view enters a window so the
             // correct light/dark theme variant is always active.
+            applySurfaceBackground()
             applySurfaceColorScheme(force: true)
             DispatchQueue.main.async { [weak self] in
                 self?.forceRefresh()
+                self?.restoreFirstResponderIfNeeded()
             }
         }
     }
@@ -404,6 +524,7 @@ class GhosttyTerminalView: NSView {
     // MARK: - Mouse Input
 
     override func mouseDown(with event: NSEvent) {
+        requestFocus()
         inputHandler.handleMouseDown(with: event)
     }
 
@@ -412,6 +533,7 @@ class GhosttyTerminalView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        requestFocus()
         inputHandler.handleRightMouseDown(with: event)
     }
 
@@ -420,6 +542,7 @@ class GhosttyTerminalView: NSView {
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        requestFocus()
         inputHandler.handleOtherMouseDown(with: event)
     }
 
@@ -457,6 +580,7 @@ class GhosttyTerminalView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        requestFocus()
         inputHandler.handleScrollWheel(with: event)
     }
 
@@ -519,9 +643,13 @@ class GhosttyTerminalView: NSView {
     /// Suspend the terminal - stops rendering but keeps the process alive.
     /// Used when the terminal's card is deselected.
     func suspend() {
+        if isTerminalFirstResponder {
+            shouldRestoreFirstResponder = true
+            window?.makeFirstResponder(nil)
+        }
         if let surface = surface?.unsafeCValue {
             ghostty_surface_set_focus(surface, false)
-            ghostty_surface_set_occlusion(surface, true)
+            ghostty_surface_set_occlusion(surface, false)
         }
 
         // Shrink Metal drawables to release GPU memory (~11MB per terminal).
@@ -539,8 +667,9 @@ class GhosttyTerminalView: NSView {
     /// Display ID, focus, and drawable size are restored by viewDidMoveToWindow/layout.
     func resume() {
         if let surface = surface?.unsafeCValue {
-            ghostty_surface_set_occlusion(surface, false)
+            ghostty_surface_set_occlusion(surface, true)
         }
+        restoreFirstResponderIfNeeded()
     }
 
     // MARK: - Signal Handlers (called from Ghostty.App)
@@ -568,6 +697,34 @@ class GhosttyTerminalView: NSView {
 
     func notifyAgentExited() {
         transition(event: .agentExited)
+    }
+
+    func updateKeySequence(_ action: ghostty_action_key_sequence_s) {
+        if action.active {
+            keySequence.append(action.trigger)
+        } else {
+            keySequence.removeAll()
+        }
+    }
+
+    func updateKeyTable(_ action: ghostty_action_key_table_s) {
+        switch action.tag {
+        case GHOSTTY_KEY_TABLE_ACTIVATE:
+            let namePtr = action.value.activate.name
+            let nameLen = Int(action.value.activate.len)
+            if let namePtr, nameLen > 0 {
+                let data = Data(bytes: namePtr, count: nameLen)
+                if let name = String(data: data, encoding: .utf8) {
+                    keyTables.append(name)
+                }
+            }
+        case GHOSTTY_KEY_TABLE_DEACTIVATE:
+            _ = keyTables.popLast()
+        case GHOSTTY_KEY_TABLE_DEACTIVATE_ALL:
+            keyTables.removeAll()
+        default:
+            break
+        }
     }
 
     // MARK: - State Machine
@@ -670,6 +827,49 @@ class GhosttyTerminalView: NSView {
         needsDisplay = true
         needsLayout = true
         displayIfNeeded()
+    }
+
+    func requestFocus() {
+        shouldRestoreFirstResponder = true
+        restoreFirstResponderIfNeeded()
+    }
+
+    private var isTerminalFirstResponder: Bool {
+        guard let window,
+              let responder = window.firstResponder as? NSView else {
+            return false
+        }
+        return responder === self || responder.isDescendant(of: self)
+    }
+
+    private func restoreFirstResponderIfNeeded() {
+        guard shouldRestoreFirstResponder,
+              let window,
+              superview != nil,
+              !isHidden,
+              bounds.width > 1,
+              bounds.height > 1 else {
+            return
+        }
+
+        if isTerminalFirstResponder {
+            shouldRestoreFirstResponder = false
+            return
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.shouldRestoreFirstResponder,
+                  let window = self.window,
+                  self.superview != nil,
+                  !self.isHidden,
+                  self.bounds.width > 1,
+                  self.bounds.height > 1 else {
+                return
+            }
+
+            _ = window.makeFirstResponder(self)
+        }
     }
 }
 

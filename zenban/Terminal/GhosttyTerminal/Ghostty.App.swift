@@ -297,6 +297,7 @@ extension Ghostty {
                 object: nil
             )
 
+            NotificationCenter.default.post(name: .ghosttyConfigDidReload, object: nil)
             Ghostty.logger.info("Ghostty app initialized with user config")
         }
 
@@ -396,7 +397,9 @@ extension Ghostty {
             }
 
             activeSurfaces = activeSurfaces.filter { $0.isValid }
+            applyAppColorScheme()
             GhosttyConfig.invalidateLoadCache()
+            NotificationCenter.default.post(name: .ghosttyConfigDidReload, object: nil)
             ghostty_config_free(config)
 
             Ghostty.logger.info("Configuration reloaded from user config files")
@@ -475,6 +478,32 @@ extension Ghostty {
             )
         }
 
+        private static func performOnMain<T>(_ work: @MainActor () -> T) -> T {
+            if Thread.isMainThread {
+                return MainActor.assumeIsolated { work() }
+            }
+            return DispatchQueue.main.sync {
+                MainActor.assumeIsolated { work() }
+            }
+        }
+
+        private static func instance(from app: ghostty_app_t?) -> App? {
+            guard let app,
+                  let userdata = ghostty_app_userdata(app) else {
+                return nil
+            }
+            return Unmanaged<App>.fromOpaque(userdata).takeUnretainedValue()
+        }
+
+        private static func url(from action: ghostty_action_open_url_s) -> URL? {
+            guard let cString = action.url else { return nil }
+            let rawValue = String(
+                data: Data(bytes: cString, count: Int(action.len)),
+                encoding: .utf8
+            ) ?? ""
+            return URL(string: rawValue)
+        }
+
         // MARK: - Callbacks
 
         static func wakeup(_ userdata: UnsafeMutableRawPointer?) {
@@ -486,6 +515,7 @@ extension Ghostty {
         }
 
         static func action(_ app: ghostty_app_t, target: ghostty_target_s, action: ghostty_action_s) -> Bool {
+            let appState = instance(from: app)
             let terminalView: GhosttyTerminalView? = {
                 guard target.tag == GHOSTTY_TARGET_SURFACE,
                       let surface: ghostty_surface_t = target.target.surface else { return nil }
@@ -506,6 +536,17 @@ extension Ghostty {
                 return true
 
             case GHOSTTY_ACTION_SET_TITLE:
+                let title = action.action.set_title.title.flatMap { String(cString: $0) } ?? ""
+                DispatchQueue.main.async {
+                    terminalView?.debounceTitleChange(title)
+                    if let terminalView {
+                        NotificationCenter.default.post(
+                            name: .ghosttyDidSetTitle,
+                            object: terminalView,
+                            userInfo: [Notification.Name.TitleKey: title]
+                        )
+                    }
+                }
                 return true
 
             case GHOSTTY_ACTION_PWD:
@@ -532,7 +573,13 @@ extension Ghostty {
                 let backingSize = NSSize(width: Double(cellSize.width), height: Double(cellSize.height))
                 DispatchQueue.main.async {
                     guard let terminalView = terminalView else { return }
-                    terminalView.cellSize = terminalView.convertFromBacking(backingSize)
+                    let resolved = terminalView.convertFromBacking(backingSize)
+                    terminalView.cellSize = resolved
+                    NotificationCenter.default.post(
+                        name: .ghosttyDidUpdateCellSize,
+                        object: terminalView,
+                        userInfo: [Notification.Name.CellSizeKey: resolved]
+                    )
                 }
                 return true
 
@@ -550,11 +597,13 @@ extension Ghostty {
                 let background = config.flatMap { colorConfigValue($0, key: "background") }
                 let opacity = config.flatMap { doubleConfigValue($0, key: "background-opacity") }
                 GhosttyConfig.invalidateLoadCache()
+                NotificationCenter.default.post(name: .ghosttyConfigDidReload, object: nil)
                 DispatchQueue.main.async {
                     terminalView?.handleRuntimeConfigChange(
                         backgroundColor: background,
                         backgroundOpacity: opacity
                     )
+                    appState?.applyAppColorScheme()
                 }
                 return true
 
@@ -570,6 +619,36 @@ extension Ghostty {
                     DispatchQueue.main.async {
                         terminalView?.handleRuntimeColorChange(backgroundColor: background)
                     }
+                }
+                return true
+
+            case GHOSTTY_ACTION_RELOAD_CONFIG:
+                return performOnMain {
+                    appState?.reloadConfig()
+                    return true
+                }
+
+            case GHOSTTY_ACTION_KEY_SEQUENCE:
+                DispatchQueue.main.async {
+                    terminalView?.updateKeySequence(action.action.key_sequence)
+                }
+                return true
+
+            case GHOSTTY_ACTION_KEY_TABLE:
+                DispatchQueue.main.async {
+                    terminalView?.updateKeyTable(action.action.key_table)
+                }
+                return true
+
+            case GHOSTTY_ACTION_OPEN_URL:
+                guard let url = url(from: action.action.open_url) else { return false }
+                return performOnMain {
+                    NSWorkspace.shared.open(url)
+                }
+
+            case GHOSTTY_ACTION_SHOW_CHILD_EXITED:
+                DispatchQueue.main.async {
+                    terminalView?.onProcessExit?()
                 }
                 return true
 

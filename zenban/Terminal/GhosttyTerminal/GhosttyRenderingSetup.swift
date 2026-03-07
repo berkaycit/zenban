@@ -66,6 +66,9 @@ class GhosttyRenderingSetup {
         worktreePath: String,
         initialBounds: NSRect,
         window: NSWindow?,
+        workspaceID: UUID? = nil,
+        surfaceID: UUID? = nil,
+        boardID: UUID? = nil,
         paneId: String? = nil,
         command: String? = nil
     ) -> ghostty_surface_t? {
@@ -77,8 +80,51 @@ class GhosttyRenderingSetup {
         surfaceConfig.scale_factor = Double(window?.backingScaleFactor ?? 2.0)
 
         // Build environment variables
+        let processEnv = ProcessInfo.processInfo.environment
         var env: [String: String] = [:]
         env["ZENBAN_TERMINAL"] = "1"
+
+        let resolvedWorkspaceID = workspaceID
+        let resolvedSurfaceID = surfaceID ?? paneId.flatMap(UUID.init(uuidString:))
+        if let resolvedSurfaceID {
+            env["CMUX_SURFACE_ID"] = resolvedSurfaceID.uuidString
+            env["CMUX_PANEL_ID"] = resolvedSurfaceID.uuidString
+        }
+        if let resolvedWorkspaceID {
+            env["CMUX_WORKSPACE_ID"] = resolvedWorkspaceID.uuidString
+            env["CMUX_TAB_ID"] = resolvedWorkspaceID.uuidString
+            env["ZENBAN_CARD_ID"] = resolvedWorkspaceID.uuidString
+        }
+        if let boardID {
+            env["ZENBAN_BOARD_ID"] = boardID.uuidString
+        }
+        if let bundleID = Bundle.main.bundleIdentifier, !bundleID.isEmpty {
+            env["CMUX_BUNDLE_ID"] = bundleID
+        }
+
+        for key in [
+            "CMUX_SOCKET_PATH",
+            "CMUX_SOCKET",
+            "CMUX_PORT",
+            "CMUX_PORT_END",
+            "CMUX_PORT_RANGE",
+            "CMUX_CLAUDE_HOOKS_DISABLED",
+        ] {
+            if let value = processEnv[key], !value.isEmpty {
+                env[key] = value
+            }
+        }
+
+        if let cliBinPath = Bundle.main.resourceURL?.appendingPathComponent("bin").path,
+           FileManager.default.fileExists(atPath: cliBinPath) {
+            let currentPath = processEnv["PATH"]
+                ?? getenv("PATH").map { String(cString: $0) }
+                ?? ""
+            if !currentPath.split(separator: ":").contains(Substring(cliBinPath)) {
+                let separator = currentPath.isEmpty ? "" : ":"
+                env["PATH"] = "\(cliBinPath)\(separator)\(currentPath)"
+            }
+        }
 
         // Shell integration: inject ZDOTDIR wrapper for zsh shells
         if let integrationDir = Bundle.main.resourceURL?
@@ -89,19 +135,19 @@ class GhosttyRenderingSetup {
 
             let shell = (env["SHELL"]?.isEmpty == false ? env["SHELL"] : nil)
                 ?? getenv("SHELL").map { String(cString: $0) }
-                ?? ProcessInfo.processInfo.environment["SHELL"]
+                ?? processEnv["SHELL"]
                 ?? "/bin/zsh"
             let shellName = URL(fileURLWithPath: shell).lastPathComponent
             if shellName == "zsh" {
                 let candidateZdotdir = (env["ZDOTDIR"]?.isEmpty == false ? env["ZDOTDIR"] : nil)
                     ?? getenv("ZDOTDIR").map { String(cString: $0) }
-                    ?? (ProcessInfo.processInfo.environment["ZDOTDIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["ZDOTDIR"] : nil)
+                    ?? (processEnv["ZDOTDIR"]?.isEmpty == false ? processEnv["ZDOTDIR"] : nil)
 
                 if let candidateZdotdir, !candidateZdotdir.isEmpty {
                     var isGhosttyInjected = false
                     let ghosttyResources = (env["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? env["GHOSTTY_RESOURCES_DIR"] : nil)
                         ?? getenv("GHOSTTY_RESOURCES_DIR").map { String(cString: $0) }
-                        ?? (ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"] : nil)
+                        ?? (processEnv["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? processEnv["GHOSTTY_RESOURCES_DIR"] : nil)
                     if let ghosttyResources {
                         let ghosttyZdotdir = URL(fileURLWithPath: ghosttyResources)
                             .appendingPathComponent("shell-integration/zsh").path

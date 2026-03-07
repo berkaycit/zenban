@@ -170,7 +170,7 @@ final class TerminalManager {
 
     func focusTerminal(for cardID: UUID) {
         guard let terminalView = terminalViews[cardID] else { return }
-        terminalView.window?.makeFirstResponder(terminalView)
+        terminalView.requestFocus()
     }
 
     func isTerminalFocused(for cardID: UUID) -> Bool {

@@ -40,7 +40,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. O(1) board index lookup via lazy cache. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board/Card/Column` | Data models. Board has repositoryPath/agent/agentCounters. Card can override agent. Column has display name/color. Agent has autoNamePrefix for card naming. |
-| `TerminalManager` | Card-scoped terminal lifecycle manager. Reuses suspended Ghostty surfaces, launches agents, and keeps worktree terminals alive across card switches. Ghostty runtime/resources are packaged from the repo-root cmux import (`ghostty/zig-out/share`, `Resources/ghostty`, `Resources/shell-integration`, `Resources/terminfo-overlay`) via the `Copy Ghostty Resources` build phase. |
+| `TerminalManager` | Card-scoped terminal lifecycle manager. Reuses suspended Ghostty surfaces, launches agents, and keeps worktree terminals alive across card switches. Ghostty runtime/resources are packaged from the repo-root cmux import (`ghostty/zig-out/share`, `Resources/ghostty`, `Resources/shell-integration`, `Resources/terminfo-overlay`, `Resources/bin`) via the `Copy Ghostty Resources` build phase, and Zenban maps each card to cmux's workspace/tab identity when building the surface environment. |
 | `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `DevServerManager` | Dev server processes. Setup (npm install), port detection, WebView preview. 100KB output buffer. |

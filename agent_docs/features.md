@@ -21,6 +21,7 @@
 - Runtime/resources are copied from `clone/cmux` with a build phase that recreates cmux's `ghostty`, `terminfo`, and `shell-integration` bundle layout
 - Ghostty now reads the user's standard config files (`~/.config/ghostty/config` and Ghostty app-support fallbacks) instead of a Zenban-specific bundled preset
 - Zenban pushes macOS appearance into the Ghostty app and each surface so `theme=light:...,dark:...` and `window-theme` resolve the same way they do in cmux
+- Surface env/action handling now follows cmux more closely: card IDs are exported as cmux workspace/tab IDs, cmux `bin/` wrappers are bundled, and Ghostty reload/open-url/key-table actions are handled by the host layer
 - Terminal reuses suspended surfaces when switching cards
 
 ## Git Worktrees
