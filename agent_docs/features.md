@@ -20,7 +20,7 @@
 - Embedded terminal now uses cmux's Ghostty host stack, including `Workspace`, `TabManager`, Bonsplit splits, browser panels, and find/search state inside the card detail area
 - The board owns one shared cmux `TabManager`; each card is treated as a cmux workspace with card IDs exported as `CMUX_WORKSPACE_ID`/`CMUX_TAB_ID`, and terminal panels export `CMUX_SURFACE_ID`
 - Card switches use a selected+retiring handoff so old Ghostty/browser portals are hidden before the previous card unmounts
-- Workspaces can move into detached terminal-only windows and back without changing card identity or worktree routing; detached cards show a placeholder in the detail pane that focuses the external window
+- Workspaces can move into detached terminal-only windows and back without changing card identity or worktree routing; detached windows currently host one card workspace and detached cards show a placeholder in the detail pane that focuses the external window
 - Runtime/resources are copied from `clone/cmux` with a build phase that recreates cmux's `ghostty`, `terminfo`, `shell-integration`, and `bin` bundle layout
 - Ghostty reads the user's standard config files and receives the same app/surface color-scheme updates cmux uses, so theme resolution now matches cmux behavior
 - Bundled `cmux`, `claude`, and `open` helpers are in `Resources/bin`, and the app starts a cmux-compatible local socket controller so shell integration can report pwd/tty/git/pr state back into the owning workspace whether it is embedded or detached
@@ -28,9 +28,9 @@
 ## Git Worktrees
 
 - Each card gets its own git worktree (branch: card/uuid)
-- Embedded terminal starts in the card worktree directory
+- Workspace uses the card worktree directory when ready; otherwise it opens at the repo path first and the agent later switches into the worktree with `cd && launch`
 - View Changes button opens diff view
-- Worktrees cleaned up on card/board deletion
+- Worktrees cleaned up on card/board deletion with best-effort branch removal
 
 ## Dev Server Preview
 

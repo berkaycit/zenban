@@ -40,8 +40,8 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. O(1) board index lookup via lazy cache. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board/Card/Column` | Data models. Board has repositoryPath/agent/agentCounters. Card can override agent. Column has display name/color. Agent has autoNamePrefix for card naming. |
-| `TerminalManager` | Terminal adapter between Zenban cards and the cmux host stack. The main board now owns one cmux-style `TabManager`, each card maps 1:1 to a `Workspace` using the card UUID, and detached terminal windows temporarily re-home that workspace into a dedicated window manager before attaching it back to the board. `CardWorkspaceDeckView` still keeps only the selected + retiring card mounted during handoff so split layout, browser panels, search state, scrollback, and focus survive card switches without stale Ghostty/WebKit portals bleeding through. |
-| `AppDelegate` | Window-level terminal host contract for cmux parity. Tracks the main board window plus detached terminal windows, routes active `TabManager`/window focus into `TerminalController`, starts the local cmux-compatible socket controller, and preserves card identity while workspaces move between the board and detached windows. |
+| `TerminalManager` | Terminal adapter between Zenban cards and the cmux host stack. The board owns one cmux-style `TabManager`, lazily creates one `Workspace` per card using the card UUID, and keeps workspaces alive until card teardown. `CardWorkspaceDeckView` keeps only the selected + retiring card mounted during handoff so split layout, browser panels, search state, scrollback, and focus survive card switches without stale Ghostty/WebKit portals bleeding through. |
+| `AppDelegate` | Window-level terminal host contract for Zenban's reduced cmux shell. Tracks the main board window plus single-card detached terminal windows, routes active `TabManager`/window focus into `TerminalController`, starts the local cmux-compatible socket controller, and preserves card identity while workspaces move between the board and detached windows. |
 | `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `DevServerManager` | Dev server processes. Setup (npm install), port detection, WebView preview. 100KB output buffer. |
@@ -62,11 +62,11 @@ Cards auto-named by agent prefix (cc-1, codex-1, gemini-1). Per-board counters p
 
 ## Card Worktrees
 
-For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Terminal starts in worktree. Cleanup prunes stale entries, best-effort branch deletion.
+For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Workspace startup uses the worktree path when it already exists; otherwise the repo path is used until worktree creation finishes and the agent is relaunched with `cd <worktree> && <agent>`. Cleanup prunes stale entries with best-effort branch deletion.
 
 ## Detached Terminal Windows
 
-Cards still equal workspaces, but a workspace can move out of the board detail pane into a dedicated terminal-only window. The board keeps the card selected while `AppDelegate` and `TerminalManager` rebind the workspace's `TabManager`, and the card detail pane shows a focus placeholder instead of mounting a duplicate Ghostty host.
+Cards still equal workspaces, but a workspace can move out of the board detail pane into a dedicated terminal-only window. Detached windows currently host one card workspace at a time. The board keeps the card selected while `AppDelegate` and `TerminalManager` rebind the workspace's `TabManager`, and the card detail pane shows a focus placeholder instead of mounting a duplicate Ghostty host.
 
 ## Dev Server Preview
 

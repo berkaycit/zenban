@@ -24,9 +24,9 @@ xcodebuild -project zenban.xcodeproj -scheme zenban -configuration Release build
 
 ## Architecture
 
-- **zenban/**: Main app target containing SwiftUI views and app entry point
-  - `zenbanApp.swift`: App entry point using `@main` attribute
-  - `ContentView.swift`: Root view of the application
+- **zenban/**: Main app target containing SwiftUI views, app entry point, board UI, services, and the terminal adapter
+- **zenban/CmuxParity/**: cmux-derived workspace and terminal core; compare Ghostty/workspace behavior here first
+- **zenban/Terminal/**: Zenban-only adapter that lazily maps cards 1:1 to cmux workspaces and git-backed worktrees
 - **zenbanTests/**: Unit tests using Swift Testing framework (`import Testing`)
 - **zenbanUITests/**: UI tests using XCTest framework
 
@@ -46,7 +46,7 @@ The project uses Swift 6 concurrency features:
 - **Vendor/GhosttyKit.xcframework**: Ghostty runtime copied from `clone/cmux`.
 - **vendor/bonsplit**: Local cmux-derived package for split panes and workspace chrome.
 - **Resources/ghostty**, **Resources/shell-integration**, **Resources/terminfo-overlay**, **Resources/bin**, **ghostty/zig-out/share**: cmux-sourced Ghostty assets and helpers bundled by the `Copy Ghostty Resources` build phase.
-- **zenban/CmuxParity**: cmux host-side workspace stack, notification store, and local socket controller.
+- **zenban/CmuxParity**: cmux host-side workspace stack, notification store, and local socket controller. This layer stays close to `clone/cmux`, but Zenban does not ship the full cmux app shell.
 - **zenban/Terminal/GhosttyTerminal**: Ghostty-backed terminal surface implementation used by the cmux host layer.
 
 ## When to Read Agent Docs
@@ -76,5 +76,4 @@ The project uses Swift 6 concurrency features:
 - Don't use emojis
 
 ## Gotchas
-
-- **Keyboard event monitor**: `zenbanApp.swift` has a global NSEvent monitor for board/card navigation shortcuts. When adding overlays/dialogs with their own keyboard handling, add a skip condition to the monitor (e.g., `if store.showDeleteConfirmation { return event }`).
+- **Keyboard event monitor**: `zenbanApp.swift` has a global NSEvent monitor for board/card navigation shortcuts. When adding overlays/dialogs with their own keyboard handling, add a skip condition to the monitor (e.g., `if store.showDeleteConfirmation { return event }`). Terminal behavior is split between shared `zenban/CmuxParity` code and Zenban-only card/worktree adapters, so do not assume every cmux app-shell feature exists here.

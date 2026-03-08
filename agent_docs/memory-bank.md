@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Clarify cmux parity and worktree docs
+- **Description**: Updated the architecture and feature docs to reflect how Zenban's terminal stack actually differs from upstream cmux. The docs now call out the lazy card-to-workspace mapping, the two-phase worktree startup path, and the fact that detached terminal windows currently host one card workspace at a time. Refreshed agent guidance files so terminal changes are documented against the correct layer.
+
 - **Summary**: Add cmux-style detached terminal windows
 - **Description**: Zenban's terminal adapter now uses a single board-owned cmux `TabManager` instead of creating one manager per card, while still keeping card UUIDs as workspace identity. `AppDelegate` now acts as the cmux-style window host contract, tracking the main board window, detached terminal-only windows, and socket routing/focus between them. Detached cards keep their worktree and shell-integration IDs, and the card detail pane now shows a placeholder that focuses the detached terminal window instead of mounting a duplicate host.
 

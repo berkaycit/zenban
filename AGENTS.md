@@ -37,8 +37,8 @@
 - `vendor/bonsplit/`: Local Swift package copied from `clone/cmux` for the split/workspace host UI.
 - `Resources/ghostty`, `Resources/shell-integration`, `Resources/terminfo-overlay`, `ghostty/zig-out/share/`: Ghostty assets copied from `clone/cmux` and packaged by the `Copy Ghostty Resources` build phase.
 - `Resources/bin/`: Bundled `cmux`, `claude`, and `open` helpers copied into the app bundle for socket/browser/Claude integration.
-- `zenban/CmuxParity/`: cmux-derived workspace host layer (`Workspace`, `TabManager`, panels, notification store, socket controller).
-- `zenban/Terminal/`: Card-to-workspace adapter layer that maps Zenban cards onto the cmux host stack.
+- `zenban/CmuxParity/`: cmux-derived workspace host layer (`Workspace`, `TabManager`, panels, notification store, socket controller). Terminal core is close to `clone/cmux`, but Zenban's app shell is slimmer.
+- `zenban/Terminal/`: Card-to-workspace adapter layer that lazily maps cards 1:1 onto the cmux host stack and launches agents after per-card worktrees are ready.
 - `zenban/Terminal/GhosttyTerminal/`: Ghostty-backed terminal surface implementation used by the cmux host layer.
 
 ## Swift Concurrency
@@ -71,4 +71,5 @@ The project uses Swift 6 concurrency features:
 - Ensure your changes are easy to verify
 - After each change, do NOT run npm run build
 - If doing any Firebase related work, use the Firebase MCP
+- When changing terminal behavior, verify whether the logic lives in shared `zenban/CmuxParity/` code or Zenban-only adapter/worktree code (`zenban/Terminal/`, `BoardStore`, `GitService`)
 - Don't use emojis
