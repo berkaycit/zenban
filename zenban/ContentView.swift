@@ -5,6 +5,7 @@
 //  Created by Berkay Cit on 25.12.2025.
 //
 
+import AppKit
 import SwiftUI
 
 struct ContentView: View {
@@ -143,7 +144,7 @@ struct ContentView: View {
 
             if isBoardListVisible(columnVisibility) {
                 devServerSidebarRestoreVisibility = columnVisibility
-                columnVisibility = .doubleColumn
+                transitionBoardList(to: .doubleColumn)
             } else {
                 devServerSidebarRestoreVisibility = nil
             }
@@ -152,12 +153,59 @@ struct ContentView: View {
 
         guard !devServerReconfigureRestartInFlight else { return }
         guard let restoreVisibility = devServerSidebarRestoreVisibility else { return }
-        columnVisibility = restoreVisibility
+        transitionBoardList(to: restoreVisibility)
         devServerSidebarRestoreVisibility = nil
     }
 
     private func isBoardListVisible(_ visibility: NavigationSplitViewVisibility) -> Bool {
         visibility != .doubleColumn && visibility != .detailOnly
+    }
+
+    private func transitionBoardList(to visibility: NavigationSplitViewVisibility) {
+        guard columnVisibility != visibility else { return }
+
+        if toggleSidebarWithSystemAnimation(from: columnVisibility, to: visibility) {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            columnVisibility = visibility
+        }
+    }
+
+    private func toggleSidebarWithSystemAnimation(
+        from currentVisibility: NavigationSplitViewVisibility,
+        to targetVisibility: NavigationSplitViewVisibility
+    ) -> Bool {
+        guard shouldUseSystemSidebarToggle(from: currentVisibility, to: targetVisibility) else { return false }
+
+        let action = #selector(NSSplitViewController.toggleSidebar(_:))
+        let targetWindow = NSApp.keyWindow ?? NSApp.mainWindow
+        let dispatched = targetWindow?.firstResponder?.tryToPerform(action, with: nil) == true
+            || NSApp.sendAction(action, to: nil, from: nil)
+        guard dispatched else { return false }
+
+        DispatchQueue.main.async {
+            if columnVisibility != targetVisibility {
+                columnVisibility = targetVisibility
+            }
+        }
+        return true
+    }
+
+    private func shouldUseSystemSidebarToggle(
+        from currentVisibility: NavigationSplitViewVisibility,
+        to targetVisibility: NavigationSplitViewVisibility
+    ) -> Bool {
+        switch (currentVisibility, targetVisibility) {
+        case (.all, .doubleColumn),
+             (.automatic, .doubleColumn),
+             (.doubleColumn, .all),
+             (.doubleColumn, .automatic):
+            true
+        default:
+            false
+        }
     }
 }
 
