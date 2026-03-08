@@ -36,7 +36,8 @@
 
 - Per-board dev server config (setup/dev commands)
 - Auto-detects package manager from lock files
-- WebView preview with toggleable console
+- Board-area preview reuses cmux's browser stack (`BrowserPanelView`) once the server is ready
+- Startup/setup output stays visible until the URL is detected, then the cmux JavaScript console auto-opens for that preview session
 - Port auto-detection from output
 - Toggle with Cmd+Shift+S
 

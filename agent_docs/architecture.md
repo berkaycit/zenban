@@ -12,7 +12,7 @@ zenban/
 │   ├── Board/       # Kanban board layout
 │   ├── Card/        # Card display and editing
 │   ├── Git/         # Git changes view, diff display, PR creation
-│   ├── DevServer/   # Dev server preview with WebView
+│   ├── DevServer/   # Board-area dev server preview using cmux browser panels
 │   ├── Settings/    # Unified settings (General, Terminal, Dev Server)
 │   └── Components/  # Reusable UI components
 ├── Terminal/        # Embedded Ghostty terminal layer
@@ -44,7 +44,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `AppDelegate` | Window-level terminal host contract for Zenban's reduced cmux shell. Tracks the main board window plus single-card detached terminal windows, routes active `TabManager`/window focus into `TerminalController`, starts the local cmux-compatible socket controller, and preserves card identity while workspaces move between the board and detached windows. |
 | `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
-| `DevServerManager` | Dev server processes. Setup (npm install), port detection, WebView preview. 100KB output buffer. |
+| `DevServerManager` | Dev server setup/process lifecycle, port detection, and server-output buffering. Ready-state preview is owned by `DevServerView`, not the manager. |
 | `ClaudeHooksInstaller` | Installs Claude Code hooks to ~/.claude/settings.json for Zenban URL scheme integration. |
 | `DependencyCheckService` | Actor for checking/installing dependencies (Homebrew required; gh, Claude CLI optional). Shows DependencySetupView modal on startup if required deps missing. |
 | `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). GitDiffViewModel for batch loading with LRU cache and content hash validation. |
@@ -70,7 +70,7 @@ Cards still equal workspaces, but a workspace can move out of the board detail p
 
 ## Dev Server Preview
 
-Board stores DevServerConfig. First run prompts for commands (auto-detected from package.json). WebView shows in board area. ProcessEnvironment sets BROWSER=none.
+Board stores DevServerConfig. First run prompts for commands (auto-detected from package.json). `DevServerView` keeps setup/start output visible during startup, then swaps the board-area surface to a cmux `BrowserPanelView` tied to the card ID once the server reaches `ready(url)`. The preview reuses that live browser panel for in-session reloads and auto-opens the cmux JavaScript console, while unexpected server exits return the board area to the error/log view. `ProcessEnvironment` sets `BROWSER=none` so the dev command never launches an external browser.
 
 ## Keyboard Shortcuts
 

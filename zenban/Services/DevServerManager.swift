@@ -1,59 +1,18 @@
 import Foundation
 
-/// Source of output line
 enum OutputSource: Equatable {
-    case serverStdout    // Dev server process stdout
-    case serverStderr    // Dev server process stderr (errors/warnings)
-    case browserLog      // Browser console.log
-    case browserWarn     // Browser console.warn
-    case browserError    // Browser console.error / uncaught errors
-    case browserInfo     // Browser console.info
-    case browserDebug    // Browser console.debug
+    case serverStdout
+    case serverStderr
 }
 
-/// Represents a single line of output from dev server or browser console
 struct OutputLine: Identifiable, Equatable {
     let id = UUID()
     let text: String
     let source: OutputSource
     let timestamp: Date
 
-    /// Whether this line should be displayed as an error (red color)
     var isError: Bool {
-        source == .serverStderr || source == .browserError
-    }
-
-    /// Whether this line is a warning (orange color)
-    var isWarning: Bool {
-        source == .browserWarn
-    }
-
-    /// Whether this is from browser console (not server process)
-    var isBrowser: Bool {
-        switch source {
-        case .browserLog, .browserWarn, .browserError, .browserInfo, .browserDebug:
-            true
-        case .serverStdout, .serverStderr:
-            false
-        }
-    }
-
-    /// Prefix to show the source of the message
-    var prefix: String {
-        switch source {
-        case .serverStdout, .serverStderr:
-            return ""
-        case .browserLog:
-            return "[log] "
-        case .browserWarn:
-            return "[warn] "
-        case .browserError:
-            return "[error] "
-        case .browserInfo:
-            return "[info] "
-        case .browserDebug:
-            return "[debug] "
-        }
+        source == .serverStderr
     }
 
     init(text: String, source: OutputSource, timestamp: Date = Date()) {
@@ -62,7 +21,6 @@ struct OutputLine: Identifiable, Equatable {
         self.timestamp = timestamp
     }
 
-    /// Convenience initializer for server output
     init(text: String, isError: Bool, timestamp: Date = Date()) {
         self.text = text
         self.source = isError ? .serverStderr : .serverStdout
@@ -70,7 +28,7 @@ struct OutputLine: Identifiable, Equatable {
     }
 }
 
-/// Manages dev server processes for cards
+/// Manages dev server processes for cards.
 @Observable
 final class DevServerManager {
 
@@ -90,12 +48,10 @@ final class DevServerManager {
     private var stderrPipes: [UUID: Pipe] = [:]
     private var outputLines: [UUID: [OutputLine]] = [:]
     private var pendingUIUpdates: [UUID: Bool] = [:]
-    /// Partial line buffer for incomplete lines (stdout/stderr)
+    private var expectedTerminatedProcesses: Set<ObjectIdentifier> = []
     private var partialLineBuffers: [UUID: (stdout: String, stderr: String)] = [:]
 
-    /// Maximum number of output lines to keep
     private let maxOutputLines = 1000
-    /// UI update throttle interval
     private let uiUpdateInterval: TimeInterval = 0.15
 
     // MARK: - Public API
@@ -104,50 +60,109 @@ final class DevServerManager {
         serverStates[cardID] ?? .idle
     }
 
-    /// Get raw output string (for state builders and error messages)
     func output(for cardID: UUID) -> String {
         let lines = outputLines[cardID] ?? []
-        return lines.map { $0.text }.joined(separator: "\n")
+        return lines.map(\.text).joined(separator: "\n")
     }
 
-    /// Get structured output lines with error distinction
     func outputLinesArray(for cardID: UUID) -> [OutputLine] {
         outputLines[cardID] ?? []
     }
 
-    /// Clear output lines for a card (used for browser refresh)
-    func clearOutput(for cardID: UUID) {
+    func runSetup(
+        for cardID: UUID,
+        command: String,
+        directory: String
+    ) async throws {
+        stopAllServers()
+
+        serverStates[cardID] = .runningSetup(output: "")
         outputLines[cardID] = []
-        outputVersion[cardID] = (outputVersion[cardID] ?? 0) + 1
+        partialLineBuffers[cardID] = (stdout: "", stderr: "")
+
+        try await runCommandToCompletion(
+            for: cardID,
+            command: command,
+            directory: directory,
+            stateBuilder: { output in .runningSetup(output: output) },
+            timeout: 300
+        )
     }
 
-    /// Add a browser console message to the output
-    func addBrowserConsoleMessage(for cardID: UUID, level: String, message: String) {
-        let source: OutputSource = switch level {
-        case "warn": .browserWarn
-        case "error": .browserError
-        case "info": .browserInfo
-        case "debug": .browserDebug
-        default: .browserLog
-        }
+    func startDevServer(
+        for cardID: UUID,
+        command: String,
+        directory: String
+    ) async throws -> URL {
+        stopAllServers()
 
-        let line = OutputLine(text: message, source: source, timestamp: Date())
-        var currentLines = outputLines[cardID] ?? []
-        currentLines.append(line)
+        serverStates[cardID] = .startingServer(output: "")
+        outputLines[cardID] = []
+        partialLineBuffers[cardID] = (stdout: "", stderr: "")
 
-        // Truncate if needed
-        if currentLines.count > maxOutputLines {
-            let truncatedCount = currentLines.count - maxOutputLines
-            currentLines = Array(currentLines.suffix(maxOutputLines))
-            let marker = OutputLine(text: "[...\(truncatedCount) lines truncated...]", source: .serverStdout)
-            currentLines.insert(marker, at: 0)
-        }
-
-        outputLines[cardID] = currentLines
-        scheduleUIUpdate(for: cardID)
+        return try await runDevServerProcess(
+            for: cardID,
+            command: command,
+            directory: directory
+        )
     }
 
-    /// Decode data to string with UTF-8 fallback to Latin1
+    func stopServer(for cardID: UUID) {
+        if let pipe = stdoutPipes[cardID] {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            stdoutPipes[cardID] = nil
+        }
+        if let pipe = stderrPipes[cardID] {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            stderrPipes[cardID] = nil
+        }
+
+        if let process = processes[cardID] {
+            expectedTerminatedProcesses.insert(ObjectIdentifier(process))
+            killProcessTree(process)
+            processes[cardID] = nil
+        }
+
+        serverStates[cardID] = .idle
+        outputLines[cardID] = nil
+        outputVersion[cardID] = nil
+        pendingUIUpdates[cardID] = nil
+        partialLineBuffers[cardID] = nil
+    }
+
+    func stopAllServers() {
+        for (_, pipe) in stdoutPipes {
+            pipe.fileHandleForReading.readabilityHandler = nil
+        }
+        for (_, pipe) in stderrPipes {
+            pipe.fileHandleForReading.readabilityHandler = nil
+        }
+        stdoutPipes.removeAll()
+        stderrPipes.removeAll()
+
+        for (cardID, process) in processes {
+            expectedTerminatedProcesses.insert(ObjectIdentifier(process))
+            killProcessTree(process)
+            serverStates[cardID] = .idle
+        }
+        processes.removeAll()
+        outputLines.removeAll()
+        outputVersion.removeAll()
+        pendingUIUpdates.removeAll()
+        partialLineBuffers.removeAll()
+    }
+
+    func isServerRunning(for cardID: UUID) -> Bool {
+        switch serverStates[cardID] {
+        case .ready, .startingServer, .detectingPort:
+            true
+        case .idle, .runningSetup, .error, nil:
+            false
+        }
+    }
+
+    // MARK: - Private
+
     private func decodeOutput(_ data: Data) -> String? {
         guard !data.isEmpty else { return nil }
 
@@ -160,29 +175,22 @@ final class DevServerManager {
         return "[Binary data: \(data.count) bytes]"
     }
 
-    /// Append output to buffer with line-based truncation and throttled UI updates
     private func appendOutput(_ str: String, for cardID: UUID, isError: Bool) {
         var currentLines = outputLines[cardID] ?? []
         var buffers = partialLineBuffers[cardID] ?? (stdout: "", stderr: "")
 
-        // Get the appropriate partial buffer
         let partialBuffer = isError ? buffers.stderr : buffers.stdout
         let fullText = partialBuffer + str
-
-        // Split into lines
         var lines = fullText.components(separatedBy: "\n")
 
-        // If string doesn't end with newline, keep last part as partial; otherwise clear buffer
         let newPartial = (!str.hasSuffix("\n") && !lines.isEmpty) ? lines.removeLast() : ""
         if isError {
             buffers.stderr = newPartial
         } else {
             buffers.stdout = newPartial
         }
-
         partialLineBuffers[cardID] = buffers
 
-        // Create OutputLine objects for complete lines
         let timestamp = Date()
         let newLines = lines
             .filter { !$0.isEmpty }
@@ -190,12 +198,14 @@ final class DevServerManager {
 
         currentLines.append(contentsOf: newLines)
 
-        // Truncate to max lines
         if currentLines.count > maxOutputLines {
             let truncatedCount = currentLines.count - maxOutputLines
             currentLines = Array(currentLines.suffix(maxOutputLines))
-            // Add truncation marker at the beginning
-            let marker = OutputLine(text: "[...\(truncatedCount) lines truncated...]", isError: false, timestamp: timestamp)
+            let marker = OutputLine(
+                text: "[...\(truncatedCount) lines truncated...]",
+                isError: false,
+                timestamp: timestamp
+            )
             currentLines.insert(marker, at: 0)
         }
 
@@ -203,7 +213,6 @@ final class DevServerManager {
         scheduleUIUpdate(for: cardID)
     }
 
-    /// Flush any remaining partial line buffers
     private func flushPartialBuffers(for cardID: UUID) {
         guard let buffers = partialLineBuffers[cardID] else { return }
 
@@ -221,7 +230,6 @@ final class DevServerManager {
         partialLineBuffers[cardID] = (stdout: "", stderr: "")
     }
 
-    /// Throttled UI update via version increment
     private func scheduleUIUpdate(for cardID: UUID) {
         guard pendingUIUpdates[cardID] != true else { return }
         pendingUIUpdates[cardID] = true
@@ -233,132 +241,23 @@ final class DevServerManager {
         }
     }
 
-    /// Force immediate UI update
     private func flushOutput(for cardID: UUID) {
         pendingUIUpdates[cardID] = false
         outputVersion[cardID, default: 0] += 1
     }
 
-    /// Run setup command (npm install etc.) and wait for completion
-    func runSetup(
-        for cardID: UUID,
-        command: String,
-        directory: String
-    ) async throws {
-        // Stop ALL servers including this card (prevents orphaned processes from rapid clicks)
-        stopAllServers()
-
-        serverStates[cardID] = .runningSetup(output: "")
-        outputLines[cardID] = []
-        partialLineBuffers[cardID] = (stdout: "", stderr: "")
-
-        try await runCommandToCompletion(
-            for: cardID,
-            command: command,
-            directory: directory,
-            stateBuilder: { output in .runningSetup(output: output) },
-            timeout: 300 // 5 minutes for setup
-        )
-    }
-
-    /// Start dev server and detect port
-    func startDevServer(
-        for cardID: UUID,
-        command: String,
-        directory: String
-    ) async throws -> URL {
-        // Stop ALL servers including this card (prevents orphaned processes from rapid clicks)
-        stopAllServers()
-
-        serverStates[cardID] = .startingServer(output: "")
-        outputLines[cardID] = []
-        partialLineBuffers[cardID] = (stdout: "", stderr: "")
-
-        return try await runDevServerProcess(
-            for: cardID,
-            command: command,
-            directory: directory
-        )
-    }
-
-    /// Stop server for a specific card
-    func stopServer(for cardID: UUID) {
-        // Clean up pipe handlers first to prevent retain cycles
-        if let pipe = stdoutPipes[cardID] {
-            pipe.fileHandleForReading.readabilityHandler = nil
-            stdoutPipes[cardID] = nil
-        }
-        if let pipe = stderrPipes[cardID] {
-            pipe.fileHandleForReading.readabilityHandler = nil
-            stderrPipes[cardID] = nil
-        }
-
-        // Kill the process and its children (process group)
-        if let process = processes[cardID] {
-            killProcessTree(process)
-            processes[cardID] = nil
-        }
-
-        serverStates[cardID] = .idle
-        outputLines[cardID] = nil
-        outputVersion[cardID] = nil
-        pendingUIUpdates[cardID] = nil
-        partialLineBuffers[cardID] = nil
-    }
-
-    /// Stop all running servers
-    func stopAllServers() {
-        // Clean up all pipe handlers first
-        for (_, pipe) in stdoutPipes {
-            pipe.fileHandleForReading.readabilityHandler = nil
-        }
-        for (_, pipe) in stderrPipes {
-            pipe.fileHandleForReading.readabilityHandler = nil
-        }
-        stdoutPipes.removeAll()
-        stderrPipes.removeAll()
-
-        // Kill all processes and their children
-        for (cardID, process) in processes {
-            killProcessTree(process)
-            serverStates[cardID] = .idle
-        }
-        processes.removeAll()
-        outputLines.removeAll()
-        outputVersion.removeAll()
-        pendingUIUpdates.removeAll()
-        partialLineBuffers.removeAll()
-    }
-
-    /// Kill process and all its child processes
     private func killProcessTree(_ process: Process) {
         guard process.isRunning else { return }
 
-        // First try SIGTERM for graceful shutdown
         process.terminate()
 
-        // Give it a moment to clean up
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
             if process.isRunning {
-                // If still running, force kill the process group
                 let pid = process.processIdentifier
-                // Kill entire process group (negative pid)
                 kill(-pid, SIGKILL)
             }
         }
     }
-
-    /// Check if a server is running for a card
-    func isServerRunning(for cardID: UUID) -> Bool {
-        switch serverStates[cardID] {
-        case .ready, .startingServer, .detectingPort:
-            true
-        case .idle, .runningSetup, .error, nil:
-            false
-        }
-    }
-
-    // MARK: - Private
 
     private func runCommandToCompletion(
         for cardID: UUID,
@@ -380,13 +279,11 @@ final class DevServerManager {
                 process.currentDirectoryURL = URL(fileURLWithPath: directory)
                 process.environment = ProcessEnvironment.buildWithNodeSupport()
 
-                // Separate pipes for stdout and stderr
                 let stdoutPipe = Pipe()
                 let stderrPipe = Pipe()
                 process.standardOutput = stdoutPipe
                 process.standardError = stderrPipe
 
-                // Store references for cleanup (must be on main thread for thread safety)
                 DispatchQueue.main.sync {
                     self.processes[cardID] = process
                     self.stdoutPipes[cardID] = stdoutPipe
@@ -396,7 +293,6 @@ final class DevServerManager {
                 let group = DispatchGroup()
                 group.enter()
 
-                // Handler for stdout (normal output)
                 stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
                     let data = handle.availableData
                     guard !data.isEmpty, let self else { return }
@@ -404,12 +300,10 @@ final class DevServerManager {
 
                     DispatchQueue.main.async {
                         self.appendOutput(str, for: cardID, isError: false)
-                        let newOutput = self.output(for: cardID)
-                        self.serverStates[cardID] = stateBuilder(newOutput)
+                        self.serverStates[cardID] = stateBuilder(self.output(for: cardID))
                     }
                 }
 
-                // Handler for stderr (error output)
                 stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
                     let data = handle.availableData
                     guard !data.isEmpty, let self else { return }
@@ -417,8 +311,7 @@ final class DevServerManager {
 
                     DispatchQueue.main.async {
                         self.appendOutput(str, for: cardID, isError: true)
-                        let newOutput = self.output(for: cardID)
-                        self.serverStates[cardID] = stateBuilder(newOutput)
+                        self.serverStates[cardID] = stateBuilder(self.output(for: cardID))
                     }
                 }
 
@@ -429,7 +322,6 @@ final class DevServerManager {
                 do {
                     try process.run()
                 } catch {
-                    // Clean up on error (must be on main thread for thread safety)
                     stdoutPipe.fileHandleForReading.readabilityHandler = nil
                     stderrPipe.fileHandleForReading.readabilityHandler = nil
                     DispatchQueue.main.sync {
@@ -443,17 +335,26 @@ final class DevServerManager {
                 }
 
                 let result = group.wait(timeout: .now() + timeout)
-
-                // FIX: Read any remaining data before clearing handlers (race condition fix)
+                let wasExpectedTermination = DispatchQueue.main.sync {
+                    self.expectedTerminatedProcesses.remove(ObjectIdentifier(process)) != nil
+                }
                 let finalStdoutData = stdoutPipe.fileHandleForReading.availableData
                 let finalStderrData = stderrPipe.fileHandleForReading.availableData
 
-                // Clean up pipe handlers (must be on main thread for thread safety)
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
 
+                if wasExpectedTermination {
+                    DispatchQueue.main.sync {
+                        self.stdoutPipes[cardID] = nil
+                        self.stderrPipes[cardID] = nil
+                        self.processes[cardID] = nil
+                    }
+                    continuation.resume(throwing: DevServerError.cancelled)
+                    return
+                }
+
                 DispatchQueue.main.sync {
-                    // Append final data if any
                     if !finalStdoutData.isEmpty, let str = self.decodeOutput(finalStdoutData) {
                         self.appendOutput(str, for: cardID, isError: false)
                     }
@@ -461,13 +362,10 @@ final class DevServerManager {
                         self.appendOutput(str, for: cardID, isError: true)
                     }
 
-                    // Flush partial line buffers
                     self.flushPartialBuffers(for: cardID)
-
                     self.stdoutPipes[cardID] = nil
                     self.stderrPipes[cardID] = nil
                     self.processes[cardID] = nil
-                    // Flush final output to UI
                     self.flushOutput(for: cardID)
                 }
 
@@ -481,7 +379,6 @@ final class DevServerManager {
                 }
 
                 if process.terminationStatus != 0 {
-                    // Read output on main thread for thread safety
                     var output = ""
                     DispatchQueue.main.sync {
                         output = self.output(for: cardID)
@@ -501,8 +398,7 @@ final class DevServerManager {
         command: String,
         directory: String
     ) async throws -> URL {
-        // Use a class to track state across closures (reference semantics)
-        class ContinuationState {
+        final class ContinuationState {
             var isResumed = false
             var portDetected = false
         }
@@ -524,20 +420,17 @@ final class DevServerManager {
                 process.currentDirectoryURL = URL(fileURLWithPath: directory)
                 process.environment = ProcessEnvironment.buildWithNodeSupport()
 
-                // Separate pipes for stdout and stderr
                 let stdoutPipe = Pipe()
                 let stderrPipe = Pipe()
                 process.standardOutput = stdoutPipe
                 process.standardError = stderrPipe
 
-                // Store references for cleanup (must be on main thread for thread safety)
                 DispatchQueue.main.sync {
                     self.processes[cardID] = process
                     self.stdoutPipes[cardID] = stdoutPipe
                     self.stderrPipes[cardID] = stderrPipe
                 }
 
-                // Helper to handle output and port detection
                 let handleOutput: (String, Bool) -> Void = { str, isError in
                     DispatchQueue.main.async {
                         self.appendOutput(str, for: cardID, isError: isError)
@@ -557,7 +450,6 @@ final class DevServerManager {
                     }
                 }
 
-                // Handler for stdout (normal output)
                 stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
                     let data = handle.availableData
                     guard !data.isEmpty, let self else { return }
@@ -565,7 +457,6 @@ final class DevServerManager {
                     handleOutput(str, false)
                 }
 
-                // Handler for stderr (error output)
                 stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
                     let data = handle.availableData
                     guard !data.isEmpty, let self else { return }
@@ -576,16 +467,22 @@ final class DevServerManager {
                 process.terminationHandler = { [weak self] _ in
                     guard let self else { return }
 
-                    // FIX: Read any remaining data before clearing handlers (race condition fix)
                     let finalStdoutData = stdoutPipe.fileHandleForReading.availableData
                     let finalStderrData = stderrPipe.fileHandleForReading.availableData
 
-                    // Clean up pipe handlers
                     stdoutPipe.fileHandleForReading.readabilityHandler = nil
                     stderrPipe.fileHandleForReading.readabilityHandler = nil
 
                     DispatchQueue.main.async {
-                        // Append final data if any
+                        let wasExpectedTermination =
+                            self.expectedTerminatedProcesses.remove(ObjectIdentifier(process)) != nil
+
+                        self.processes[cardID] = nil
+                        self.stdoutPipes[cardID] = nil
+                        self.stderrPipes[cardID] = nil
+
+                        guard !wasExpectedTermination else { return }
+
                         if !finalStdoutData.isEmpty, let str = self.decodeOutput(finalStdoutData) {
                             self.appendOutput(str, for: cardID, isError: false)
                         }
@@ -593,28 +490,22 @@ final class DevServerManager {
                             self.appendOutput(str, for: cardID, isError: true)
                         }
 
-                        // Flush partial line buffers
                         self.flushPartialBuffers(for: cardID)
-
-                        self.stdoutPipes[cardID] = nil
-                        self.stderrPipes[cardID] = nil
-                        // Flush final output to UI
                         self.flushOutput(for: cardID)
 
-                        if !state.portDetected && !state.isResumed {
+                        let output = self.output(for: cardID)
+                        self.serverStates[cardID] = .error(message: "Server stopped unexpectedly:\n\(output)")
+
+                        if !state.isResumed {
                             state.isResumed = true
-                            let output = self.output(for: cardID)
-                            self.serverStates[cardID] = .error(message: "Server stopped unexpectedly:\n\(output)")
                             continuation.resume(throwing: DevServerError.serverCrashed(output))
                         }
-                        self.processes[cardID] = nil
                     }
                 }
 
                 do {
                     try process.run()
                 } catch {
-                    // Clean up on error (must be on main thread for thread safety)
                     stdoutPipe.fileHandleForReading.readabilityHandler = nil
                     stderrPipe.fileHandleForReading.readabilityHandler = nil
                     var shouldResume = false
@@ -634,7 +525,6 @@ final class DevServerManager {
                     return
                 }
 
-                // Timeout for port detection (30 seconds)
                 DispatchQueue.global().asyncAfter(deadline: .now() + 30) { [weak self] in
                     guard let self, !state.isResumed else { return }
                     DispatchQueue.main.async {
@@ -642,8 +532,21 @@ final class DevServerManager {
                         state.isResumed = true
                         let output = self.output(for: cardID)
                         self.serverStates[cardID] = .error(message: "Could not detect server port:\n\(output)")
-                        // Kill the process since we're timing out
-                        self.stopServer(for: cardID)
+
+                        if let pipe = self.stdoutPipes[cardID] {
+                            pipe.fileHandleForReading.readabilityHandler = nil
+                            self.stdoutPipes[cardID] = nil
+                        }
+                        if let pipe = self.stderrPipes[cardID] {
+                            pipe.fileHandleForReading.readabilityHandler = nil
+                            self.stderrPipes[cardID] = nil
+                        }
+                        if let process = self.processes[cardID] {
+                            self.expectedTerminatedProcesses.insert(ObjectIdentifier(process))
+                            self.killProcessTree(process)
+                            self.processes[cardID] = nil
+                        }
+
                         continuation.resume(throwing: DevServerError.portDetectionTimeout)
                     }
                 }
@@ -666,9 +569,7 @@ final class DevServerManager {
         return patterns.compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
     }()
 
-    /// Parse port from recent output only (last 2KB is enough for port detection)
     private static func parsePortFromOutput(_ output: String) -> Int? {
-        // Only scan last 2KB - ports appear near when server starts
         let scanLimit = 2048
         let searchRange: String
         if output.count > scanLimit {
@@ -679,7 +580,10 @@ final class DevServerManager {
         }
 
         for regex in compiledPortPatterns {
-            if let match = regex.firstMatch(in: searchRange, range: NSRange(searchRange.startIndex..., in: searchRange)),
+            if let match = regex.firstMatch(
+                in: searchRange,
+                range: NSRange(searchRange.startIndex..., in: searchRange)
+            ),
                let portRange = Range(match.range(at: 1), in: searchRange),
                let port = Int(searchRange[portRange]),
                port > 0 && port < 65536 {
@@ -688,7 +592,6 @@ final class DevServerManager {
         }
         return nil
     }
-
 }
 
 // MARK: - Errors

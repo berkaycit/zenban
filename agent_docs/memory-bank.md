@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Switch dev server preview to the cmux browser stack
+- **Description**: Replaced the board-area dev server overlay's custom WebView and mirrored browser console with a cmux `BrowserPanelView` owned directly by `DevServerView`. Startup logs now stay visible until a ready URL is detected, the cmux JavaScript console auto-opens for the live preview session, `Cmd+Shift+R` reloads the same browser panel, and `DevServerManager` is back to server-process output only while unexpected exits surface the error/log view again.
+
 - **Summary**: Clarify cmux parity and worktree docs
 - **Description**: Updated the architecture and feature docs to reflect how Zenban's terminal stack actually differs from upstream cmux. The docs now call out the lazy card-to-workspace mapping, the two-phase worktree startup path, and the fact that detached terminal windows currently host one card workspace at a time. Refreshed agent guidance files so terminal changes are documented against the correct layer.
 
