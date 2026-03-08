@@ -7,10 +7,21 @@ A macOS kanban board application built with SwiftUI.
 - macOS 15.6+
 - Xcode 26.2+
 - Swift 5.0+
+- zig
 
 ## Building from Source
 
-### 1. Build Zenban
+Zenban uses the terminal code and runtime assets that are already vendored or copied into this repository.
+
+### 1. Prepare Ghostty dependencies
+
+```bash
+./scripts/setup.sh
+```
+
+This prepares `GhosttyKit.xcframework` from the repo's local `ghostty` tree and reuses the bundled runtime assets under `Resources/` and `vendor/`.
+
+### 2. Build Zenban
 
 ```bash
 open zenban.xcodeproj
@@ -24,9 +35,9 @@ xcodebuild -project zenban.xcodeproj -scheme zenban -configuration Debug build
 
 ## Terminal Status
 
-Embedded Ghostty is enabled. Zenban ships the Ghostty runtime and resource layout copied from the `cmux` project, packages them with the `Copy Ghostty Resources` build phase, and reads the user's standard Ghostty config files.
+Embedded Ghostty is enabled. Zenban ships the Ghostty runtime and cmux-derived workspace stack from assets already stored in this repo, packages them with the `Copy Ghostty Resources` build phase, and reads the user's standard Ghostty config files.
 
-Each card terminal starts in its board or worktree directory, reuses suspended surfaces when switching cards, and now stays in sync with Ghostty light/dark theme selection driven by macOS appearance and `window-theme`.
+Each card maps to a cmux-style workspace. For git boards, cards get their own worktrees; the workspace uses the worktree path when available and otherwise starts from the board repo path until worktree setup finishes. Card switches reuse suspended surfaces and stay in sync with Ghostty light/dark theme selection driven by macOS appearance and `window-theme`.
 
 ## Bundle Identifier
 
