@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 /// Fullscreen overlay view for dev server preview.
 struct DevServerView: View {
@@ -306,14 +307,38 @@ struct DevServerView: View {
         autoOpenedConsolePanelID = panel.id
         cancelConsoleOpenTask()
         consoleOpenTask = Task { @MainActor in
-            for _ in 0..<20 {
+            for _ in 0..<80 {
                 guard browserPanel?.id == panel.id else { return }
-                if panel.showDeveloperToolsConsole() {
-                    return
+
+                guard isPreviewReadyForConsole(panel) else {
+                    try? await Task.sleep(nanoseconds: 75_000_000)
+                    continue
                 }
-                try? await Task.sleep(nanoseconds: 75_000_000)
+
+                panel.requestDeveloperToolsConsoleAfterAttach()
+                panel.focus()
+
+                for delay in [75_000_000 as UInt64, 200_000_000] {
+                    try? await Task.sleep(nanoseconds: delay)
+                    guard browserPanel?.id == panel.id else { return }
+                    panel.focus()
+                }
+
+                return
             }
+
+            autoOpenedConsolePanelID = nil
         }
+    }
+
+    private func isPreviewReadyForConsole(_ panel: BrowserPanel) -> Bool {
+        guard panel.webView.window != nil else { return false }
+        guard !panel.webView.isHiddenOrHasHiddenAncestor else { return false }
+        guard !panel.isLoading, !panel.webView.isLoading else { return false }
+
+        let loadedURL = panel.webView.url ?? panel.currentURL
+        guard let loadedURL else { return false }
+        return loadedURL.absoluteString != "about:blank"
     }
 
     private func cancelConsoleOpenTask() {

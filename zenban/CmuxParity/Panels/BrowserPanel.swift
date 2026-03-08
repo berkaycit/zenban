@@ -1515,12 +1515,14 @@ final class BrowserPanel: Panel, ObservableObject {
     private var insecureHTTPAlertWindowProvider: () -> NSWindow? = { NSApp.keyWindow ?? NSApp.mainWindow }
     // Persist user intent across WebKit detach/reattach churn (split/layout updates).
     private var preferredDeveloperToolsVisible: Bool = false
+    private var preferredDeveloperToolsShowsConsole: Bool = false
     private var forceDeveloperToolsRefreshOnNextAttach: Bool = false
     private var developerToolsRestoreRetryWorkItem: DispatchWorkItem?
     private var developerToolsRestoreRetryAttempt: Int = 0
     private let developerToolsRestoreRetryDelay: TimeInterval = 0.05
     private let developerToolsRestoreRetryMaxAttempts: Int = 40
     private var browserThemeMode: BrowserThemeMode
+    @Published private(set) var developerToolsAutoOpenRequestToken: Int = 0
 
     var displayTitle: String {
         if !pageTitle.isEmpty {
@@ -2442,6 +2444,9 @@ extension BrowserPanel {
         if targetVisible {
             let visibleAfterToggle = inspector.cmuxCallBool(selector: isVisibleSelector) ?? false
             if visibleAfterToggle {
+                applyPreferredDeveloperToolsPaneIfNeeded(inspector: inspector)
+            }
+            if visibleAfterToggle {
                 cancelDeveloperToolsRestoreRetry()
             } else {
                 developerToolsRestoreRetryAttempt = 0
@@ -2449,6 +2454,7 @@ extension BrowserPanel {
             }
         } else {
             cancelDeveloperToolsRestoreRetry()
+            preferredDeveloperToolsShowsConsole = false
             forceDeveloperToolsRefreshOnNextAttach = false
         }
 #if DEBUG
@@ -2478,6 +2484,7 @@ extension BrowserPanel {
         }
         preferredDeveloperToolsVisible = true
         if (inspector.cmuxCallBool(selector: NSSelectorFromString("isVisible")) ?? false) {
+            applyPreferredDeveloperToolsPaneIfNeeded(inspector: inspector)
             cancelDeveloperToolsRestoreRetry()
         } else {
             scheduleDeveloperToolsRestoreRetry()
@@ -2487,9 +2494,20 @@ extension BrowserPanel {
 
     @discardableResult
     func showDeveloperToolsConsole() -> Bool {
+        preferredDeveloperToolsShowsConsole = true
         guard showDeveloperTools() else { return false }
-        guard let inspector = webView.cmuxInspectorObject() else { return true }
-        // WebKit private inspector API differs by OS; try known console selectors.
+        return true
+    }
+
+    func requestDeveloperToolsConsoleAfterAttach() {
+        preferredDeveloperToolsVisible = true
+        preferredDeveloperToolsShowsConsole = true
+        developerToolsAutoOpenRequestToken &+= 1
+    }
+
+    private func applyPreferredDeveloperToolsPaneIfNeeded(inspector: NSObject) {
+        guard preferredDeveloperToolsShowsConsole else { return }
+
         let consoleSelectors = [
             "showConsole",
             "showConsoleTab",
@@ -2502,7 +2520,6 @@ extension BrowserPanel {
                 break
             }
         }
-        return true
     }
 
     /// Called before WKWebView detaches so manual inspector closes are respected.
@@ -2518,6 +2535,7 @@ extension BrowserPanel {
             return
         }
         preferredDeveloperToolsVisible = false
+        preferredDeveloperToolsShowsConsole = false
         cancelDeveloperToolsRestoreRetry()
     }
 
@@ -2525,6 +2543,7 @@ extension BrowserPanel {
     func restoreDeveloperToolsAfterAttachIfNeeded() {
         guard preferredDeveloperToolsVisible else {
             cancelDeveloperToolsRestoreRetry()
+            preferredDeveloperToolsShowsConsole = false
             forceDeveloperToolsRefreshOnNextAttach = false
             return
         }
@@ -2538,6 +2557,7 @@ extension BrowserPanel {
 
         let visible = inspector.cmuxCallBool(selector: NSSelectorFromString("isVisible")) ?? false
         if visible {
+            applyPreferredDeveloperToolsPaneIfNeeded(inspector: inspector)
             #if DEBUG
             if shouldForceRefresh {
                 dlog("browser.devtools refresh.consumeVisible panel=\(id.uuidString.prefix(5)) \(debugDeveloperToolsStateSummary())")
@@ -2566,6 +2586,7 @@ extension BrowserPanel {
         preferredDeveloperToolsVisible = true
         let visibleAfterShow = inspector.cmuxCallBool(selector: NSSelectorFromString("isVisible")) ?? false
         if visibleAfterShow {
+            applyPreferredDeveloperToolsPaneIfNeeded(inspector: inspector)
             cancelDeveloperToolsRestoreRetry()
         } else {
             scheduleDeveloperToolsRestoreRetry()
@@ -2588,6 +2609,7 @@ extension BrowserPanel {
             inspector.cmuxCallVoid(selector: selector)
         }
         preferredDeveloperToolsVisible = false
+        preferredDeveloperToolsShowsConsole = false
         forceDeveloperToolsRefreshOnNextAttach = false
         cancelDeveloperToolsRestoreRetry()
         return true
