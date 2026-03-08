@@ -3167,16 +3167,22 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
         // Recompute from current bounds after layout. Pending size is only a fallback
         // when we don't have usable bounds (e.g. detached/off-window transitions).
-        superview?.layoutSubtreeIfNeeded()
-        layoutSubtreeIfNeeded()
-        updateSurfaceSize()
-        applySurfaceBackground()
-        applySurfaceColorScheme(force: true)
-        GhosttyApp.shared.synchronizeThemeWithAppearance(
-            effectiveAppearance,
-            source: "surface.viewDidMoveToWindow"
-        )
-        applyWindowBackgroundIfActive()
+        // Schedule layout + surface updates for the next run loop turn to avoid reentrant
+        // layout warnings when NSHostingView ancestors are already mid-layout from portal
+        // reparenting.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.window != nil else { return }
+            self.superview?.layoutSubtreeIfNeeded()
+            self.layoutSubtreeIfNeeded()
+            self.updateSurfaceSize()
+            self.applySurfaceBackground()
+            self.applySurfaceColorScheme(force: true)
+            GhosttyApp.shared.synchronizeThemeWithAppearance(
+                self.effectiveAppearance,
+                source: "surface.viewDidMoveToWindow"
+            )
+            self.applyWindowBackgroundIfActive()
+        }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -6969,8 +6975,16 @@ struct GhosttyTerminalView: NSViewRepresentable {
         )
 
         if shouldApplyImmediateHostedState {
-            hostedView.setVisibleInUI(isVisibleInUI)
-            hostedView.setActive(isActive)
+            // Defer visibility/active changes that trigger first-responder updates to avoid
+            // "Modifying state during view update" warnings from SwiftUI. These methods call
+            // makeFirstResponder which can re-enter the SwiftUI layout cycle.
+            let capturedVisible = isVisibleInUI
+            let capturedActive = isActive
+            DispatchQueue.main.async { [weak hostedView] in
+                guard let hostedView else { return }
+                hostedView.setVisibleInUI(capturedVisible)
+                hostedView.setActive(capturedActive)
+            }
         } else {
             // Preserve portal entry visibility while a stale host is still receiving SwiftUI updates.
             // The currently bound host remains authoritative for immediate visible/active state.

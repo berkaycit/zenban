@@ -553,6 +553,7 @@ final class WindowTerminalPortal: NSObject {
     private var installConstraints: [NSLayoutConstraint] = []
     private var hasDeferredFullSyncScheduled = false
     private var hasExternalGeometrySyncScheduled = false
+    private var isSynchronizingLayout = false
     private var geometryObservers: [NSObjectProtocol] = []
 #if DEBUG
     private var lastLoggedBonsplitContainerSignature: String?
@@ -656,6 +657,11 @@ final class WindowTerminalPortal: NSObject {
     }
 
     private func synchronizeLayoutHierarchy() {
+        // Guard against reentrant layout. NSHostingView (used by SwiftUI) logs a warning
+        // and skips the pass when layoutSubtreeIfNeeded is called during an in-progress layout.
+        guard !isSynchronizingLayout else { return }
+        isSynchronizingLayout = true
+        defer { isSynchronizingLayout = false }
         installedContainerView?.layoutSubtreeIfNeeded()
         installedReferenceView?.layoutSubtreeIfNeeded()
         hostView.superview?.layoutSubtreeIfNeeded()
