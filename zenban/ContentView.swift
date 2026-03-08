@@ -10,6 +10,8 @@ import SwiftUI
 struct ContentView: View {
     @Environment(BoardStore.self) private var store
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var devServerSidebarRestoreVisibility: NavigationSplitViewVisibility?
+    @State private var devServerReconfigureRestartInFlight = false
 
     var body: some View {
         @Bindable var store = store
@@ -27,7 +29,7 @@ struct ContentView: View {
                         setupCommand: store.devServerSetupCommand,
                         devCommand: store.devServerDevCommand,
                         autoOpenConsole: store.selectedBoard?.devServerConfig?.autoOpenConsole ?? false,
-                        onDismiss: store.stopDevServer,
+                        onDismiss: stopDevServerAndRestoreSidebarIfNeeded,
                         onReconfigure: store.openReconfigure
                     )
                     .id(card.id)
@@ -69,6 +71,9 @@ struct ContentView: View {
             store.draggedCardID = nil
             store.stopOverlays()
         }
+        .onChange(of: store.showDevServer) { wasShowing, isShowing in
+            handleDevServerVisibilityChange(wasShowing: wasShowing, isShowing: isShowing)
+        }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 1200, minHeight: 600)
         .sheet(isPresented: $store.showDevServerConfig) {
@@ -79,7 +84,9 @@ struct ContentView: View {
                     worktreePath: worktreePath,
                     boardID: board.id,
                     isPresented: $store.showDevServerConfig,
-                    onStart: store.confirmDevServerConfig
+                    onStart: { setup, dev in
+                        handleDevServerCommandStart(setup: setup, dev: dev)
+                    }
                 )
             }
         }
@@ -111,6 +118,46 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func handleDevServerCommandStart(setup: String?, dev: String) {
+        if case .devServerReconfiguring = store.overlayState {
+            devServerReconfigureRestartInFlight = true
+        }
+        store.confirmDevServerConfig(setup: setup, dev: dev)
+    }
+
+    private func stopDevServerAndRestoreSidebarIfNeeded() {
+        devServerReconfigureRestartInFlight = false
+        store.stopDevServer()
+    }
+
+    private func handleDevServerVisibilityChange(wasShowing: Bool, isShowing: Bool) {
+        guard wasShowing != isShowing else { return }
+
+        if isShowing {
+            if devServerReconfigureRestartInFlight {
+                devServerReconfigureRestartInFlight = false
+                return
+            }
+
+            if isBoardListVisible(columnVisibility) {
+                devServerSidebarRestoreVisibility = columnVisibility
+                columnVisibility = .doubleColumn
+            } else {
+                devServerSidebarRestoreVisibility = nil
+            }
+            return
+        }
+
+        guard !devServerReconfigureRestartInFlight else { return }
+        guard let restoreVisibility = devServerSidebarRestoreVisibility else { return }
+        columnVisibility = restoreVisibility
+        devServerSidebarRestoreVisibility = nil
+    }
+
+    private func isBoardListVisible(_ visibility: NavigationSplitViewVisibility) -> Bool {
+        visibility != .doubleColumn && visibility != .detailOnly
     }
 }
 
