@@ -14,6 +14,8 @@ struct DevServerView: View {
     @State private var browserPanel: BrowserPanel?
     @State private var browserIsFocused = true
     @State private var consoleOpenTask: Task<Void, Never>?
+    @State private var startupTask: Task<Void, Never>?
+    @State private var startupRequestID: UUID?
     @State private var autoOpenedConsolePanelID: UUID?
 
     var body: some View {
@@ -241,30 +243,54 @@ struct DevServerView: View {
     // MARK: - Actions
 
     private func startServer() {
+        cancelStartupTask()
         resetBrowserPreview()
+        guard let worktreePath = card.worktreePath else { return }
 
-        Task {
-            do {
-                guard let worktreePath = card.worktreePath else { return }
+        let requestID = devServerManager.beginRequest(for: card.id)
+        startupRequestID = requestID
+        let task = Task { @MainActor in
+            await withTaskCancellationHandler {
+                do {
+                    try Task.checkCancellation()
+                    guard startupRequestID == requestID else { return }
 
-                let needsSetup = PackageJsonParser.isSetupNeeded(in: worktreePath)
-                if needsSetup, let setup = setupCommand {
-                    try await devServerManager.runSetup(
+                    let needsSetup = PackageJsonParser.isSetupNeeded(in: worktreePath)
+                    if needsSetup, let setup = setupCommand {
+                        try await devServerManager.runSetup(
+                            for: card.id,
+                            command: setup,
+                            directory: worktreePath,
+                            requestID: requestID
+                        )
+                    }
+
+                    try Task.checkCancellation()
+                    guard startupRequestID == requestID else { return }
+
+                    _ = try await devServerManager.startDevServer(
                         for: card.id,
-                        command: setup,
-                        directory: worktreePath
+                        command: devCommand,
+                        directory: worktreePath,
+                        requestID: requestID
                     )
+                } catch is CancellationError {
+                    // Cancellation is expected when the preview closes or restarts.
+                } catch {
+                    // DevServerManager drives the visible state.
                 }
 
-                _ = try await devServerManager.startDevServer(
-                    for: card.id,
-                    command: devCommand,
-                    directory: worktreePath
-                )
-            } catch {
-                // DevServerManager drives the visible state.
+                if startupRequestID == requestID {
+                    startupTask = nil
+                    startupRequestID = nil
+                }
+            } onCancel: {
+                Task { @MainActor in
+                    devServerManager.stopRequest(for: card.id, requestID: requestID)
+                }
             }
         }
+        startupTask = task
     }
 
     private func handleStateChange(_ state: DevServerManager.ServerState) {
@@ -350,14 +376,23 @@ struct DevServerView: View {
 
     private func resetBrowserPreview() {
         cancelConsoleOpenTask()
+        browserPanel?.close()
         browserPanel = nil
         autoOpenedConsolePanelID = nil
         browserIsFocused = true
     }
 
     private func teardownPreview() {
+        cancelStartupTask()
         cancelConsoleOpenTask()
+        browserPanel?.close()
         browserPanel = nil
         devServerManager.stopServer(for: card.id)
+    }
+
+    private func cancelStartupTask() {
+        startupTask?.cancel()
+        startupTask = nil
+        startupRequestID = nil
     }
 }

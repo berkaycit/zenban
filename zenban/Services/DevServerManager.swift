@@ -50,6 +50,7 @@ final class DevServerManager {
     private var pendingUIUpdates: [UUID: Bool] = [:]
     private var expectedTerminatedProcesses: Set<ObjectIdentifier> = []
     private var partialLineBuffers: [UUID: (stdout: String, stderr: String)] = [:]
+    private var activeRequestIDs: [UUID: UUID] = [:]
 
     private let maxOutputLines = 1000
     private let uiUpdateInterval: TimeInterval = 0.15
@@ -69,12 +70,22 @@ final class DevServerManager {
         outputLines[cardID] ?? []
     }
 
+    func beginRequest(for cardID: UUID) -> UUID {
+        stopAllServers()
+        let requestID = UUID()
+        activeRequestIDs[cardID] = requestID
+        return requestID
+    }
+
     func runSetup(
         for cardID: UUID,
         command: String,
-        directory: String
+        directory: String,
+        requestID: UUID
     ) async throws {
-        stopAllServers()
+        guard isRequestCurrent(requestID, for: cardID) else {
+            throw DevServerError.cancelled
+        }
 
         serverStates[cardID] = .runningSetup(output: "")
         outputLines[cardID] = []
@@ -85,16 +96,20 @@ final class DevServerManager {
             command: command,
             directory: directory,
             stateBuilder: { output in .runningSetup(output: output) },
-            timeout: 300
+            timeout: 300,
+            requestID: requestID
         )
     }
 
     func startDevServer(
         for cardID: UUID,
         command: String,
-        directory: String
+        directory: String,
+        requestID: UUID
     ) async throws -> URL {
-        stopAllServers()
+        guard isRequestCurrent(requestID, for: cardID) else {
+            throw DevServerError.cancelled
+        }
 
         serverStates[cardID] = .startingServer(output: "")
         outputLines[cardID] = []
@@ -103,11 +118,14 @@ final class DevServerManager {
         return try await runDevServerProcess(
             for: cardID,
             command: command,
-            directory: directory
+            directory: directory,
+            requestID: requestID
         )
     }
 
     func stopServer(for cardID: UUID) {
+        activeRequestIDs.removeValue(forKey: cardID)
+
         if let pipe = stdoutPipes[cardID] {
             pipe.fileHandleForReading.readabilityHandler = nil
             stdoutPipes[cardID] = nil
@@ -130,6 +148,11 @@ final class DevServerManager {
         partialLineBuffers[cardID] = nil
     }
 
+    func stopRequest(for cardID: UUID, requestID: UUID) {
+        guard isRequestCurrent(requestID, for: cardID) else { return }
+        stopServer(for: cardID)
+    }
+
     func stopAllServers() {
         for (_, pipe) in stdoutPipes {
             pipe.fileHandleForReading.readabilityHandler = nil
@@ -150,6 +173,7 @@ final class DevServerManager {
         outputVersion.removeAll()
         pendingUIUpdates.removeAll()
         partialLineBuffers.removeAll()
+        activeRequestIDs.removeAll()
     }
 
     func isServerRunning(for cardID: UUID) -> Bool {
@@ -163,6 +187,41 @@ final class DevServerManager {
 
     // MARK: - Private
 
+    private func isRequestCurrent(_ requestID: UUID, for cardID: UUID) -> Bool {
+        activeRequestIDs[cardID] == requestID
+    }
+
+    private func registerProcessIfCurrent(
+        _ process: Process,
+        stdoutPipe: Pipe,
+        stderrPipe: Pipe,
+        for cardID: UUID,
+        requestID: UUID
+    ) -> Bool {
+        guard isRequestCurrent(requestID, for: cardID) else { return false }
+        processes[cardID] = process
+        stdoutPipes[cardID] = stdoutPipe
+        stderrPipes[cardID] = stderrPipe
+        return true
+    }
+
+    private func clearRegisteredResourcesIfMatching(
+        process: Process? = nil,
+        stdoutPipe: Pipe? = nil,
+        stderrPipe: Pipe? = nil,
+        for cardID: UUID
+    ) {
+        if let process, processes[cardID] === process {
+            processes[cardID] = nil
+        }
+        if let stdoutPipe, stdoutPipes[cardID] === stdoutPipe {
+            stdoutPipes[cardID] = nil
+        }
+        if let stderrPipe, stderrPipes[cardID] === stderrPipe {
+            stderrPipes[cardID] = nil
+        }
+    }
+
     private func decodeOutput(_ data: Data) -> String? {
         guard !data.isEmpty else { return nil }
 
@@ -175,7 +234,11 @@ final class DevServerManager {
         return "[Binary data: \(data.count) bytes]"
     }
 
-    private func appendOutput(_ str: String, for cardID: UUID, isError: Bool) {
+    private func appendOutput(_ str: String, for cardID: UUID, isError: Bool, requestID: UUID? = nil) {
+        if let requestID, !isRequestCurrent(requestID, for: cardID) {
+            return
+        }
+
         var currentLines = outputLines[cardID] ?? []
         var buffers = partialLineBuffers[cardID] ?? (stdout: "", stderr: "")
 
@@ -210,10 +273,14 @@ final class DevServerManager {
         }
 
         outputLines[cardID] = currentLines
-        scheduleUIUpdate(for: cardID)
+        scheduleUIUpdate(for: cardID, requestID: requestID)
     }
 
-    private func flushPartialBuffers(for cardID: UUID) {
+    private func flushPartialBuffers(for cardID: UUID, requestID: UUID? = nil) {
+        if let requestID, !isRequestCurrent(requestID, for: cardID) {
+            return
+        }
+
         guard let buffers = partialLineBuffers[cardID] else { return }
 
         let timestamp = Date()
@@ -230,18 +297,25 @@ final class DevServerManager {
         partialLineBuffers[cardID] = (stdout: "", stderr: "")
     }
 
-    private func scheduleUIUpdate(for cardID: UUID) {
+    private func scheduleUIUpdate(for cardID: UUID, requestID: UUID? = nil) {
         guard pendingUIUpdates[cardID] != true else { return }
         pendingUIUpdates[cardID] = true
 
         DispatchQueue.main.asyncAfter(deadline: .now() + uiUpdateInterval) { [weak self] in
             guard let self else { return }
+            if let requestID, !self.isRequestCurrent(requestID, for: cardID) {
+                self.pendingUIUpdates[cardID] = false
+                return
+            }
             self.pendingUIUpdates[cardID] = false
             self.outputVersion[cardID, default: 0] += 1
         }
     }
 
-    private func flushOutput(for cardID: UUID) {
+    private func flushOutput(for cardID: UUID, requestID: UUID? = nil) {
+        if let requestID, !isRequestCurrent(requestID, for: cardID) {
+            return
+        }
         pendingUIUpdates[cardID] = false
         outputVersion[cardID, default: 0] += 1
     }
@@ -264,11 +338,20 @@ final class DevServerManager {
         command: String,
         directory: String,
         stateBuilder: @escaping (String) -> ServerState,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        requestID: UUID
     ) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else {
+                    continuation.resume(throwing: DevServerError.cancelled)
+                    return
+                }
+
+                let isCurrentRequest = DispatchQueue.main.sync {
+                    self.isRequestCurrent(requestID, for: cardID)
+                }
+                guard isCurrentRequest else {
                     continuation.resume(throwing: DevServerError.cancelled)
                     return
                 }
@@ -284,10 +367,18 @@ final class DevServerManager {
                 process.standardOutput = stdoutPipe
                 process.standardError = stderrPipe
 
-                DispatchQueue.main.sync {
-                    self.processes[cardID] = process
-                    self.stdoutPipes[cardID] = stdoutPipe
-                    self.stderrPipes[cardID] = stderrPipe
+                let didRegisterProcess = DispatchQueue.main.sync {
+                    self.registerProcessIfCurrent(
+                        process,
+                        stdoutPipe: stdoutPipe,
+                        stderrPipe: stderrPipe,
+                        for: cardID,
+                        requestID: requestID
+                    )
+                }
+                guard didRegisterProcess else {
+                    continuation.resume(throwing: DevServerError.cancelled)
+                    return
                 }
 
                 let group = DispatchGroup()
@@ -299,7 +390,8 @@ final class DevServerManager {
                     guard let str = self.decodeOutput(data) else { return }
 
                     DispatchQueue.main.async {
-                        self.appendOutput(str, for: cardID, isError: false)
+                        guard self.isRequestCurrent(requestID, for: cardID) else { return }
+                        self.appendOutput(str, for: cardID, isError: false, requestID: requestID)
                         self.serverStates[cardID] = stateBuilder(self.output(for: cardID))
                     }
                 }
@@ -310,7 +402,8 @@ final class DevServerManager {
                     guard let str = self.decodeOutput(data) else { return }
 
                     DispatchQueue.main.async {
-                        self.appendOutput(str, for: cardID, isError: true)
+                        guard self.isRequestCurrent(requestID, for: cardID) else { return }
+                        self.appendOutput(str, for: cardID, isError: true, requestID: requestID)
                         self.serverStates[cardID] = stateBuilder(self.output(for: cardID))
                     }
                 }
@@ -325,10 +418,15 @@ final class DevServerManager {
                     stdoutPipe.fileHandleForReading.readabilityHandler = nil
                     stderrPipe.fileHandleForReading.readabilityHandler = nil
                     DispatchQueue.main.sync {
-                        self.processes[cardID] = nil
-                        self.stdoutPipes[cardID] = nil
-                        self.stderrPipes[cardID] = nil
-                        self.serverStates[cardID] = .error(message: error.localizedDescription)
+                        self.clearRegisteredResourcesIfMatching(
+                            process: process,
+                            stdoutPipe: stdoutPipe,
+                            stderrPipe: stderrPipe,
+                            for: cardID
+                        )
+                        if self.isRequestCurrent(requestID, for: cardID) {
+                            self.serverStates[cardID] = .error(message: error.localizedDescription)
+                        }
                     }
                     continuation.resume(throwing: error)
                     return
@@ -346,32 +444,48 @@ final class DevServerManager {
 
                 if wasExpectedTermination {
                     DispatchQueue.main.sync {
-                        self.stdoutPipes[cardID] = nil
-                        self.stderrPipes[cardID] = nil
-                        self.processes[cardID] = nil
+                        self.clearRegisteredResourcesIfMatching(
+                            process: process,
+                            stdoutPipe: stdoutPipe,
+                            stderrPipe: stderrPipe,
+                            for: cardID
+                        )
                     }
                     continuation.resume(throwing: DevServerError.cancelled)
                     return
                 }
 
-                DispatchQueue.main.sync {
-                    if !finalStdoutData.isEmpty, let str = self.decodeOutput(finalStdoutData) {
-                        self.appendOutput(str, for: cardID, isError: false)
-                    }
-                    if !finalStderrData.isEmpty, let str = self.decodeOutput(finalStderrData) {
-                        self.appendOutput(str, for: cardID, isError: true)
+                let isStillCurrentRequest = DispatchQueue.main.sync {
+                    let isCurrent = self.isRequestCurrent(requestID, for: cardID)
+                    if isCurrent {
+                        if !finalStdoutData.isEmpty, let str = self.decodeOutput(finalStdoutData) {
+                            self.appendOutput(str, for: cardID, isError: false, requestID: requestID)
+                        }
+                        if !finalStderrData.isEmpty, let str = self.decodeOutput(finalStderrData) {
+                            self.appendOutput(str, for: cardID, isError: true, requestID: requestID)
+                        }
+
+                        self.flushPartialBuffers(for: cardID, requestID: requestID)
+                        self.flushOutput(for: cardID, requestID: requestID)
                     }
 
-                    self.flushPartialBuffers(for: cardID)
-                    self.stdoutPipes[cardID] = nil
-                    self.stderrPipes[cardID] = nil
-                    self.processes[cardID] = nil
-                    self.flushOutput(for: cardID)
+                    self.clearRegisteredResourcesIfMatching(
+                        process: process,
+                        stdoutPipe: stdoutPipe,
+                        stderrPipe: stderrPipe,
+                        for: cardID
+                    )
+                    return isCurrent
+                }
+                guard isStillCurrentRequest else {
+                    continuation.resume(throwing: DevServerError.cancelled)
+                    return
                 }
 
                 if result == .timedOut {
                     self.killProcessTree(process)
                     DispatchQueue.main.async {
+                        guard self.isRequestCurrent(requestID, for: cardID) else { return }
                         self.serverStates[cardID] = .error(message: "Setup timed out after \(Int(timeout)) seconds")
                     }
                     continuation.resume(throwing: DevServerError.timeout)
@@ -382,7 +496,9 @@ final class DevServerManager {
                     var output = ""
                     DispatchQueue.main.sync {
                         output = self.output(for: cardID)
-                        self.serverStates[cardID] = .error(message: "Setup failed:\n\(output)")
+                        if self.isRequestCurrent(requestID, for: cardID) {
+                            self.serverStates[cardID] = .error(message: "Setup failed:\n\(output)")
+                        }
                     }
                     continuation.resume(throwing: DevServerError.setupFailed(output))
                     return
@@ -396,7 +512,8 @@ final class DevServerManager {
     private func runDevServerProcess(
         for cardID: UUID,
         command: String,
-        directory: String
+        directory: String,
+        requestID: UUID
     ) async throws -> URL {
         final class ContinuationState {
             var isResumed = false
@@ -407,6 +524,17 @@ final class DevServerManager {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else {
+                    if !state.isResumed {
+                        state.isResumed = true
+                        continuation.resume(throwing: DevServerError.cancelled)
+                    }
+                    return
+                }
+
+                let isCurrentRequest = DispatchQueue.main.sync {
+                    self.isRequestCurrent(requestID, for: cardID)
+                }
+                guard isCurrentRequest else {
                     if !state.isResumed {
                         state.isResumed = true
                         continuation.resume(throwing: DevServerError.cancelled)
@@ -425,15 +553,27 @@ final class DevServerManager {
                 process.standardOutput = stdoutPipe
                 process.standardError = stderrPipe
 
-                DispatchQueue.main.sync {
-                    self.processes[cardID] = process
-                    self.stdoutPipes[cardID] = stdoutPipe
-                    self.stderrPipes[cardID] = stderrPipe
+                let didRegisterProcess = DispatchQueue.main.sync {
+                    self.registerProcessIfCurrent(
+                        process,
+                        stdoutPipe: stdoutPipe,
+                        stderrPipe: stderrPipe,
+                        for: cardID,
+                        requestID: requestID
+                    )
+                }
+                guard didRegisterProcess else {
+                    if !state.isResumed {
+                        state.isResumed = true
+                        continuation.resume(throwing: DevServerError.cancelled)
+                    }
+                    return
                 }
 
                 let handleOutput: (String, Bool) -> Void = { str, isError in
                     DispatchQueue.main.async {
-                        self.appendOutput(str, for: cardID, isError: isError)
+                        guard self.isRequestCurrent(requestID, for: cardID) else { return }
+                        self.appendOutput(str, for: cardID, isError: isError, requestID: requestID)
                         let newOutput = self.output(for: cardID)
 
                         if !state.portDetected && !state.isResumed {
@@ -477,21 +617,38 @@ final class DevServerManager {
                         let wasExpectedTermination =
                             self.expectedTerminatedProcesses.remove(ObjectIdentifier(process)) != nil
 
-                        self.processes[cardID] = nil
-                        self.stdoutPipes[cardID] = nil
-                        self.stderrPipes[cardID] = nil
+                        self.clearRegisteredResourcesIfMatching(
+                            process: process,
+                            stdoutPipe: stdoutPipe,
+                            stderrPipe: stderrPipe,
+                            for: cardID
+                        )
 
-                        guard !wasExpectedTermination else { return }
+                        guard self.isRequestCurrent(requestID, for: cardID) else {
+                            if !state.isResumed {
+                                state.isResumed = true
+                                continuation.resume(throwing: DevServerError.cancelled)
+                            }
+                            return
+                        }
+
+                        guard !wasExpectedTermination else {
+                            if !state.isResumed {
+                                state.isResumed = true
+                                continuation.resume(throwing: DevServerError.cancelled)
+                            }
+                            return
+                        }
 
                         if !finalStdoutData.isEmpty, let str = self.decodeOutput(finalStdoutData) {
-                            self.appendOutput(str, for: cardID, isError: false)
+                            self.appendOutput(str, for: cardID, isError: false, requestID: requestID)
                         }
                         if !finalStderrData.isEmpty, let str = self.decodeOutput(finalStderrData) {
-                            self.appendOutput(str, for: cardID, isError: true)
+                            self.appendOutput(str, for: cardID, isError: true, requestID: requestID)
                         }
 
-                        self.flushPartialBuffers(for: cardID)
-                        self.flushOutput(for: cardID)
+                        self.flushPartialBuffers(for: cardID, requestID: requestID)
+                        self.flushOutput(for: cardID, requestID: requestID)
 
                         let output = self.output(for: cardID)
                         self.serverStates[cardID] = .error(message: "Server stopped unexpectedly:\n\(output)")
@@ -510,10 +667,13 @@ final class DevServerManager {
                     stderrPipe.fileHandleForReading.readabilityHandler = nil
                     var shouldResume = false
                     DispatchQueue.main.sync {
-                        self.processes[cardID] = nil
-                        self.stdoutPipes[cardID] = nil
-                        self.stderrPipes[cardID] = nil
-                        if !state.isResumed {
+                        self.clearRegisteredResourcesIfMatching(
+                            process: process,
+                            stdoutPipe: stdoutPipe,
+                            stderrPipe: stderrPipe,
+                            for: cardID
+                        )
+                        if self.isRequestCurrent(requestID, for: cardID), !state.isResumed {
                             state.isResumed = true
                             shouldResume = true
                             self.serverStates[cardID] = .error(message: error.localizedDescription)
@@ -529,6 +689,11 @@ final class DevServerManager {
                     guard let self, !state.isResumed else { return }
                     DispatchQueue.main.async {
                         guard !state.isResumed else { return }
+                        guard self.isRequestCurrent(requestID, for: cardID) else {
+                            state.isResumed = true
+                            continuation.resume(throwing: DevServerError.cancelled)
+                            return
+                        }
                         state.isResumed = true
                         let output = self.output(for: cardID)
                         self.serverStates[cardID] = .error(message: "Could not detect server port:\n\(output)")
