@@ -76,6 +76,7 @@ struct ContentView: View {
             handleDevServerVisibilityChange(wasShowing: wasShowing, isShowing: isShowing)
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .frame(minWidth: 1200, minHeight: 600)
         .sheet(isPresented: $store.showDevServerConfig) {
             if let card = store.devServerCard,
