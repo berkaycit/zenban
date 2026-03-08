@@ -8,20 +8,18 @@ struct CardDetailView: View {
     @Environment(TerminalManager.self) private var terminalManager
     @State private var editedTitle = ""
     @State private var isEditing = false
-    @State private var showTerminal = true
     @FocusState private var isFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             cardInfoSection
-                .frame(maxHeight: showTerminal && terminalManager.isTerminalAvailable ? 160 : .infinity)
+                .frame(maxHeight: terminalManager.isTerminalAvailable ? 160 : .infinity)
 
             if terminalManager.isTerminalAvailable {
                 Divider()
                 terminalSection
             }
         }
-        .animation(.easeOut(duration: 0.15), value: showTerminal)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .background(Color.cardBackground)
@@ -223,17 +221,14 @@ struct CardDetailView: View {
 
     private var terminalSection: some View {
         VStack(spacing: 0) {
-            terminalHeader
-            if showTerminal {
-                if terminalManager.isDetached(cardID: card.id) {
-                    detachedTerminalPlaceholder
-                        .frame(minHeight: 200)
-                        .frame(maxHeight: .infinity)
-                } else {
-                    CardWorkspaceDeckView(cardID: card.id, boardID: boardID, cardTitle: card.title)
-                        .frame(minHeight: 200)
-                        .frame(maxHeight: .infinity)
-                }
+            if terminalManager.isDetached(cardID: card.id) {
+                detachedTerminalPlaceholder
+                    .frame(minHeight: 200)
+                    .frame(maxHeight: .infinity)
+            } else {
+                CardWorkspaceDeckView(cardID: card.id, boardID: boardID, cardTitle: card.title)
+                    .frame(minHeight: 200)
+                    .frame(maxHeight: .infinity)
             }
         }
     }
@@ -254,27 +249,6 @@ struct CardDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.03))
-    }
-
-    private var terminalHeader: some View {
-        HStack {
-            Image(systemName: "terminal")
-                .foregroundStyle(.secondary)
-            Text("Terminal")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            Button(action: { showTerminal.toggle() }) {
-                Image(systemName: showTerminal ? "chevron.down" : "chevron.up")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.1))
     }
 
     private func startEditing() {
