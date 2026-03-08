@@ -77,7 +77,8 @@ struct DevServerView: View {
             .buttonStyle(.plain)
             .help("Close Preview")
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Content
