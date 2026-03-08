@@ -22,7 +22,7 @@ struct CardDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
-        .background(Color.cardBackground)
+        .background(Color.cardBackground.ignoresSafeArea(.container, edges: .top))
         .onAppear {
             editedTitle = card.title
         }
