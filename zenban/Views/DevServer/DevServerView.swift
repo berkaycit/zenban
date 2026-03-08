@@ -67,6 +67,7 @@ struct DevServerView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Reconfigure")
+                .accessibilityLabel("Reconfigure dev server")
             }
 
             Button(action: onDismiss) {
@@ -76,6 +77,7 @@ struct DevServerView: View {
             }
             .buttonStyle(.plain)
             .help("Close Preview")
+            .accessibilityLabel("Close preview")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -154,7 +156,7 @@ struct DevServerView: View {
                     }
                 }
             }
-            .background(Color.black.opacity(0.05))
+            .background(Color.codeBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
@@ -212,7 +214,7 @@ struct DevServerView: View {
                     .padding(12)
             }
             .frame(maxHeight: 200)
-            .background(Color.black.opacity(0.05))
+            .background(Color.codeBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.horizontal, 32)
 

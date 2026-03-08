@@ -25,7 +25,7 @@ struct DevServerCommandSheet: View {
         }
         .frame(width: 400)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear {
+        .task {
             loadExistingConfigOrDetect()
         }
     }

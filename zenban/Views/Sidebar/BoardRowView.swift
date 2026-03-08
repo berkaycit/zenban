@@ -48,6 +48,7 @@ struct BoardRowView: View {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("Pinned")
             }
         }
         .padding(.vertical, 12)

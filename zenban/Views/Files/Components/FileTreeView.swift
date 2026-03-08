@@ -70,7 +70,7 @@ struct FileTreeItem: View {
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
-            .background(isHovering ? Color.secondary.opacity(0.1) : Color.clear)
+            .background(isHovering ? Color.inputBackground : Color.clear)
             .contentShape(Rectangle())
             .onTapGesture {
                 if item.isDirectory {

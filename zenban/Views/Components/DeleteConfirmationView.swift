@@ -39,6 +39,7 @@ struct DeleteConfirmationView: View {
                     isSelected: selectedOption == .delete,
                     isDestructive: true
                 ))
+                .accessibilityLabel("Delete card")
 
                 Button(action: onCancel) {
                     Text("Cancel")
@@ -48,6 +49,7 @@ struct DeleteConfirmationView: View {
                     isSelected: selectedOption == .cancel,
                     isDestructive: false
                 ))
+                .accessibilityLabel("Cancel deletion")
             }
         }
         .padding(24)

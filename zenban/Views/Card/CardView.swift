@@ -24,6 +24,7 @@ struct CardView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Delete card")
             }
         }
         .padding(12)

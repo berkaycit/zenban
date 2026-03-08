@@ -23,6 +23,7 @@ struct ColumnHeaderView: View {
                 .padding(.vertical, 2)
                 .background(Color.countBackground)
                 .clipShape(Capsule())
+                .accessibilityLabel("\(count) cards")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

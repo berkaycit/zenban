@@ -72,7 +72,7 @@ struct CreatePRSheet: View {
                 TextField("PR Title", text: $config.title)
                     .textFieldStyle(.plain)
                     .padding(10)
-                    .background(Color.secondary.opacity(0.1))
+                    .background(Color.inputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
@@ -104,7 +104,7 @@ struct CreatePRSheet: View {
                     .font(.body)
                     .frame(height: 120)
                     .padding(6)
-                    .background(Color.secondary.opacity(0.1))
+                    .background(Color.inputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .scrollContentBackground(.hidden)
             }
@@ -125,7 +125,7 @@ struct CreatePRSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color.secondary.opacity(0.1))
+                .background(Color.inputBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 

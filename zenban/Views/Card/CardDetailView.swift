@@ -96,6 +96,7 @@ struct CardDetailView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
                         .help("View Changes")
+                        .accessibilityLabel("View Changes")
 
                         Button(action: { store.toggleFileBrowser() }) {
                             Image(systemName: "folder")
@@ -104,6 +105,7 @@ struct CardDetailView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
                         .help("File Browser")
+                        .accessibilityLabel("File Browser")
 
                         Button(action: startDevServer) {
                             Image(systemName: "play.circle")
@@ -112,6 +114,7 @@ struct CardDetailView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
                         .help("Dev Server")
+                        .accessibilityLabel("Dev Server")
                         .contextMenu {
                             if board?.devServerConfig != nil {
                                 Button("Reconfigure") { store.configureDevServer(for: card) }
@@ -126,10 +129,11 @@ struct CardDetailView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .help("Delete")
+                    .accessibilityLabel("Delete card")
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .background(Color.secondary.opacity(0.08))
+                .background(Color.pillBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
@@ -174,7 +178,7 @@ struct CardDetailView: View {
             }
         }
         .padding(4)
-        .background(Color.secondary.opacity(0.08))
+        .background(Color.pillBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -248,7 +252,7 @@ struct CardDetailView: View {
             .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.03))
+        .background(Color.codeBackground)
     }
 
     private func startEditing() {

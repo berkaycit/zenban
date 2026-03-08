@@ -61,7 +61,7 @@ struct CommitSheet: View {
                 TextField("Brief description of changes", text: $summary)
                     .textFieldStyle(.plain)
                     .padding(10)
-                    .background(Color.secondary.opacity(0.1))
+                    .background(Color.inputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
@@ -93,7 +93,7 @@ struct CommitSheet: View {
                     .font(.body)
                     .frame(height: 100)
                     .padding(6)
-                    .background(Color.secondary.opacity(0.1))
+                    .background(Color.inputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .scrollContentBackground(.hidden)
             }

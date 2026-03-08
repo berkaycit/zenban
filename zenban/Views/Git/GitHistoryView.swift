@@ -10,6 +10,7 @@ struct GitHistoryView: View {
     @State private var isLoadingMore = false
     @State private var hasMoreCommits = true
     @State private var errorMessage: String?
+    @State private var activeTask: Task<Void, Never>?
 
     private let logService = GitLogService()
     private let pageSize = 30
@@ -32,6 +33,9 @@ struct GitHistoryView: View {
         .task {
             await loadCommits()
         }
+        .onDisappear {
+            activeTask?.cancel()
+        }
     }
 
     private var header: some View {
@@ -47,12 +51,13 @@ struct GitHistoryView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.15))
+                    .background(Color.countBackground)
                     .clipShape(Capsule())
             }
 
             Button {
-                Task { await refresh() }
+                activeTask?.cancel()
+                activeTask = Task { await refresh() }
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 11))
@@ -119,7 +124,7 @@ struct GitHistoryView: View {
                     commitRow(commit)
                         .onAppear {
                             if commit.id == commits.last?.id && hasMoreCommits && !isLoadingMore {
-                                Task { await loadMoreCommits() }
+                                activeTask = Task { await loadMoreCommits() }
                             }
                         }
                     Divider()
@@ -137,7 +142,7 @@ struct GitHistoryView: View {
                     .padding(.vertical, 10)
                 } else if hasMoreCommits {
                     Button {
-                        Task { await loadMoreCommits() }
+                        activeTask = Task { await loadMoreCommits() }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.down.circle")

@@ -49,15 +49,19 @@ struct DiffFileRow: View {
         case .added, .untracked:
             Image(systemName: "plus.circle.fill")
                 .foregroundStyle(.green)
+                .accessibilityLabel("Added")
         case .modified:
             Image(systemName: "pencil.circle.fill")
                 .foregroundStyle(.orange)
+                .accessibilityLabel("Modified")
         case .deleted:
             Image(systemName: "minus.circle.fill")
                 .foregroundStyle(.red)
+                .accessibilityLabel("Deleted")
         case .renamed:
             Image(systemName: "arrow.triangle.swap")
                 .foregroundStyle(.blue)
+                .accessibilityLabel("Renamed")
         }
     }
 }

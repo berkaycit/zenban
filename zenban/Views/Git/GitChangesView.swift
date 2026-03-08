@@ -92,7 +92,7 @@ struct GitChangesView: View {
         .clipped()
         .background(Color.cardBackground)
         .compositingGroup()
-        .onAppear {
+        .task {
             loadBranches()
             loadChanges()
         }
@@ -176,6 +176,7 @@ struct GitChangesView: View {
                     .font(.body.weight(.medium))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Back")
 
             Picker("View", selection: $selectedTab) {
                 ForEach(GitChangesTab.allCases, id: \.self) { tab in
@@ -219,6 +220,7 @@ struct GitChangesView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isLoading)
+                .accessibilityLabel("Refresh changes")
             }
         }
         .padding(16)
@@ -262,7 +264,7 @@ struct GitChangesView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.05))
+        .background(Color.secondaryBackground)
     }
 
     // MARK: - Content Views
@@ -367,7 +369,7 @@ struct GitChangesView: View {
 
     private func panelResizeHandle(width: Binding<CGFloat>, minWidth: CGFloat, maxWidth: CGFloat) -> some View {
         Rectangle()
-            .fill(Color(nsColor: .separatorColor))
+            .fill(Color.separator)
             .frame(width: 1)
             .overlay(
                 Rectangle()
@@ -454,7 +456,7 @@ struct GitChangesView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.05))
+        .background(Color.secondaryBackground)
     }
 
     @ViewBuilder
@@ -532,7 +534,7 @@ struct GitChangesView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.05))
+        .background(Color.secondaryBackground)
     }
 
     @ViewBuilder
@@ -615,7 +617,7 @@ struct GitChangesView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(Color.black.opacity(0.02))
+                    .background(Color.codeBackground)
                 } else if let diff = historyFileDiffs[file.path] {
                     DiffView(diffOutput: diff, fontSize: 12, fontFamily: "Menlo")
                         .frame(minHeight: 812, maxHeight: 812)
