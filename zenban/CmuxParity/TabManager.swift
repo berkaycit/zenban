@@ -51,60 +51,6 @@ enum WorkspaceAutoReorderSettings {
     }
 }
 
-enum SidebarBranchLayoutSettings {
-    static let key = "sidebarBranchVerticalLayout"
-    static let defaultVerticalLayout = true
-
-    static func usesVerticalLayout(defaults: UserDefaults = .standard) -> Bool {
-        if defaults.object(forKey: key) == nil {
-            return defaultVerticalLayout
-        }
-        return defaults.bool(forKey: key)
-    }
-}
-
-enum SidebarActiveTabIndicatorStyle: String, CaseIterable, Identifiable {
-    case leftRail
-    case solidFill
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .leftRail:
-            return String(localized: "sidebar.indicator.leftRail", defaultValue: "Left Rail")
-        case .solidFill:
-            return String(localized: "sidebar.indicator.solidFill", defaultValue: "Solid Fill")
-        }
-    }
-}
-
-enum SidebarActiveTabIndicatorSettings {
-    static let styleKey = "sidebarActiveTabIndicatorStyle"
-    static let defaultStyle: SidebarActiveTabIndicatorStyle = .leftRail
-
-    static func resolvedStyle(rawValue: String?) -> SidebarActiveTabIndicatorStyle {
-        guard let rawValue else { return defaultStyle }
-        if let style = SidebarActiveTabIndicatorStyle(rawValue: rawValue) {
-            return style
-        }
-
-        // Legacy values from earlier iterations map to the closest modern option.
-        switch rawValue {
-        case "rail":
-            return .leftRail
-        case "border", "wash", "lift", "typography", "washRail", "blueWashColorRail":
-            return .solidFill
-        default:
-            return defaultStyle
-        }
-    }
-
-    static func current(defaults: UserDefaults = .standard) -> SidebarActiveTabIndicatorStyle {
-        resolvedStyle(rawValue: defaults.string(forKey: styleKey))
-    }
-}
-
 enum WorkspacePlacementSettings {
     static let placementKey = "newWorkspacePlacement"
     static let defaultPlacement: NewWorkspacePlacement = .afterCurrent
