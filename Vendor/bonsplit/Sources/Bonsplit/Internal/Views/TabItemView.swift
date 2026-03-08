@@ -346,7 +346,9 @@ struct TabItemView: View {
 
         contextButton("New Terminal Tab to Right", action: .newTerminalToRight)
 
-        contextButton("New Browser Tab to Right", action: .newBrowserToRight)
+        if contextMenuState.showsBrowserCreationAffordances {
+            contextButton("New Browser Tab to Right", action: .newBrowserToRight)
+        }
 
         if contextMenuState.isBrowser {
             Divider()

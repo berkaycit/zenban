@@ -53,6 +53,9 @@ public struct BonsplitConfiguration: Sendable {
     /// Controls where new tabs are inserted in the tab list
     public var newTabPosition: NewTabPosition
 
+    /// Whether the UI exposes user-facing browser creation affordances.
+    public var showsBrowserCreationAffordances: Bool
+
     // MARK: - Appearance
 
     /// Tab bar appearance customization
@@ -85,6 +88,7 @@ public struct BonsplitConfiguration: Sendable {
         autoCloseEmptyPanes: Bool = true,
         contentViewLifecycle: ContentViewLifecycle = .recreateOnSwitch,
         newTabPosition: NewTabPosition = .current,
+        showsBrowserCreationAffordances: Bool = true,
         appearance: Appearance = .default
     ) {
         self.allowSplits = allowSplits
@@ -95,6 +99,7 @@ public struct BonsplitConfiguration: Sendable {
         self.autoCloseEmptyPanes = autoCloseEmptyPanes
         self.contentViewLifecycle = contentViewLifecycle
         self.newTabPosition = newTabPosition
+        self.showsBrowserCreationAffordances = showsBrowserCreationAffordances
         self.appearance = appearance
     }
 }

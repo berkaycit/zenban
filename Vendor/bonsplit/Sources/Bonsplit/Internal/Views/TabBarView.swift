@@ -36,6 +36,7 @@ struct TabContextMenuState {
     let isPinned: Bool
     let isUnread: Bool
     let isBrowser: Bool
+    let showsBrowserCreationAffordances: Bool
     let hasCustomTitle: Bool
     let canCloseToLeft: Bool
     let canCloseToRight: Bool
@@ -306,6 +307,7 @@ struct TabBarView: View {
             isPinned: tab.isPinned,
             isUnread: tab.showsNotificationBadge,
             isBrowser: tab.kind == "browser",
+            showsBrowserCreationAffordances: controller.configuration.showsBrowserCreationAffordances,
             hasCustomTitle: tab.hasCustomTitle,
             canCloseToLeft: canCloseToLeft,
             canCloseToRight: canCloseToRight,
@@ -453,14 +455,16 @@ struct TabBarView: View {
             .buttonStyle(SplitActionButtonStyle(appearance: appearance))
             .help(tooltips.newTerminal)
 
-            Button {
-                controller.requestNewTab(kind: "browser", inPane: pane.id)
-            } label: {
-                Image(systemName: "globe")
-                    .font(.system(size: 12))
+            if controller.configuration.showsBrowserCreationAffordances {
+                Button {
+                    controller.requestNewTab(kind: "browser", inPane: pane.id)
+                } label: {
+                    Image(systemName: "globe")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(SplitActionButtonStyle(appearance: appearance))
+                .help(tooltips.newBrowser)
             }
-            .buttonStyle(SplitActionButtonStyle(appearance: appearance))
-            .help(tooltips.newBrowser)
 
             Button {
                 // 120fps animation handled by SplitAnimator

@@ -34,11 +34,8 @@ enum KeyboardShortcutSettings {
         case splitRight
         case splitDown
         case toggleSplitZoom
-        case splitBrowserRight
-        case splitBrowserDown
 
         // Panels
-        case openBrowser
         case toggleBrowserDeveloperTools
         case showBrowserJavaScriptConsole
 
@@ -71,9 +68,6 @@ enum KeyboardShortcutSettings {
             case .splitRight: return String(localized: "shortcut.splitRight.label", defaultValue: "Split Right")
             case .splitDown: return String(localized: "shortcut.splitDown.label", defaultValue: "Split Down")
             case .toggleSplitZoom: return String(localized: "shortcut.togglePaneZoom.label", defaultValue: "Toggle Pane Zoom")
-            case .splitBrowserRight: return String(localized: "shortcut.splitBrowserRight.label", defaultValue: "Split Browser Right")
-            case .splitBrowserDown: return String(localized: "shortcut.splitBrowserDown.label", defaultValue: "Split Browser Down")
-            case .openBrowser: return String(localized: "shortcut.openBrowser.label", defaultValue: "Open Browser")
             case .toggleBrowserDeveloperTools: return String(localized: "shortcut.toggleBrowserDevTools.label", defaultValue: "Toggle Browser Developer Tools")
             case .showBrowserJavaScriptConsole: return String(localized: "shortcut.showBrowserJSConsole.label", defaultValue: "Show Browser JavaScript Console")
             }
@@ -102,13 +96,10 @@ enum KeyboardShortcutSettings {
             case .splitRight: return "shortcut.splitRight"
             case .splitDown: return "shortcut.splitDown"
             case .toggleSplitZoom: return "shortcut.toggleSplitZoom"
-            case .splitBrowserRight: return "shortcut.splitBrowserRight"
-            case .splitBrowserDown: return "shortcut.splitBrowserDown"
             case .nextSurface: return "shortcut.nextSurface"
             case .prevSurface: return "shortcut.prevSurface"
             case .newSurface: return "shortcut.newSurface"
             case .toggleTerminalCopyMode: return "shortcut.toggleTerminalCopyMode"
-            case .openBrowser: return "shortcut.openBrowser"
             case .toggleBrowserDeveloperTools: return "shortcut.toggleBrowserDeveloperTools"
             case .showBrowserJavaScriptConsole: return "shortcut.showBrowserJavaScriptConsole"
             }
@@ -158,10 +149,6 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "d", command: true, shift: true, option: false, control: false)
             case .toggleSplitZoom:
                 return StoredShortcut(key: "\r", command: true, shift: true, option: false, control: false)
-            case .splitBrowserRight:
-                return StoredShortcut(key: "d", command: true, shift: false, option: true, control: false)
-            case .splitBrowserDown:
-                return StoredShortcut(key: "d", command: true, shift: true, option: true, control: false)
             case .nextSurface:
                 return StoredShortcut(key: "]", command: true, shift: true, option: false, control: false)
             case .prevSurface:
@@ -170,8 +157,6 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "t", command: true, shift: false, option: false, control: false)
             case .toggleTerminalCopyMode:
                 return StoredShortcut(key: "m", command: true, shift: true, option: false, control: false)
-            case .openBrowser:
-                return StoredShortcut(key: "l", command: true, shift: true, option: false, control: false)
             case .toggleBrowserDeveloperTools:
                 // Safari default: Show Web Inspector.
                 return StoredShortcut(key: "i", command: true, shift: false, option: true, control: false)

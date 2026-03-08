@@ -1015,7 +1015,7 @@ final class Workspace: Identifiable, ObservableObject {
     private static func currentSplitButtonTooltips() -> BonsplitConfiguration.SplitButtonTooltips {
         BonsplitConfiguration.SplitButtonTooltips(
             newTerminal: KeyboardShortcutSettings.Action.newSurface.tooltip(String(localized: "workspace.tooltip.newTerminal", defaultValue: "New Terminal")),
-            newBrowser: KeyboardShortcutSettings.Action.openBrowser.tooltip(String(localized: "workspace.tooltip.newBrowser", defaultValue: "New Browser")),
+            newBrowser: String(localized: "workspace.tooltip.newBrowser", defaultValue: "New Browser"),
             splitRight: KeyboardShortcutSettings.Action.splitRight.tooltip(String(localized: "workspace.tooltip.splitRight", defaultValue: "Split Right")),
             splitDown: KeyboardShortcutSettings.Action.splitDown.tooltip(String(localized: "workspace.tooltip.splitDown", defaultValue: "Split Down"))
         )
@@ -1137,6 +1137,7 @@ final class Workspace: Identifiable, ObservableObject {
             autoCloseEmptyPanes: true,
             contentViewLifecycle: .keepAllAlive,
             newTabPosition: .current,
+            showsBrowserCreationAffordances: false,
             appearance: appearance
         )
         self.bonsplitController = BonsplitController(configuration: config)

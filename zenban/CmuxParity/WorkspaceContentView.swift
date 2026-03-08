@@ -300,7 +300,6 @@ struct EmptyPanelView: View {
     @ObservedObject var workspace: Workspace
     let paneId: PaneID
     @AppStorage(KeyboardShortcutSettings.Action.newSurface.defaultsKey) private var newSurfaceShortcutData = Data()
-    @AppStorage(KeyboardShortcutSettings.Action.openBrowser.defaultsKey) private var openBrowserShortcutData = Data()
 
     private struct ShortcutHint: View {
         let text: String
@@ -327,20 +326,8 @@ struct EmptyPanelView: View {
         _ = workspace.newTerminalSurface(inPane: paneId)
     }
 
-    private func createBrowser() {
-        #if DEBUG
-        dlog("emptyPane.newBrowser pane=\(paneId.id.uuidString.prefix(5))")
-        #endif
-        focusPane()
-        _ = workspace.newBrowserSurface(inPane: paneId)
-    }
-
     private var newSurfaceShortcut: StoredShortcut {
         decodeShortcut(from: newSurfaceShortcutData, fallback: KeyboardShortcutSettings.Action.newSurface.defaultShortcut)
-    }
-
-    private var openBrowserShortcut: StoredShortcut {
-        decodeShortcut(from: openBrowserShortcutData, fallback: KeyboardShortcutSettings.Action.openBrowser.defaultShortcut)
     }
 
     private func decodeShortcut(from data: Data, fallback: StoredShortcut) -> StoredShortcut {
@@ -388,21 +375,12 @@ struct EmptyPanelView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 12) {
-                emptyPaneActionButton(
-                    title: "Terminal",
-                    systemImage: "terminal.fill",
-                    shortcut: newSurfaceShortcut,
-                    action: createTerminal
-                )
-
-                emptyPaneActionButton(
-                    title: "Browser",
-                    systemImage: "globe",
-                    shortcut: openBrowserShortcut,
-                    action: createBrowser
-                )
-            }
+            emptyPaneActionButton(
+                title: "Terminal",
+                systemImage: "terminal.fill",
+                shortcut: newSurfaceShortcut,
+                action: createTerminal
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: GhosttyBackgroundTheme.currentColor()))

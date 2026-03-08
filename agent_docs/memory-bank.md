@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Remove terminal browser create affordances
+- **Description**: Removed the user-facing ways to open browser tabs from the cmux workspace shell, including the empty-pane browser button, browser-create shortcuts, and bonsplit chrome/context-menu affordances. Dev Server preview and internal/socket-driven browser APIs stay intact, so embedded browsers still exist where the app needs them without exposing manual terminal-side creation.
+
 - **Summary**: Refine dev server preview controls
 - **Description**: Added a board-level `autoOpenConsole` option so the cmux browser console stays off by default and only opens automatically when requested. The board-area dev server preview now also hides the sidebar for the active session, restores the previous split visibility on close, and supports `Cmd+Shift+R` reloads against the same live browser panel.
 

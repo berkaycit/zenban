@@ -753,16 +753,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if matches(.newSurface) {
             return workspace.newTerminalSurfaceInFocusedPane() != nil
         }
-        if matches(.openBrowser),
-           let paneId = workspace.bonsplitController.focusedPaneId {
-            return manager.newBrowserSurface(tabId: workspace.id, inPane: paneId) != nil
-        }
-        if matches(.splitBrowserRight) {
-            return workspace.newBrowserSplit(from: focusedPanelId, orientation: .horizontal) != nil
-        }
-        if matches(.splitBrowserDown) {
-            return workspace.newBrowserSplit(from: focusedPanelId, orientation: .vertical) != nil
-        }
         if matches(.toggleBrowserDeveloperTools) {
             return manager.toggleDeveloperToolsFocusedBrowser()
         }
