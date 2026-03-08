@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add cmux-style detached terminal windows
+- **Description**: Zenban's terminal adapter now uses a single board-owned cmux `TabManager` instead of creating one manager per card, while still keeping card UUIDs as workspace identity. `AppDelegate` now acts as the cmux-style window host contract, tracking the main board window, detached terminal-only windows, and socket routing/focus between them. Detached cards keep their worktree and shell-integration IDs, and the card detail pane now shows a placeholder that focuses the detached terminal window instead of mounting a duplicate host.
+
 - **Summary**: Add cmux-style card handoff for Ghostty
 - **Description**: Replaced the terminal section's direct single-card host with a persistent `CardWorkspaceDeckView` that mirrors cmux workspace switching at the card level. Card changes now keep only the selected and retiring workspaces mounted, activate the new card immediately, and explicitly hide retiring terminal/browser portals before unmounting. `TerminalManager` now owns deferred cross-card unfocus and portal-hide helpers so rapid card switching no longer leaves stale Ghostty content visible.
 
