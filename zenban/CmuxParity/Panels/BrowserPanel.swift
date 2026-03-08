@@ -2505,6 +2505,11 @@ extension BrowserPanel {
         developerToolsAutoOpenRequestToken &+= 1
     }
 
+    func acknowledgeDeveloperToolsAutoOpenRequest(_ token: Int) {
+        guard developerToolsAutoOpenRequestToken == token else { return }
+        developerToolsAutoOpenRequestToken = 0
+    }
+
     private func applyPreferredDeveloperToolsPaneIfNeeded(inspector: NSObject) {
         guard preferredDeveloperToolsShowsConsole else { return }
 

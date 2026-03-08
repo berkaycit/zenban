@@ -9,6 +9,7 @@ struct DevServerSettingsSheet: View {
     @State private var setupCommand = ""
     @State private var devCommand = ""
     @State private var skipSetup = false
+    @State private var autoOpenConsole = false
 
     private var board: Board? { store.board(for: boardID) }
 
@@ -93,6 +94,21 @@ struct DevServerSettingsSheet: View {
                     .textFieldStyle(.roundedBorder)
             }
 
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Preview")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Open console automatically", isOn: $autoOpenConsole)
+                    .toggleStyle(.checkbox)
+
+                Text("Opens the cmux browser console after the page finishes loading.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if board?.devServerConfig == nil {
                 Label("Not configured yet. Settings will be saved when you click Save.", systemImage: "info.circle")
                     .font(.caption)
@@ -136,6 +152,7 @@ struct DevServerSettingsSheet: View {
             setupCommand = config.setupCommand ?? ""
             devCommand = config.devCommand
             skipSetup = config.skipSetup
+            autoOpenConsole = config.autoOpenConsole
         }
     }
 
@@ -143,7 +160,8 @@ struct DevServerSettingsSheet: View {
         let config = DevServerConfig(
             setupCommand: setupCommand.isEmpty ? nil : setupCommand,
             devCommand: devCommand.isEmpty ? "npm run dev" : devCommand,
-            skipSetup: skipSetup
+            skipSetup: skipSetup,
+            autoOpenConsole: autoOpenConsole
         )
         store.updateDevServerConfig(boardID, config: config)
         isPresented = false

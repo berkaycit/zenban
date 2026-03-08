@@ -26,6 +26,7 @@ struct ContentView: View {
                         card: card,
                         setupCommand: store.devServerSetupCommand,
                         devCommand: store.devServerDevCommand,
+                        autoOpenConsole: store.selectedBoard?.devServerConfig?.autoOpenConsole ?? false,
                         onDismiss: store.stopDevServer,
                         onReconfigure: store.openReconfigure
                     )

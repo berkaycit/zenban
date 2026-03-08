@@ -6,6 +6,7 @@ struct DevServerView: View {
     let card: Card
     let setupCommand: String?
     let devCommand: String
+    let autoOpenConsole: Bool
     let onDismiss: () -> Void
     var onReconfigure: (() -> Void)?
 
@@ -302,6 +303,7 @@ struct DevServerView: View {
     }
 
     private func scheduleConsoleOpenIfNeeded(for panel: BrowserPanel) {
+        guard autoOpenConsole else { return }
         guard autoOpenedConsolePanelID != panel.id else { return }
 
         autoOpenedConsolePanelID = panel.id

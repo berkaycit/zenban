@@ -235,6 +235,7 @@ struct BrowserPanelView: View {
     @State private var lastHandledAddressBarFocusRequestId: UUID?
     @State private var isBrowserThemeMenuPresented = false
     @State private var ghosttyBackgroundGeneration: Int = 0
+    @State private var developerToolsAutoOpenTask: Task<Void, Never>?
     // Keep this below half of the compact omnibar height so it reads as a squircle,
     // not a capsule.
     private let omnibarPillCornerRadius: CGFloat = 10
@@ -400,6 +401,11 @@ struct BrowserPanelView: View {
             autoFocusOmnibarIfBlank()
             syncWebViewResponderPolicyWithViewState(reason: "onAppear")
             BrowserHistoryStore.shared.loadIfNeeded()
+            scheduleDeveloperToolsAutoOpenIfNeeded()
+        }
+        .onDisappear {
+            developerToolsAutoOpenTask?.cancel()
+            developerToolsAutoOpenTask = nil
         }
         .onChange(of: panel.focusFlashToken) { _ in
             triggerFocusFlashAnimation()
@@ -428,6 +434,9 @@ struct BrowserPanelView: View {
         }
         .onChange(of: panel.pendingAddressBarFocusRequestId) { _ in
             applyPendingAddressBarFocusRequestIfNeeded()
+        }
+        .onChange(of: panel.developerToolsAutoOpenRequestToken) { _ in
+            scheduleDeveloperToolsAutoOpenIfNeeded()
         }
         .onChange(of: isFocused) { focused in
             // Ensure this view doesn't retain focus while hidden (bonsplit keepAllAlive).
@@ -906,6 +915,38 @@ struct BrowserPanelView: View {
         guard !panel.webView.isLoading else { return }
         guard isWebViewBlank() else { return }
         addressBarFocused = true
+    }
+
+    private func scheduleDeveloperToolsAutoOpenIfNeeded() {
+        developerToolsAutoOpenTask?.cancel()
+        developerToolsAutoOpenTask = nil
+
+        let requestToken = panel.developerToolsAutoOpenRequestToken
+        guard requestToken != 0 else { return }
+
+        developerToolsAutoOpenTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+
+            for _ in 0..<40 {
+                guard !Task.isCancelled else { return }
+                guard panel.developerToolsAutoOpenRequestToken == requestToken else { return }
+
+                let isAttached = panel.webView.window != nil && !panel.webView.isHiddenOrHasHiddenAncestor
+                let isReady = !panel.isLoading && !panel.webView.isLoading
+                if isAttached && isReady {
+                    if panel.showDeveloperToolsConsole() {
+                        panel.acknowledgeDeveloperToolsAutoOpenRequest(requestToken)
+                        panel.focus()
+                        try? await Task.sleep(nanoseconds: 75_000_000)
+                        guard !Task.isCancelled else { return }
+                        panel.focus()
+                        return
+                    }
+                }
+
+                try? await Task.sleep(nanoseconds: 75_000_000)
+            }
+        }
     }
 
     private func openDevTools() {
