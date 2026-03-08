@@ -660,16 +660,25 @@ class TabManager: ObservableObject {
     private var uiTestCancellables = Set<AnyCancellable>()
 #endif
 
+    private let createsInitialWorkspace: Bool
+    private let keepsBootstrapWorkspaceWhenEmpty: Bool
+
     init(
         initialWorkingDirectory: String? = nil,
         initialWorkspaceID: UUID? = nil,
-        initialWorkspaceTitle: String? = nil
+        initialWorkspaceTitle: String? = nil,
+        createsInitialWorkspace: Bool = true,
+        keepsBootstrapWorkspaceWhenEmpty: Bool = true
     ) {
-        addWorkspace(
-            workingDirectory: initialWorkingDirectory,
-            workspaceID: initialWorkspaceID,
-            title: initialWorkspaceTitle
-        )
+        self.createsInitialWorkspace = createsInitialWorkspace
+        self.keepsBootstrapWorkspaceWhenEmpty = keepsBootstrapWorkspaceWhenEmpty
+        if createsInitialWorkspace {
+            addWorkspace(
+                workingDirectory: initialWorkingDirectory,
+                workspaceID: initialWorkspaceID,
+                title: initialWorkspaceTitle
+            )
+        }
         observers.append(NotificationCenter.default.addObserver(
             forName: .ghosttyDidSetTitle,
             object: nil,
@@ -1260,8 +1269,12 @@ class TabManager: ObservableObject {
         lastFocusedPanelByTab.removeValue(forKey: removed.id)
 
         if tabs.isEmpty {
-            // The UI assumes each window always has at least one workspace.
-            _ = addWorkspace()
+            selectedTabId = nil
+            if keepsBootstrapWorkspaceWhenEmpty {
+                // The shared cmux host keeps a bootstrap workspace around when a window
+                // becomes empty. Zenban uses the opt-out path for detached placeholders.
+                _ = addWorkspace()
+            }
             return removed
         }
 

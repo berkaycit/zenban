@@ -7,11 +7,12 @@ final class TerminalManager {
     struct WorkspaceRecord {
         let cardID: UUID
         let boardID: UUID
-        let tabManager: TabManager
+        var tabManager: TabManager
         let workspace: Workspace
         let primaryTerminalPanelID: UUID
         var cardTitle: String
         var workingDirectory: String?
+        var detachedWindowID: UUID?
     }
 
     enum TerminalManagerError: Error {
@@ -22,6 +23,10 @@ final class TerminalManager {
     private var agentLaunchedForCard: Set<UUID> = []
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
     private var pendingCardUnfocusTarget: (cardID: UUID, panelID: UUID)?
+    private let mainBoardTabManager = TabManager(
+        createsInitialWorkspace: false,
+        keepsBootstrapWorkspaceWhenEmpty: false
+    )
 
     weak var boardStore: BoardStore?
 
@@ -31,6 +36,7 @@ final class TerminalManager {
 
     init() {
         _ = GhosttyApp.shared
+        AppDelegate.shared?.registerMainBoardTabManager(mainBoardTabManager)
     }
 
     func workspaceRecord(for cardID: UUID, boardID: UUID, cardTitle: String) -> WorkspaceRecord {
@@ -39,6 +45,7 @@ final class TerminalManager {
                 record.cardTitle = cardTitle
                 record.workspace.setCustomTitle(cardTitle)
                 records[cardID] = record
+                AppDelegate.shared?.updateWorkspaceTitle(for: cardID, title: cardTitle)
             }
             return record
         }
@@ -47,15 +54,13 @@ final class TerminalManager {
         let card = board?.cards.first { $0.id == cardID }
         let agent = card?.agent ?? board?.agent
         let workingDirectory = card?.worktreePath ?? board?.repositoryPath
-        let tabManager = TabManager(
-            initialWorkingDirectory: workingDirectory,
-            initialWorkspaceID: cardID,
-            initialWorkspaceTitle: cardTitle
+        AppDelegate.shared?.registerMainBoardTabManager(mainBoardTabManager)
+        let workspace = mainBoardTabManager.addWorkspace(
+            workingDirectory: workingDirectory,
+            select: records.isEmpty,
+            workspaceID: cardID,
+            title: cardTitle
         )
-
-        guard let workspace = tabManager.tabs.first(where: { $0.id == cardID }) else {
-            fatalError("cmux parity workspace was not created for card \(cardID)")
-        }
 
         workspace.setCustomTitle(cardTitle)
 
@@ -68,14 +73,15 @@ final class TerminalManager {
         var record = WorkspaceRecord(
             cardID: cardID,
             boardID: boardID,
-            tabManager: tabManager,
+            tabManager: mainBoardTabManager,
             workspace: workspace,
             primaryTerminalPanelID: primaryTerminalPanelID,
             cardTitle: cardTitle,
-            workingDirectory: workingDirectory
+            workingDirectory: workingDirectory,
+            detachedWindowID: nil
         )
         records[cardID] = record
-        AppDelegate.shared?.register(tabManager: tabManager, for: cardID, boardID: boardID)
+        AppDelegate.shared?.register(tabManager: mainBoardTabManager, for: cardID, boardID: boardID)
 
         let isGitRepo = board?.repositoryPath.map { GitService.isGitRepository(path: $0) } ?? false
         if let agent, !isGitRepo {
@@ -95,7 +101,10 @@ final class TerminalManager {
     }
 
     func activateWorkspace(for cardID: UUID) {
-        guard records[cardID] != nil else { return }
+        guard let record = records[cardID] else { return }
+        if record.tabManager.selectedTabId != record.workspace.id {
+            record.tabManager.selectWorkspace(record.workspace)
+        }
         AppDelegate.shared?.activateCard(cardID)
     }
 
@@ -150,7 +159,60 @@ final class TerminalManager {
         }
         guard let record = records.removeValue(forKey: cardID) else { return }
         AppDelegate.shared?.unregister(cardID: cardID)
+        _ = record.tabManager.detachWorkspace(tabId: cardID)
         record.workspace.teardownAllPanels()
+    }
+
+    var boardWindowTabManager: TabManager {
+        mainBoardTabManager
+    }
+
+    func isDetached(cardID: UUID) -> Bool {
+        records[cardID]?.detachedWindowID != nil
+    }
+
+    func detachedWindowID(for cardID: UUID) -> UUID? {
+        records[cardID]?.detachedWindowID
+    }
+
+    func moveWorkspace(cardID: UUID, to destinationManager: TabManager, detachedWindowID: UUID?) -> Bool {
+        guard var record = records[cardID] else { return false }
+
+        if record.tabManager === destinationManager {
+            record.detachedWindowID = detachedWindowID
+            records[cardID] = record
+            AppDelegate.shared?.register(tabManager: destinationManager, for: cardID, boardID: record.boardID)
+            return true
+        }
+
+        guard let workspace = record.tabManager.detachWorkspace(tabId: cardID) else {
+            return false
+        }
+
+        destinationManager.attachWorkspace(workspace, select: true)
+        record.tabManager = destinationManager
+        record.detachedWindowID = detachedWindowID
+        records[cardID] = record
+        AppDelegate.shared?.register(tabManager: destinationManager, for: cardID, boardID: record.boardID)
+        return true
+    }
+
+    func attachWorkspaceToBoard(cardID: UUID, focus: Bool = true) -> Bool {
+        guard moveWorkspace(cardID: cardID, to: mainBoardTabManager, detachedWindowID: nil) else {
+            return false
+        }
+
+        if focus {
+            activateWorkspace(for: cardID)
+        }
+        return true
+    }
+
+    func selectCardInBoard(for cardID: UUID) {
+        guard let record = records[cardID] else { return }
+        boardStore?.selectedBoardID = record.boardID
+        boardStore?.selectedCardID = cardID
+        boardStore?.focusRegion = .cards
     }
 
     func switchAgent(for cardID: UUID, to agent: Agent) {

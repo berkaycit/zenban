@@ -126,6 +126,11 @@ struct zenbanApp: App {
                 .environment(store)
                 .environment(terminalManager)
                 .environment(devServerManager)
+                .background(
+                    WindowAccessor { window in
+                        appDelegate.registerMainAppWindow(window)
+                    }
+                )
                 .navigationTitle("")
                 .onAppear {
                     setupCardDeletionHandler()
@@ -152,6 +157,7 @@ struct zenbanApp: App {
         terminalManager.boardStore = store
         store.terminalManager = terminalManager
         appDelegate.terminalManager = terminalManager
+        appDelegate.registerMainBoardTabManager(terminalManager.boardWindowTabManager)
         store.onCardDeleted = { [terminalManager, devServerManager] cardID in
             terminalManager.killSessionForCard(cardID)
             devServerManager.stopServer(for: cardID)

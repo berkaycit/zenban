@@ -225,11 +225,35 @@ struct CardDetailView: View {
         VStack(spacing: 0) {
             terminalHeader
             if showTerminal {
-                CardWorkspaceDeckView(cardID: card.id, boardID: boardID, cardTitle: card.title)
-                    .frame(minHeight: 200)
-                    .frame(maxHeight: .infinity)
+                if terminalManager.isDetached(cardID: card.id) {
+                    detachedTerminalPlaceholder
+                        .frame(minHeight: 200)
+                        .frame(maxHeight: .infinity)
+                } else {
+                    CardWorkspaceDeckView(cardID: card.id, boardID: boardID, cardTitle: card.title)
+                        .frame(minHeight: 200)
+                        .frame(maxHeight: .infinity)
+                }
             }
         }
+    }
+
+    private var detachedTerminalPlaceholder: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "rectangle.on.rectangle")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+            Text("This card is open in a detached terminal window.")
+                .font(.headline)
+            Button("Focus Detached Window") {
+                if let windowId = terminalManager.detachedWindowID(for: card.id) {
+                    _ = AppDelegate.shared?.focusMainWindow(windowId: windowId)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.03))
     }
 
     private var terminalHeader: some View {
