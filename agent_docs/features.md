@@ -37,9 +37,12 @@
 - Per-board dev server config (setup/dev commands)
 - Auto-detects package manager from lock files
 - Board-area preview reuses cmux's browser stack (`BrowserPanelView`) once the server is ready
-- Startup/setup output stays visible until the URL is detected, then the cmux JavaScript console auto-opens for that preview session
+- Startup/setup output stays visible until the URL is detected
+- Optional board-level "Open console automatically" setting keeps the cmux JavaScript console off by default and opens it only after the preview finishes loading when enabled
+- Board list auto-collapses while the preview is active and restores its previous visibility when the preview closes
 - Port auto-detection from output
 - Toggle with Cmd+Shift+S
+- Reload the current preview with Cmd+Shift+R
 
 ## Git Changes View
 
@@ -57,6 +60,7 @@
 | Cmd+Shift+A | New Card |
 | Cmd+Shift+D | Delete selected card |
 | Cmd+Shift+S | Toggle Dev Server |
+| Cmd+Shift+R | Reload Dev Server |
 | Cmd+Shift+X | Toggle Git Changes |
 | Shift+Arrow Up/Down | Navigate cards/boards |
 | Shift+Arrow Left/Right | Navigate columns |

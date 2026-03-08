@@ -70,10 +70,10 @@ Cards still equal workspaces, but a workspace can move out of the board detail p
 
 ## Dev Server Preview
 
-Board stores DevServerConfig. First run prompts for commands (auto-detected from package.json). `DevServerView` keeps setup/start output visible during startup, then swaps the board-area surface to a cmux `BrowserPanelView` tied to the card ID once the server reaches `ready(url)`. The preview reuses that live browser panel for in-session reloads and auto-opens the cmux JavaScript console, while unexpected server exits return the board area to the error/log view. `ProcessEnvironment` sets `BROWSER=none` so the dev command never launches an external browser.
+Board stores `DevServerConfig`, including the optional `autoOpenConsole` flag that defaults to `false`. First run prompts for commands (auto-detected from package.json). `DevServerView` keeps setup/start output visible during startup, then swaps the board-area surface to a cmux `BrowserPanelView` tied to the card ID once the server reaches `ready(url)`. The preview reuses that live browser panel for in-session reloads, only auto-opens the cmux JavaScript console when the board config requests it, and returns the board area to the error/log view on unexpected server exits. `ContentView` temporarily collapses the sidebar while the dev server overlay is active and restores the prior split visibility when the session ends. `ProcessEnvironment` sets `BROWSER=none` so the dev command never launches an external browser.
 
 ## Keyboard Shortcuts
 
-Cmd+Shift: N (new board), A (new card), D (delete card), S (dev server), X (git changes), F (file browser). Cmd+W closes file tab. Cmd+/ opens shortcuts help.
+Cmd+Shift: N (new board), A (new card), D (delete card), S (dev server), R (reload dev server), X (git changes), F (file browser). Cmd+W closes file tab. Cmd+/ opens shortcuts help.
 Shift+Arrow: Up/Down navigates cards/boards, Left/Right moves columns. Enter focuses terminal.
 FocusRegion tracks keyboard focus. NSEvent monitor in zenbanApp for app-wide capture.

@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Refine dev server preview controls
+- **Description**: Added a board-level `autoOpenConsole` option so the cmux browser console stays off by default and only opens automatically when requested. The board-area dev server preview now also hides the sidebar for the active session, restores the previous split visibility on close, and supports `Cmd+Shift+R` reloads against the same live browser panel.
+
 - **Summary**: Switch dev server preview to the cmux browser stack
 - **Description**: Replaced the board-area dev server overlay's custom WebView and mirrored browser console with a cmux `BrowserPanelView` owned directly by `DevServerView`. Startup logs now stay visible until a ready URL is detected, the cmux JavaScript console auto-opens for the live preview session, `Cmd+Shift+R` reloads the same browser panel, and `DevServerManager` is back to server-process output only while unexpected exits surface the error/log view again.
 
