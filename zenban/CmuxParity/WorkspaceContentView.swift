@@ -17,7 +17,6 @@ struct WorkspaceContentView: View {
     ) -> Void)?
     @State private var config = WorkspaceContentView.resolveGhosttyAppearanceConfig(reason: "stateInit")
     @Environment(\.colorScheme) private var colorScheme
-    @EnvironmentObject var notificationStore: TerminalNotificationStore
 
     static func panelVisibleInUI(
         isWorkspaceVisible: Bool,
@@ -63,10 +62,6 @@ struct WorkspaceContentView: View {
                     isSelectedInPane: isSelectedInPane,
                     isFocused: isFocused
                 )
-                let hasUnreadNotification = Workspace.shouldShowUnreadIndicator(
-                    hasUnreadNotification: notificationStore.hasUnreadNotification(forTabId: workspace.id, surfaceId: panel.id),
-                    isManuallyUnread: workspace.manualUnreadPanelIds.contains(panel.id)
-                )
                 PanelContentView(
                     panel: panel,
                     isFocused: isFocused,
@@ -75,7 +70,6 @@ struct WorkspaceContentView: View {
                     portalPriority: workspacePortalPriority,
                     isSplit: isSplit,
                     appearance: appearance,
-                    hasUnreadNotification: hasUnreadNotification,
                     onFocus: {
                         // Keep bonsplit focus in sync with the AppKit first responder for the
                         // active workspace. This prevents divergence between the blue focused-tab
@@ -107,14 +101,7 @@ struct WorkspaceContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            syncBonsplitNotificationBadges()
             refreshGhosttyAppearanceConfig(reason: "onAppear")
-        }
-        .onChange(of: notificationStore.notifications) { _, _ in
-            syncBonsplitNotificationBadges()
-        }
-        .onChange(of: workspace.manualUnreadPanelIds) { _, _ in
-            syncBonsplitNotificationBadges()
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyConfigDidReload)) { _ in
             GhosttyConfig.invalidateLoadCache()
@@ -140,36 +127,6 @@ struct WorkspaceContentView: View {
                 backgroundSource: source,
                 notificationPayloadHex: payloadHex
             )
-        }
-    }
-
-    private func syncBonsplitNotificationBadges() {
-        let unreadFromNotifications: Set<UUID> = Set(
-            notificationStore.notifications
-                .filter { $0.tabId == workspace.id && !$0.isRead }
-                .compactMap { $0.surfaceId }
-        )
-        let manualUnread = workspace.manualUnreadPanelIds
-
-        for paneId in workspace.bonsplitController.allPaneIds {
-            for tab in workspace.bonsplitController.tabs(inPane: paneId) {
-                let panelId = workspace.panelIdFromSurfaceId(tab.id)
-                let expectedKind = panelId.flatMap { workspace.panelKind(panelId: $0) }
-                let expectedPinned = panelId.map { workspace.isPanelPinned($0) } ?? false
-                let shouldShow = panelId.map { unreadFromNotifications.contains($0) || manualUnread.contains($0) } ?? false
-                let kindUpdate: String?? = expectedKind.map { .some($0) }
-
-                if tab.showsNotificationBadge != shouldShow ||
-                    tab.isPinned != expectedPinned ||
-                    (expectedKind != nil && tab.kind != expectedKind) {
-                    workspace.bonsplitController.updateTab(
-                        tab.id,
-                        kind: kindUpdate,
-                        showsNotificationBadge: shouldShow,
-                        isPinned: expectedPinned
-                    )
-                }
-            }
         }
     }
 

@@ -27,6 +27,7 @@ struct zenbanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = BoardStore()
     @State private var terminalManager = TerminalManager()
+    @State private var agentSessionMonitor = AgentSessionMonitor()
     @State private var devServerManager = DevServerManager()
 
     init() {
@@ -34,8 +35,9 @@ struct zenbanApp: App {
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
-        ) { [terminalManager, devServerManager] _ in
+        ) { [agentSessionMonitor, terminalManager, devServerManager] _ in
             MainActor.assumeIsolated {
+                agentSessionMonitor.stop()
                 terminalManager.terminateAllSessions()
                 devServerManager.stopAllServers()
                 TmuxSessionManager.shared.killAllZenbanSessionsSync()
@@ -139,6 +141,7 @@ struct zenbanApp: App {
                 .navigationTitle("")
                 .onAppear {
                     setupCardDeletionHandler()
+                    setupAgentMonitoring()
                     setupNotifications()
                     Task {
                         await TmuxSessionManager.shared.updateConfig()
@@ -151,12 +154,7 @@ struct zenbanApp: App {
                         await TmuxSessionManager.shared.updateConfig()
                     }
                 }
-                .onOpenURL { url in
-                    handleZenbanURL(url)
-                }
-                .handlesExternalEvents(preferring: Set(arrayLiteral: "main"), allowing: Set(arrayLiteral: "*"))
         }
-        .handlesExternalEvents(matching: Set(arrayLiteral: "*"))
         .commands {
             BoardCommands(store: store)
         }
@@ -172,10 +170,17 @@ struct zenbanApp: App {
         store.terminalManager = terminalManager
         appDelegate.terminalManager = terminalManager
         appDelegate.registerMainBoardTabManager(terminalManager.boardWindowTabManager)
-        store.onCardDeleted = { [terminalManager, devServerManager] cardID in
+        store.onCardDeleted = { [agentSessionMonitor, terminalManager, devServerManager] cardID in
+            agentSessionMonitor.removeCard(cardID)
             terminalManager.killSessionForCard(cardID)
             devServerManager.stopServer(for: cardID)
         }
+    }
+
+    private func setupAgentMonitoring() {
+        terminalManager.agentSessionMonitor = agentSessionMonitor
+        agentSessionMonitor.connect(boardStore: store, terminalManager: terminalManager)
+        agentSessionMonitor.start()
     }
 
     private func setupNotifications() {
@@ -183,48 +188,6 @@ struct zenbanApp: App {
         NotificationService.shared.onNotificationClicked = { [store] boardID, cardID in
             store.selectedBoardID = boardID
             store.selectedCardID = cardID
-        }
-    }
-
-    /// Handles zenban:// URL scheme for Claude Code hooks
-    private func handleZenbanURL(_ url: URL) {
-        switch url.host {
-        case "prompt-submitted":
-            guard let cardID = store.selectedCardID,
-                  let boardID = store.selectedBoardID,
-                  let card = store.card(id: cardID) else { return }
-
-            store.activeAgentCardID = cardID
-            store.activeAgentBoardID = boardID
-
-            if card.column != .todo {
-                store.moveCard(cardID, to: .todo, in: boardID)
-            }
-
-        case "notify":
-            guard let cardID = store.activeAgentCardID,
-                  let boardID = store.activeAgentBoardID,
-                  let card = store.card(id: cardID) else { return }
-
-            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-            let body = components?.queryItems?.first { $0.name == "body" }?.value ?? "Task completed"
-
-            NotificationService.shared.showNotification(
-                title: card.title,
-                body: body,
-                cardID: cardID,
-                boardID: boardID
-            )
-
-            if card.column == .todo {
-                store.moveCard(cardID, to: .inProgress, in: boardID)
-            }
-
-            store.activeAgentCardID = nil
-            store.activeAgentBoardID = nil
-
-        default:
-            break
         }
     }
 }

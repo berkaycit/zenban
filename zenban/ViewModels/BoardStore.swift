@@ -69,10 +69,6 @@ final class BoardStore {
     // Unified overlay state (FSM)
     var overlayState: OverlayState = .none
 
-    // Tracks which card has an active Claude Code session
-    var activeAgentCardID: UUID?
-    var activeAgentBoardID: UUID?
-
     var onCardDeleted: ((UUID) -> Void)?
     weak var terminalManager: TerminalManager?
 

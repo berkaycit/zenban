@@ -28,11 +28,11 @@ enum Agent: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var launchCommand: String {
+    var runtimeID: String {
         switch self {
-        case .claude: "claude --dangerously-skip-permissions"
-        case .codex: "codex --yolo"
-        case .gemini: "gemini --yolo"
+        case .claude: "claude"
+        case .codex: "codex"
+        case .gemini: "gemini"
         }
     }
 

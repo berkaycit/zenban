@@ -1456,28 +1456,7 @@ class GhosttyApp {
             }
 
             if action.tag == GHOSTTY_ACTION_DESKTOP_NOTIFICATION {
-                let actionTitle = action.action.desktop_notification.title
-                    .flatMap { String(cString: $0) } ?? ""
-                let actionBody = action.action.desktop_notification.body
-                    .flatMap { String(cString: $0) } ?? ""
-                return performOnMain {
-                    guard let tabManager = AppDelegate.shared?.tabManager,
-                          let tabId = tabManager.selectedTabId else {
-                        return false
-                    }
-                    let tabTitle = tabManager.titleForTab(tabId) ?? "Terminal"
-                    let command = actionTitle.isEmpty ? tabTitle : actionTitle
-                    let body = actionBody
-                    let surfaceId = tabManager.focusedSurfaceId(for: tabId)
-                    TerminalNotificationStore.shared.addNotification(
-                        tabId: tabId,
-                        surfaceId: surfaceId,
-                        title: command,
-                        subtitle: "",
-                        body: body
-                    )
-                    return true
-                }
+                return true
             }
 
             if action.tag == GHOSTTY_ACTION_RELOAD_CONFIG {
@@ -1722,24 +1701,6 @@ class GhosttyApp {
             }
             return true
         case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
-            guard let tabId = surfaceView.tabId else { return true }
-            let surfaceId = surfaceView.terminalSurface?.id
-            let actionTitle = action.action.desktop_notification.title
-                .flatMap { String(cString: $0) } ?? ""
-            let actionBody = action.action.desktop_notification.body
-                .flatMap { String(cString: $0) } ?? ""
-            performOnMain {
-                let tabTitle = AppDelegate.shared?.tabManager?.titleForTab(tabId) ?? "Terminal"
-                let command = actionTitle.isEmpty ? tabTitle : actionTitle
-                let body = actionBody
-                TerminalNotificationStore.shared.addNotification(
-                    tabId: tabId,
-                    surfaceId: surfaceId,
-                    title: command,
-                    subtitle: "",
-                    body: body
-                )
-            }
             return true
         case GHOSTTY_ACTION_COLOR_CHANGE:
             if action.action.color_change.kind == GHOSTTY_ACTION_COLOR_KIND_BACKGROUND {
@@ -6966,7 +6927,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
     var mountState: TerminalPanel.MountState = .waitingForWindow
     var portalZPriority: Int = 0
     var showsInactiveOverlay: Bool = false
-    var showsUnreadNotificationRing: Bool = false
     var inactiveOverlayColor: NSColor = .clear
     var inactiveOverlayOpacity: Double = 0
     var searchState: TerminalSurface.SearchState? = nil
@@ -7077,7 +7037,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
         // Track the latest desired state so attach retries can re-apply focus after re-parenting.
         var desiredIsActive: Bool = true
         var desiredIsVisibleInUI: Bool = true
-        var desiredShowsUnreadNotificationRing: Bool = false
         var desiredPortalZPriority: Int = 0
         var desiredMountState: TerminalPanel.MountState = .waitingForWindow
         var lastBoundHostId: ObjectIdentifier?
@@ -7458,7 +7417,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
 
             hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
             hostedView.setActive(coordinator.desiredIsActive)
-            hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
             return true
         }
     }
@@ -7478,7 +7436,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
         let coordinator = context.coordinator
         let previousDesiredIsActive = coordinator.desiredIsActive
         let previousDesiredIsVisibleInUI = coordinator.desiredIsVisibleInUI
-        let previousDesiredShowsUnreadNotificationRing = coordinator.desiredShowsUnreadNotificationRing
         let previousDesiredPortalZPriority = coordinator.desiredPortalZPriority
         let previousDesiredMountState = coordinator.desiredMountState
         let desiredStateChanged =
@@ -7488,7 +7445,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
             previousDesiredMountState != mountState
         coordinator.desiredIsActive = isActive
         coordinator.desiredIsVisibleInUI = isVisibleInUI
-        coordinator.desiredShowsUnreadNotificationRing = showsUnreadNotificationRing
         coordinator.desiredPortalZPriority = portalZPriority
         coordinator.desiredMountState = mountState
         coordinator.hostedView = hostedView
@@ -7521,7 +7477,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
             opacity: CGFloat(inactiveOverlayOpacity),
             visible: showsInactiveOverlay
         )
-        hostedView.setNotificationRing(visible: showsUnreadNotificationRing)
         hostedView.setSearchOverlay(searchState: searchState)
         hostedView.setKeyboardCopyModeIndicator(visible: terminalSurface.keyboardCopyModeActive)
         hostedView.setFocusHandler { onFocus?(terminalSurface.id) }
@@ -7637,7 +7592,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
                         coordinator.lastBoundHostId != hostId ||
                             hostedView.superview == nil ||
                             previousDesiredIsVisibleInUI != isVisibleInUI ||
-                            previousDesiredShowsUnreadNotificationRing != showsUnreadNotificationRing ||
                             previousDesiredPortalZPriority != portalZPriority ||
                             previousDesiredMountState != mountState
                     )
@@ -7723,7 +7677,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
         coordinator.attachGeneration += 1
         coordinator.desiredIsActive = false
         coordinator.desiredIsVisibleInUI = false
-        coordinator.desiredShowsUnreadNotificationRing = false
         coordinator.desiredPortalZPriority = 0
         coordinator.desiredMountState = .detaching
         coordinator.lastBoundHostId = nil

@@ -22,7 +22,6 @@ struct TerminalContainerView: View {
                 workspacePortalPriority: workspacePortalPriority,
                 onThemeRefreshRequest: nil
             )
-            .environmentObject(TerminalNotificationStore.shared)
         }
     }
 }

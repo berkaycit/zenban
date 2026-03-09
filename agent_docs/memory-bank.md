@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add tmux-driven agent runtime workflow
+- **Description**: Replaced the old direct agent launch and Claude URL-hook path with a shared `AgentLauncher` plus `AgentSessionMonitor` that classifies tmux session output and activity. Cards now stay in `To Do` while work is running or waiting, automatically move to `In Review` on completion, and jump back to `To Do` when the same terminal gets new work. The inherited cmux notification store, unread tab badges, Ghostty notification ring, and related socket commands were removed so Zenban now relies only on its own `NotificationService`.
+
 - **Summary**: Simplify Zenban quick-win cleanup paths
 - **Description**: Removed unused helper APIs and stale prompt/notification/cmux compatibility shims that no longer had call sites. Simplified `BoardStore`, `GitChangesView`, `GitDiffViewModel`, and `FileBrowserStore` so overlay handling, diff resets, placeholder UI, and file-browser error/session flows are more centralized. `DevServerManager` now avoids rebuilding the full output string on every log chunk, and `ProcessEnvironment` plus board/file-browser lookups now do less repeated work.
 

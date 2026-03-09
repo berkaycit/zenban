@@ -12,11 +12,13 @@ actor TmuxSessionManager {
         "/usr/bin/tmux",
     ]
     private static let sessionPrefix = "zenban-panel-"
+    private static let socketName = "zenban"
     private static let configPath: String = {
         let zenbanDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".zenban", isDirectory: true)
         return zenbanDir.appendingPathComponent("tmux.conf", isDirectory: false).path
     }()
+    private var sessionActivityCache: [String: Int] = [:]
 
     private init() {
         Task {
@@ -78,48 +80,38 @@ actor TmuxSessionManager {
                 : FileManager.default.homeDirectoryForCurrentUser.path) ?? FileManager.default.homeDirectoryForCurrentUser.path
         )
 
-        return "\(tmux) -f '\(escapedConfig)' new-session -A -s \(sessionName) -c '\(escapedDirectory)' -e ZENBAN_TERMINAL=1"
+        return "\(tmux) -L \(Self.socketName) -f '\(escapedConfig)' new-session -A -s \(sessionName) -c '\(escapedDirectory)' -e ZENBAN_TERMINAL=1"
     }
 
     nonisolated func sessionExistsSync(sessionID: String) -> Bool {
-        guard let tmux = tmuxPath() else { return false }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tmux)
-        process.arguments = ["has-session", "-t", sessionName(for: sessionID)]
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
+        guard let status = runSync(arguments: tmuxArguments("has-session", "-t", sessionName(for: sessionID))) else {
             return false
         }
+        return status.terminationStatus == 0
+    }
+
+    nonisolated func isRecentActivity(_ activityTimestamp: Int, thresholdSeconds: Int = 2) -> Bool {
+        let now = Int(Date().timeIntervalSince1970)
+        return now - activityTimestamp < thresholdSeconds
     }
 
     nonisolated func sendKeys(sessionID: String, keys: String, execute: Bool = false) {
-        guard !keys.isEmpty, let tmux = tmuxPath() else { return }
+        guard !keys.isEmpty else { return }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tmux)
-        var arguments = ["send-keys", "-t", sessionName(for: sessionID), keys]
+        _ = runSync(
+            arguments: tmuxArguments("send-keys", "-t", sessionName(for: sessionID), keys),
+            failureMessage: "Failed to send keys to tmux session \(sessionName(for: sessionID))"
+        )
         if execute {
-            arguments.append("Enter")
-        }
-        process.arguments = arguments
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            Self.logger.error("Failed to send keys to tmux session \(self.sessionName(for: sessionID), privacy: .public)")
+            _ = runSync(
+                arguments: tmuxArguments("send-keys", "-t", sessionName(for: sessionID), "Enter"),
+                failureMessage: "Failed to send Enter to tmux session \(sessionName(for: sessionID))"
+            )
         }
     }
 
     nonisolated func sendText(sessionID: String, text: String) {
-        guard !text.isEmpty, let tmux = tmuxPath() else { return }
+        guard !text.isEmpty else { return }
 
         if text == "\u{03}" {
             sendKeys(sessionID: sessionID, keys: "C-c", execute: false)
@@ -128,114 +120,142 @@ actor TmuxSessionManager {
 
         let segments = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let shouldAppendTrailingEnter = text.hasSuffix("\n")
+        let sessionName = sessionName(for: sessionID)
 
         for (index, segment) in segments.enumerated() {
             if !segment.isEmpty {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: tmux)
-                process.arguments = ["send-keys", "-t", sessionName(for: sessionID), "-l", segment]
-                process.standardError = FileHandle.nullDevice
-
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-                } catch {
-                    Self.logger.error("Failed to send literal text to tmux session \(self.sessionName(for: sessionID), privacy: .public)")
-                    return
-                }
+                _ = runSync(
+                    arguments: tmuxArguments("send-keys", "-t", sessionName, "-l", segment),
+                    failureMessage: "Failed to send literal text to tmux session \(sessionName)"
+                )
             }
 
             let isLastSegment = index == segments.count - 1
             if !isLastSegment || shouldAppendTrailingEnter {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: tmux)
-                process.arguments = ["send-keys", "-t", sessionName(for: sessionID), "Enter"]
-                process.standardError = FileHandle.nullDevice
-
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-                } catch {
-                    Self.logger.error("Failed to send Enter to tmux session \(self.sessionName(for: sessionID), privacy: .public)")
-                    return
-                }
+                _ = runSync(
+                    arguments: tmuxArguments("send-keys", "-t", sessionName, "Enter"),
+                    failureMessage: "Failed to send Enter to tmux session \(sessionName)"
+                )
             }
         }
     }
 
-    func killSession(sessionID: String) {
-        guard let tmux = tmuxPath() else { return }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tmux)
-        process.arguments = ["kill-session", "-t", sessionName(for: sessionID)]
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            Self.logger.error("Failed to kill tmux session \(self.sessionName(for: sessionID), privacy: .public)")
+    func unsetEnvironment(sessionID: String, names: [String]) {
+        let sessionName = sessionName(for: sessionID)
+        for key in names where !key.isEmpty {
+            _ = runSync(arguments: tmuxArguments("set-environment", "-t", sessionName, "-r", key))
         }
+    }
+
+    func setEnvironment(sessionID: String, variables: [String: String]) {
+        let sessionName = sessionName(for: sessionID)
+        for (key, value) in variables where !key.isEmpty {
+            _ = runSync(
+                arguments: tmuxArguments("set-environment", "-t", sessionName, key, value),
+                failureMessage: "Failed to set tmux environment on session \(sessionName)"
+            )
+        }
+    }
+
+    func capturePane(
+        sessionID: String,
+        startLine: Int = -100,
+        endLine: Int? = nil,
+        escape: Bool = true,
+        joinLines: Bool = true
+    ) throws -> String {
+        var arguments = [
+            "capture-pane",
+            "-t",
+            sessionName(for: sessionID),
+            "-p",
+            "-S",
+            String(startLine),
+        ]
+        if let endLine {
+            arguments += ["-E", String(endLine)]
+        }
+        if escape {
+            arguments.append("-e")
+        }
+        if joinLines {
+            arguments.append("-J")
+        }
+
+        guard let result = runSync(
+            arguments: tmuxArguments(arguments),
+            failureMessage: "Failed to capture tmux pane \(sessionName(for: sessionID))"
+        ) else {
+            throw TmuxError.captureFailed
+        }
+        guard result.terminationStatus == 0 else {
+            throw TmuxError.captureFailed
+        }
+        return result.output
+    }
+
+    func refreshSessionActivityCache() -> [String: Int] {
+        let snapshot = refreshSessionActivity()
+        sessionActivityCache = snapshot
+        return snapshot
+    }
+
+    func refreshSessionActivity() -> [String: Int] {
+        guard let result = runSync(
+            arguments: tmuxArguments("list-windows", "-a", "-F", "#{session_name}\t#{window_activity}")
+        ),
+        result.terminationStatus == 0 else {
+            return [:]
+        }
+
+        var sessions: [String: Int] = [:]
+        for line in result.output.components(separatedBy: .newlines) where !line.isEmpty {
+            let parts = line.split(separator: "\t", maxSplits: 1).map(String.init)
+            guard let name = parts.first, !name.isEmpty else { continue }
+            let activity = parts.count > 1 ? Int(parts[1]) ?? 0 : 0
+            let existing = sessions[name] ?? 0
+            if activity > existing {
+                sessions[name] = activity
+            }
+        }
+        return sessions
+    }
+
+    func cachedSessionActivity() -> [String: Int] {
+        sessionActivityCache
+    }
+
+    func killSession(sessionID: String) {
+        _ = runSync(
+            arguments: tmuxArguments("kill-session", "-t", sessionName(for: sessionID)),
+            failureMessage: "Failed to kill tmux session \(sessionName(for: sessionID))"
+        )
     }
 
     func killAllZenbanSessions() {
         for session in listZenbanSessionsSync() {
-            let process = Process()
-            guard let tmux = tmuxPath() else { return }
-            process.executableURL = URL(fileURLWithPath: tmux)
-            process.arguments = ["kill-session", "-t", session]
-            process.standardError = FileHandle.nullDevice
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-            } catch {
-                Self.logger.error("Failed to kill tmux session \(session, privacy: .public)")
-            }
+            _ = runSync(
+                arguments: tmuxArguments("kill-session", "-t", session),
+                failureMessage: "Failed to kill tmux session \(session)"
+            )
         }
     }
 
     nonisolated func killAllZenbanSessionsSync() {
-        guard let tmux = tmuxPath() else { return }
-
         for session in listZenbanSessionsSync() {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: tmux)
-            process.arguments = ["kill-session", "-t", session]
-            process.standardError = FileHandle.nullDevice
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-            } catch {
-                continue
-            }
+            _ = runSync(arguments: tmuxArguments("kill-session", "-t", session))
         }
     }
 
     nonisolated private func listZenbanSessionsSync() -> [String] {
-        guard let tmux = tmuxPath() else { return [] }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tmux)
-        process.arguments = ["list-sessions", "-F", "#{session_name}"]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8) else { return [] }
-            return output
-                .components(separatedBy: .newlines)
-                .filter { $0.hasPrefix(Self.sessionPrefix) }
-        } catch {
+        guard let result = runSync(arguments: tmuxArguments("list-sessions", "-F", "#{session_name}")),
+              result.terminationStatus == 0 else {
             return []
         }
+
+        return result.output
+            .components(separatedBy: .newlines)
+            .filter { $0.hasPrefix(Self.sessionPrefix) }
     }
 
     private func writeConfigSync(contents: String) {
@@ -250,18 +270,42 @@ actor TmuxSessionManager {
     }
 
     private func sourceConfigIfPossible() {
-        guard let tmux = tmuxPath() else { return }
+        _ = runSync(arguments: tmuxArguments("source-file", Self.configPath))
+    }
+
+    nonisolated private func tmuxArguments(_ arguments: String...) -> [String] {
+        tmuxArguments(arguments)
+    }
+
+    nonisolated private func tmuxArguments(_ arguments: [String]) -> [String] {
+        ["-L", Self.socketName, "-f", Self.configPath] + arguments
+    }
+
+    nonisolated private func runSync(
+        arguments: [String],
+        failureMessage: String? = nil
+    ) -> (terminationStatus: Int32, output: String)? {
+        guard let tmux = tmuxPath() else { return nil }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tmux)
-        process.arguments = ["source-file", Self.configPath]
+        process.arguments = arguments
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
             process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return (process.terminationStatus, output)
         } catch {
-            Self.logger.error("Failed to source tmux config: \(error.localizedDescription, privacy: .public)")
+            if let failureMessage {
+                Self.logger.error("\(failureMessage, privacy: .public)")
+            }
+            return nil
         }
     }
 
@@ -288,5 +332,9 @@ actor TmuxSessionManager {
 
     private static func escapeForShell(_ value: String) -> String {
         value.replacingOccurrences(of: "'", with: "'\\''")
+    }
+
+    enum TmuxError: Error {
+        case captureFailed
     }
 }

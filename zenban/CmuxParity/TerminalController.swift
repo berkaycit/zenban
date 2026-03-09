@@ -82,7 +82,6 @@ class TerminalController {
         "focus_pane",
         "focus_surface_by_panel",
         "focus_webview",
-        "focus_notification",
         "activate_app"
     ]
 
@@ -99,7 +98,6 @@ class TerminalController {
         "browser.focus",
         "browser.tab.switch",
         "debug.command_palette.toggle",
-        "debug.notification.focus",
         "debug.app.activate"
     ]
 
@@ -1366,21 +1364,6 @@ class TerminalController {
         case "send_key_surface":
             return sendKeyToSurface(args)
 
-        case "notify":
-            return notifyCurrent(args)
-
-        case "notify_surface":
-            return notifySurface(args)
-
-        case "notify_target":
-            return notifyTarget(args)
-
-        case "list_notifications":
-            return listNotifications()
-
-        case "clear_notifications":
-            return clearNotifications(args)
-
         case "set_app_focus":
             return setAppFocusOverride(args)
 
@@ -1547,9 +1530,6 @@ class TerminalController {
 
         case "reset_empty_panel_count":
             return resetEmptyPanelCount()
-
-        case "focus_notification":
-            return focusFromNotification(args)
 
         case "flash_count":
             return flashCount(args)
@@ -1795,17 +1775,6 @@ class TerminalController {
             return v2Result(id: id, self.v2PaneLast(params: params))
 
         // Notifications
-        case "notification.create":
-            return v2Result(id: id, self.v2NotificationCreate(params: params))
-        case "notification.create_for_surface":
-            return v2Result(id: id, self.v2NotificationCreateForSurface(params: params))
-        case "notification.create_for_target":
-            return v2Result(id: id, self.v2NotificationCreateForTarget(params: params))
-        case "notification.list":
-            return v2Ok(id: id, result: self.v2NotificationList())
-        case "notification.clear":
-            return v2Result(id: id, self.v2NotificationClear())
-
         // App focus
         case "app.focus_override.set":
             return v2Result(id: id, self.v2AppFocusOverride(params: params))
@@ -2040,8 +2009,6 @@ class TerminalController {
             return v2Result(id: id, self.v2DebugEmptyPanelCount())
         case "debug.empty_panel.reset":
             return v2Result(id: id, self.v2DebugResetEmptyPanelCount())
-        case "debug.notification.focus":
-            return v2Result(id: id, self.v2DebugFocusNotification(params: params))
         case "debug.flash.count":
             return v2Result(id: id, self.v2DebugFlashCount(params: params))
         case "debug.flash.reset":
@@ -2123,11 +2090,6 @@ class TerminalController {
             "pane.break",
             "pane.join",
             "pane.last",
-            "notification.create",
-            "notification.create_for_surface",
-            "notification.create_for_target",
-            "notification.list",
-            "notification.clear",
             "app.focus_override.set",
             "app.simulate_active",
             "markdown.open",
@@ -2242,7 +2204,6 @@ class TerminalController {
             "debug.bonsplit_underflow.reset",
             "debug.empty_panel.count",
             "debug.empty_panel.reset",
-            "debug.notification.focus",
             "debug.flash.count",
             "debug.flash.reset",
             "debug.panel_snapshot",
@@ -3202,8 +3163,7 @@ class TerminalController {
         let supportedActions = [
             "pin", "unpin", "rename", "clear_name",
             "move_up", "move_down", "move_top",
-            "close_others", "close_above", "close_below",
-            "mark_read", "mark_unread"
+            "close_others", "close_above", "close_below"
         ]
 
         var result: V2CallResult = .err(code: "invalid_params", message: "Unknown workspace action", data: [
@@ -3321,14 +3281,6 @@ class TerminalController {
                 let closed = closeWorkspaces(candidates)
                 finish(["closed": closed])
 
-            case "mark_read":
-                AppDelegate.shared?.notificationStore?.markRead(forTabId: workspace.id)
-                finish()
-
-            case "mark_unread":
-                AppDelegate.shared?.notificationStore?.markUnread(forTabId: workspace.id)
-                finish()
-
             default:
                 result = .err(code: "invalid_params", message: "Unknown workspace action", data: [
                     "action": action,
@@ -3353,7 +3305,7 @@ class TerminalController {
             "close_left", "close_right", "close_others",
             "new_terminal_right", "new_browser_right",
             "reload", "duplicate",
-            "pin", "unpin", "mark_read", "mark_unread"
+            "pin", "unpin"
         ]
 
         var result: V2CallResult = .err(code: "invalid_params", message: "Unknown tab action", data: [
@@ -3467,14 +3419,6 @@ class TerminalController {
             case "unpin":
                 workspace.setPanelPinned(panelId: surfaceId, pinned: false)
                 finish(["pinned": false])
-
-            case "mark_read", "mark_as_read":
-                workspace.markPanelRead(surfaceId)
-                finish()
-
-            case "mark_unread", "mark_as_unread":
-                workspace.markPanelUnread(surfaceId)
-                finish()
 
             case "reload", "reload_tab":
                 guard let browserPanel = workspace.browserPanel(for: surfaceId) else {
@@ -5259,130 +5203,27 @@ class TerminalController {
         return result
     }
 
-    // MARK: - V2 Notification Methods
-
     private func v2NotificationCreate(params: [String: Any]) -> V2CallResult {
-        guard let tabManager = v2ResolveTabManager(params: params) else {
-            return .err(code: "unavailable", message: "TabManager not available", data: nil)
-        }
-
-        let title = (params["title"] as? String) ?? "Notification"
-        let subtitle = (params["subtitle"] as? String) ?? ""
-        let body = (params["body"] as? String) ?? ""
-
-        var result: V2CallResult = .err(code: "internal_error", message: "Failed to notify", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
-                result = .err(code: "not_found", message: "Workspace not found", data: nil)
-                return
-            }
-            let surfaceId = ws.focusedPanelId
-            TerminalNotificationStore.shared.addNotification(
-                tabId: ws.id,
-                surfaceId: surfaceId,
-                title: title,
-                subtitle: subtitle,
-                body: body
-            )
-            result = .ok(["workspace_id": ws.id.uuidString, "surface_id": v2OrNull(surfaceId?.uuidString)])
-        }
-        return result
+        _ = params
+        return .err(code: "unsupported", message: "Notifications are not supported", data: nil)
     }
 
     private func v2NotificationCreateForSurface(params: [String: Any]) -> V2CallResult {
-        guard let tabManager = v2ResolveTabManager(params: params) else {
-            return .err(code: "unavailable", message: "TabManager not available", data: nil)
-        }
-        guard let surfaceId = v2UUID(params, "surface_id") else {
-            return .err(code: "invalid_params", message: "Missing or invalid surface_id", data: nil)
-        }
-
-        let title = (params["title"] as? String) ?? "Notification"
-        let subtitle = (params["subtitle"] as? String) ?? ""
-        let body = (params["body"] as? String) ?? ""
-
-        var result: V2CallResult = .err(code: "internal_error", message: "Failed to notify", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
-                result = .err(code: "not_found", message: "Workspace not found", data: nil)
-                return
-            }
-            guard ws.panels[surfaceId] != nil else {
-                result = .err(code: "not_found", message: "Surface not found", data: ["surface_id": surfaceId.uuidString])
-                return
-            }
-            TerminalNotificationStore.shared.addNotification(
-                tabId: ws.id,
-                surfaceId: surfaceId,
-                title: title,
-                subtitle: subtitle,
-                body: body
-            )
-            result = .ok(["workspace_id": ws.id.uuidString, "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id), "surface_id": surfaceId.uuidString, "surface_ref": v2Ref(kind: .surface, uuid: surfaceId), "window_id": v2OrNull(v2ResolveWindowId(tabManager: tabManager)?.uuidString), "window_ref": v2Ref(kind: .window, uuid: v2ResolveWindowId(tabManager: tabManager))])
-        }
-        return result
+        _ = params
+        return .err(code: "unsupported", message: "Notifications are not supported", data: nil)
     }
 
     private func v2NotificationCreateForTarget(params: [String: Any]) -> V2CallResult {
-        guard let tabManager = v2ResolveTabManager(params: params) else {
-            return .err(code: "unavailable", message: "TabManager not available", data: nil)
-        }
-        guard let wsId = v2UUID(params, "workspace_id") else {
-            return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
-        }
-        guard let surfaceId = v2UUID(params, "surface_id") else {
-            return .err(code: "invalid_params", message: "Missing or invalid surface_id", data: nil)
-        }
-
-        let title = (params["title"] as? String) ?? "Notification"
-        let subtitle = (params["subtitle"] as? String) ?? ""
-        let body = (params["body"] as? String) ?? ""
-
-        var result: V2CallResult = .err(code: "internal_error", message: "Failed to notify", data: nil)
-        v2MainSync {
-            guard let ws = tabManager.tabs.first(where: { $0.id == wsId }) else {
-                result = .err(code: "not_found", message: "Workspace not found", data: ["workspace_id": wsId.uuidString])
-                return
-            }
-            guard ws.panels[surfaceId] != nil else {
-                result = .err(code: "not_found", message: "Surface not found", data: ["surface_id": surfaceId.uuidString])
-                return
-            }
-            TerminalNotificationStore.shared.addNotification(
-                tabId: ws.id,
-                surfaceId: surfaceId,
-                title: title,
-                subtitle: subtitle,
-                body: body
-            )
-            result = .ok(["workspace_id": ws.id.uuidString, "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id), "surface_id": surfaceId.uuidString, "surface_ref": v2Ref(kind: .surface, uuid: surfaceId), "window_id": v2OrNull(v2ResolveWindowId(tabManager: tabManager)?.uuidString), "window_ref": v2Ref(kind: .window, uuid: v2ResolveWindowId(tabManager: tabManager))])
-        }
-        return result
+        _ = params
+        return .err(code: "unsupported", message: "Notifications are not supported", data: nil)
     }
 
     private func v2NotificationList() -> [String: Any] {
-        var items: [[String: Any]] = []
-        DispatchQueue.main.sync {
-            items = TerminalNotificationStore.shared.notifications.map { n in
-                return [
-                    "id": n.id.uuidString,
-                    "workspace_id": n.tabId.uuidString,
-                    "surface_id": v2OrNull(n.surfaceId?.uuidString),
-                    "is_read": n.isRead,
-                    "title": n.title,
-                    "subtitle": n.subtitle,
-                    "body": n.body
-                ]
-            }
-        }
-        return ["notifications": items]
+        ["notifications": []]
     }
 
     private func v2NotificationClear() -> V2CallResult {
-        DispatchQueue.main.sync {
-            TerminalNotificationStore.shared.clearAll()
-        }
-        return .ok([:])
+        .err(code: "unsupported", message: "Notifications are not supported", data: nil)
     }
 
     // MARK: - V2 App Focus Methods
@@ -9556,12 +9397,7 @@ class TerminalController {
           send_key_surface <id|idx> <key> - Send special key to a specific terminal
           read_screen [id|idx] [--scrollback] [--lines N] - Read terminal text (plain text)
 
-        Notification commands:
-          notify <title>|<subtitle>|<body>   - Notify focused panel
-          notify_surface <id|idx> <payload>  - Notify a specific surface
-          notify_target <workspace_id> <surface_id> <payload> - Notify by workspace+surface
-          list_notifications              - List all notifications
-          clear_notifications [--tab=X]    - Clear notifications (all or per-tab)
+        Runtime commands:
           set_app_focus <active|inactive|clear> - Override app focus state
           simulate_app_active             - Trigger app active handler
           set_status <key> <value> [--icon=X] [--color=#hex] [--url=X] [--priority=N] [--format=plain|markdown] [--tab=X] - Set a status entry
@@ -9606,7 +9442,6 @@ class TerminalController {
 #if DEBUG
         text += """
 
-          focus_notification <workspace|idx> [surface|idx] - Focus via notification flow
           flash_count <id|idx>            - Read flash count for a panel
           reset_flash_counts              - Reset flash counters
           screenshot [label]              - Capture window screenshot
@@ -10791,139 +10626,27 @@ class TerminalController {
     }
 
     private func notifyCurrent(_ args: String) -> String {
-        guard let tabManager = tabManager else { return "ERROR: TabManager not available" }
-
-        var result = "OK"
-        DispatchQueue.main.sync {
-            guard let tabId = tabManager.selectedTabId else {
-                result = "ERROR: No tab selected"
-                return
-            }
-            let surfaceId = tabManager.focusedSurfaceId(for: tabId)
-            let (title, subtitle, body) = parseNotificationPayload(args)
-            TerminalNotificationStore.shared.addNotification(
-                tabId: tabId,
-                surfaceId: surfaceId,
-                title: title,
-                subtitle: subtitle,
-                body: body
-            )
-        }
-        return result
+        _ = args
+        return "ERROR: Notifications are not supported"
     }
 
     private func notifySurface(_ args: String) -> String {
-        guard let tabManager = tabManager else { return "ERROR: TabManager not available" }
-        let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "ERROR: Missing surface id or index" }
-
-        let parts = trimmed.split(separator: " ", maxSplits: 1).map(String.init)
-        let surfaceArg = parts[0]
-        let payload = parts.count > 1 ? parts[1] : ""
-
-        var result = "OK"
-        DispatchQueue.main.sync {
-            guard let tabId = tabManager.selectedTabId,
-                  let tab = tabManager.tabs.first(where: { $0.id == tabId }) else {
-                result = "ERROR: No tab selected"
-                return
-            }
-            guard let surfaceId = resolveSurfaceId(from: surfaceArg, tab: tab) else {
-                result = "ERROR: Surface not found"
-                return
-            }
-            let (title, subtitle, body) = parseNotificationPayload(payload)
-            TerminalNotificationStore.shared.addNotification(
-                tabId: tabId,
-                surfaceId: surfaceId,
-                title: title,
-                subtitle: subtitle,
-                body: body
-            )
-        }
-        return result
+        _ = args
+        return "ERROR: Notifications are not supported"
     }
 
     private func notifyTarget(_ args: String) -> String {
-        guard let tabManager = tabManager else { return "ERROR: TabManager not available" }
-        let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "ERROR: Usage: notify_target <workspace_id> <surface_id> <title>|<subtitle>|<body>" }
-
-        let parts = trimmed.split(separator: " ", maxSplits: 2).map(String.init)
-        guard parts.count >= 2 else { return "ERROR: Usage: notify_target <workspace_id> <surface_id> <title>|<subtitle>|<body>" }
-
-        let tabArg = parts[0]
-        let panelArg = parts[1]
-        let payload = parts.count > 2 ? parts[2] : ""
-
-        var result = "OK"
-        DispatchQueue.main.sync {
-            let tab: Tab?
-            if let tabId = UUID(uuidString: tabArg) {
-                tab = tabForSidebarMutation(id: tabId)
-            } else {
-                tab = resolveTab(from: tabArg, tabManager: tabManager)
-            }
-            guard let tab else {
-                result = "ERROR: Tab not found"
-                return
-            }
-            guard let panelId = UUID(uuidString: panelArg),
-                  tab.panels[panelId] != nil else {
-                result = "ERROR: Panel not found"
-                return
-            }
-            let (title, subtitle, body) = parseNotificationPayload(payload)
-            TerminalNotificationStore.shared.addNotification(
-                tabId: tab.id,
-                surfaceId: panelId,
-                title: title,
-                subtitle: subtitle,
-                body: body
-            )
-        }
-        return result
+        _ = args
+        return "ERROR: Notifications are not supported"
     }
 
     private func listNotifications() -> String {
-        var result = ""
-        DispatchQueue.main.sync {
-            let lines = TerminalNotificationStore.shared.notifications.enumerated().map { index, notification in
-                let surfaceText = notification.surfaceId?.uuidString ?? "none"
-                let readText = notification.isRead ? "read" : "unread"
-                return "\(index):\(notification.id.uuidString)|\(notification.tabId.uuidString)|\(surfaceText)|\(readText)|\(notification.title)|\(notification.subtitle)|\(notification.body)"
-            }
-            result = lines.joined(separator: "\n")
-        }
-        return result.isEmpty ? "No notifications" : result
+        "ERROR: Notifications are not supported"
     }
 
     private func clearNotifications(_ args: String) -> String {
-        let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            DispatchQueue.main.sync {
-                TerminalNotificationStore.shared.clearAll()
-            }
-            return "OK"
-        }
-        let parsed = parseOptions(trimmed)
-        guard let tabOption = parsed.options["tab"],
-              !tabOption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "ERROR: Usage: clear_notifications [--tab=X]"
-        }
-        var tabId: UUID?
-        DispatchQueue.main.sync {
-            if let tab = resolveTabForReport(trimmed) {
-                tabId = tab.id
-            }
-        }
-        guard let tabId else {
-            return "ERROR: Tab not found"
-        }
-        DispatchQueue.main.sync {
-            TerminalNotificationStore.shared.clearNotifications(forTabId: tabId)
-        }
-        return "OK"
+        _ = args
+        return "ERROR: Notifications are not supported"
     }
 
     private func setAppFocusOverride(_ arg: String) -> String {

@@ -102,7 +102,6 @@ private struct DetachedTerminalWindowRootView: View {
                     workspacePortalPriority: 2,
                     onThemeRefreshRequest: nil
                 )
-                .environmentObject(TerminalNotificationStore.shared)
                 .onAppear {
                     terminalManager.activateWorkspace(for: cardID)
                 }
@@ -181,7 +180,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    weak var notificationStore: TerminalNotificationStore?
     private(set) var activeCardID: UUID?
 
     var tabManager: TabManager? {
@@ -196,14 +194,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         super.init()
-        notificationStore = TerminalNotificationStore.shared
         Self.shared = self
         installLifecycleObservers()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
-        notificationStore = TerminalNotificationStore.shared
         Self.shared = self
         if let terminalManager {
             registerMainBoardTabManager(terminalManager.boardWindowTabManager)

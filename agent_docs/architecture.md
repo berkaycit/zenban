@@ -40,12 +40,13 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. O(1) board index lookup via lazy cache. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board/Card/Column` | Data models. Board has repositoryPath/agent/agentCounters. Card can override agent. Column has display name/color. Agent has autoNamePrefix for card naming. |
-| `TerminalManager` | Terminal adapter between Zenban cards and the cmux host stack. The board owns one cmux-style `TabManager`, lazily creates one `Workspace` per card using the card UUID, and keeps workspaces alive until card teardown. Terminal panels now run their shell inside per-panel tmux sessions, so `CardWorkspaceDeckView` can suspend hidden Ghostty surfaces during card handoff while commands keep running and split layout/search state survive resume. User-facing workspace chrome no longer exposes browser creation; those browser surfaces are now reserved for Dev Server preview and internal automation flows. |
+| `TerminalManager` | Terminal adapter between Zenban cards and the cmux host stack. The board owns one cmux-style `TabManager`, lazily creates one `Workspace` per card using the card UUID, and keeps workspaces alive until card teardown. Agent launch now goes through `AgentLauncher` instead of raw `Agent.launchCommand` strings, so Claude/Codex/Gemini startup, worktree relaunch, agent switching, and tmux session env cleanup all share one path. |
+| `AgentSessionMonitor` | Polls the isolated Zenban tmux server, captures pane output only when activity changes, classifies agent state (`running`/`waiting`/`idle`/`error`/`stopped`), and drives the card workflow from `To Do` to `In Review` plus completion notifications. |
 | `AppDelegate` | Window-level terminal host contract for Zenban's reduced cmux shell. Tracks the main board window plus single-card detached terminal windows, routes active `TabManager`/window focus into `TerminalController`, starts the local cmux-compatible socket controller, and preserves card identity while workspaces move between the board and detached windows. |
+| `NotificationService` | Zenban's only remaining notification path. Sends macOS completion notifications, re-selects the owning board/card on click, and replaces the removed cmux-derived unread/notification store. |
 | `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
 | `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
 | `DevServerManager` | Dev server setup/process lifecycle, port detection, and server-output buffering. Ready-state preview is owned by `DevServerView`, not the manager. |
-| `ClaudeHooksInstaller` | Installs Claude Code hooks to ~/.claude/settings.json for Zenban URL scheme integration. |
 | `DependencyCheckService` | Actor for checking/installing dependencies (Homebrew and tmux required; gh and Claude CLI optional). Shows `DependencySetupView` on startup when required terminal runtime deps are missing and can install tmux through Homebrew. |
 | `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). `GitDiffViewModel` handles cancellable on-demand diff loading with caching and lightweight diff-source fallback logic. |
 | `GitHistoryView` | Commit history list with pagination. Uses GitLogService for async loading. |
@@ -62,7 +63,7 @@ Cards auto-named by agent prefix (cc-1, codex-1, gemini-1). Per-board counters p
 
 ## Card Worktrees
 
-For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Workspace startup uses the worktree path when it already exists; otherwise the repo path is used until worktree creation finishes and the agent is relaunched with `cd <worktree> && <agent>`. Cleanup prunes stale entries with best-effort branch deletion.
+For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Workspace startup uses the repo path until the worktree is ready, then `TerminalManager` relaunches the selected agent through the shared `AgentLauncher` path with the worktree directory and refreshed tmux session env. Cleanup prunes stale entries with best-effort branch deletion.
 
 ## Detached Terminal Windows
 

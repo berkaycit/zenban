@@ -18,12 +18,22 @@ final class TerminalManager {
         var detachedWindowID: UUID?
     }
 
+    struct AgentSessionRecord {
+        let cardID: UUID
+        let boardID: UUID
+        let panelID: UUID
+        let tmuxSessionID: String
+        var agent: Agent
+        var workingDirectory: String?
+    }
+
     enum TerminalManagerError: Error {
         case workspaceUnavailable
     }
 
     private var records: [UUID: WorkspaceRecord] = [:]
     private var agentLaunchedForCard: Set<UUID> = []
+    private var agentSessionRecordByCardID: [UUID: AgentSessionRecord] = [:]
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
     private var pendingCardUnfocusTarget: (cardID: UUID, panelID: UUID)?
     private var activeCardID: UUID?
@@ -33,6 +43,7 @@ final class TerminalManager {
     )
 
     weak var boardStore: BoardStore?
+    weak var agentSessionMonitor: AgentSessionMonitor?
 
 #if DEBUG
     private func debugWorkspaceSummary(_ record: WorkspaceRecord) -> String {
@@ -74,9 +85,15 @@ final class TerminalManager {
             if record.cardTitle != cardTitle {
                 record.cardTitle = cardTitle
                 record.workspace.setCustomTitle(cardTitle)
-                records[cardID] = record
                 AppDelegate.shared?.updateWorkspaceTitle(for: cardID, title: cardTitle)
             }
+            let board = boardStore?.board(for: boardID)
+            let card = board?.cards.first { $0.id == cardID }
+            let updatedWorkingDirectory = card?.worktreePath ?? board?.repositoryPath
+            if record.workingDirectory != updatedWorkingDirectory {
+                record.workingDirectory = updatedWorkingDirectory
+            }
+            records[cardID] = record
 #if DEBUG
             dlog("handoff.workspaceRecord.reuse \(debugWorkspaceSummary(record)) title=\(cardTitle)")
 #endif
@@ -274,6 +291,7 @@ final class TerminalManager {
     func killSessionForCard(_ cardID: UUID) {
         resetWorkspace(for: cardID)
         agentLaunchedForCard.remove(cardID)
+        agentSessionRecordByCardID.removeValue(forKey: cardID)
         pendingWorktreeReady.removeValue(forKey: cardID)
     }
 
@@ -282,6 +300,8 @@ final class TerminalManager {
         if pendingCardUnfocusTarget?.cardID == cardID {
             pendingCardUnfocusTarget = nil
         }
+        agentSessionRecordByCardID.removeValue(forKey: cardID)
+        agentSessionMonitor?.removeCard(cardID)
         guard let record = records.removeValue(forKey: cardID) else { return }
 #if DEBUG
         dlog("handoff.resetWorkspace \(debugWorkspaceSummary(record))")
@@ -357,19 +377,23 @@ final class TerminalManager {
 
     func switchAgent(for cardID: UUID, to agent: Agent) {
         guard let panel = targetTerminalPanel(for: cardID) else { return }
-        panel.sendText("\u{03}")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            panel.sendText("\u{03}")
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            panel.sendText(agent.launchCommand + "\n")
-        }
+        launchAgent(
+            agent: agent,
+            for: cardID,
+            on: panel,
+            workingDirectory: currentWorkingDirectory(for: cardID),
+            reason: .agentSwitch
+        )
     }
 
     func worktreeReady(cardID: UUID, worktreePath: String, agent: Agent) {
         guard !agentLaunchedForCard.contains(cardID) else {
             pendingWorktreeReady.removeValue(forKey: cardID)
             return
+        }
+        if var record = records[cardID] {
+            record.workingDirectory = worktreePath
+            records[cardID] = record
         }
 
         guard let panel = targetTerminalPanel(for: cardID) else {
@@ -379,7 +403,13 @@ final class TerminalManager {
 
         pendingWorktreeReady.removeValue(forKey: cardID)
         agentLaunchedForCard.insert(cardID)
-        panel.sendText("cd \"\(worktreePath)\" && \(agent.launchCommand)\n")
+        launchAgent(
+            agent: agent,
+            for: cardID,
+            on: panel,
+            workingDirectory: worktreePath,
+            reason: .worktreeReady
+        )
     }
 
     func terminateAllSessions() {
@@ -388,6 +418,7 @@ final class TerminalManager {
             resetWorkspace(for: cardID)
         }
         agentLaunchedForCard.removeAll()
+        agentSessionRecordByCardID.removeAll()
         pendingWorktreeReady.removeAll()
     }
 
@@ -419,6 +450,26 @@ final class TerminalManager {
 
     func allRecords() -> [WorkspaceRecord] {
         Array(records.values)
+    }
+
+    func allAgentSessionSnapshots() -> [AgentSessionSnapshot] {
+        guard let boardStore else { return [] }
+
+        return agentSessionRecordByCardID.values.compactMap { session in
+            guard let board = boardStore.board(for: session.boardID),
+                  let card = board.cards.first(where: { $0.id == session.cardID }) else {
+                return nil
+            }
+
+            return AgentSessionSnapshot(
+                cardID: session.cardID,
+                boardID: session.boardID,
+                cardTitle: card.title,
+                column: card.column,
+                agent: card.agent ?? board.agent,
+                tmuxSessionID: session.tmuxSessionID
+            )
+        }
     }
 
     private func completePendingCardUnfocus(selectedCardID: UUID?) {
@@ -520,6 +571,51 @@ final class TerminalManager {
         guard !agentLaunchedForCard.contains(record.cardID) else { return }
         guard let panel = targetTerminalPanel(for: record.cardID) else { return }
         agentLaunchedForCard.insert(record.cardID)
-        panel.sendText(agent.launchCommand + "\n")
+        launchAgent(
+            agent: agent,
+            for: record.cardID,
+            on: panel,
+            workingDirectory: record.workingDirectory,
+            reason: .initialLaunch
+        )
+    }
+
+    private func launchAgent(
+        agent: Agent,
+        for cardID: UUID,
+        on panel: TerminalPanel,
+        workingDirectory: String?,
+        reason: AgentLaunchReason
+    ) {
+        guard let record = records[cardID] else { return }
+
+        agentSessionRecordByCardID[cardID] = AgentSessionRecord(
+            cardID: cardID,
+            boardID: record.boardID,
+            panelID: panel.id,
+            tmuxSessionID: panel.tmuxSessionID,
+            agent: agent,
+            workingDirectory: workingDirectory
+        )
+        agentSessionMonitor?.registerLaunch(for: cardID)
+
+        let plan = AgentLauncher.plan(
+            for: agent,
+            cardID: cardID,
+            boardID: record.boardID,
+            workingDirectory: workingDirectory,
+            reason: reason
+        )
+
+        Task { @MainActor in
+            await AgentLauncher.launch(plan, on: panel)
+        }
+    }
+
+    private func currentWorkingDirectory(for cardID: UUID) -> String? {
+        guard let session = agentSessionRecordByCardID[cardID] else {
+            return records[cardID]?.workingDirectory
+        }
+        return session.workingDirectory ?? records[cardID]?.workingDirectory
     }
 }

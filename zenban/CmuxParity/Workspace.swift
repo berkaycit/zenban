@@ -1408,15 +1408,13 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     private func hasUnreadNotification(panelId: UUID) -> Bool {
-        AppDelegate.shared?.notificationStore?.hasUnreadNotification(forTabId: id, surfaceId: panelId) ?? false
+        _ = panelId
+        return false
     }
 
     private func syncUnreadBadgeStateForPanel(_ panelId: UUID) {
         guard let tabId = surfaceIdFromPanelId(panelId) else { return }
-        let shouldShowUnread = Self.shouldShowUnreadIndicator(
-            hasUnreadNotification: hasUnreadNotification(panelId: panelId),
-            isManuallyUnread: manualUnreadPanelIds.contains(panelId)
-        )
+        let shouldShowUnread = false
         if let existing = bonsplitController.tab(tabId), existing.showsNotificationBadge == shouldShowUnread {
             return
         }
@@ -1559,7 +1557,6 @@ final class Workspace: Identifiable, ObservableObject {
 
     func markPanelRead(_ panelId: UUID) {
         guard panels[panelId] != nil else { return }
-        AppDelegate.shared?.notificationStore?.markRead(forTabId: id, surfaceId: panelId)
         clearManualUnread(panelId: panelId)
     }
 
