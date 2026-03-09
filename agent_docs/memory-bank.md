@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Re-verify notification docs against current code
+- **Description**: Re-read the live notification and agent workflow code after user reversions, then corrected the docs to match the current implementation more precisely. Fixed the column naming to `In Review` and tightened the notification workflow wording so it reflects the actual initial-launch, worktree-ready, and agent-switch launch paths in `TerminalManager`.
+
+- **Summary**: Document current notification workflow
+- **Description**: Synced the architecture and feature docs with the current tmux-based agent notification code, removing stale references to the older richer telemetry model. Added `agent_docs/notification-workflow.md` as a single reference for how submit detection, raw tmux status polling, card movement, and macOS notifications currently work.
+
 - **Summary**: Gate agent completion on explicit submit
 - **Description**: Changed the tmux-driven agent workflow so task cycles start only after Zenban observes a real terminal submit, matching the centralized send model used in `agent-view`. Typing, startup noise, and other tmux activity no longer move cards or trigger completion notifications. The Ghostty terminal surface now reports Enter/newline submits into `AgentSessionMonitor`, while launch and relaunch paths stay internal-only.
 

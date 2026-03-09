@@ -2,7 +2,7 @@
 
 ## Kanban Board
 
-- 3 fixed columns: To Do, In Progress, Done
+- 3 fixed columns: To Do, In Review, Done
 - Multiple boards with sidebar navigation
 - Drag-and-drop cards between columns
 - Pin boards to top of sidebar
@@ -13,7 +13,7 @@
 - Create cards with Cmd+Shift+A
 - Delete cards via Cmd+Shift+D (with confirmation)
 - Per-card agent override
-- Agent completion monitor keeps unfinished agent cards in `To Do`, but only starts a task cycle after a real Zenban terminal submit; typing without Enter does not move the card or notify
+- Agent completion monitor keeps unfinished agent cards in `To Do`, but only starts a task cycle after Zenban sees meaningful draft input followed by Enter or newline paste; typing without submit does not move the card or notify
 
 ## Terminal Integration
 
@@ -21,7 +21,7 @@
 - The board owns one shared cmux `TabManager`; each card is treated as a cmux workspace with card IDs exported as `CMUX_WORKSPACE_ID`/`CMUX_TAB_ID`, and terminal panels export `CMUX_SURFACE_ID`
 - Every terminal split now runs inside its own tmux session; hidden cards tear down Ghostty surfaces to save memory, then reattach to the same tmux-backed shell when the card becomes visible again
 - Agent startup is centralized: Claude launches with `--dangerously-skip-permissions`, Codex and Gemini with `--yolo`, and tmux session env is refreshed on first launch, worktree handoff, and agent switch
-- Zenban now watches tmux session activity plus pane output to detect `running`, `waiting`, `idle`, `error`, and `stopped` agent states without Claude URL hooks, while card completion is gated by explicit submit events from the terminal surface
+- Zenban now watches tmux session activity plus pane output to detect raw `running`, `waiting`, `idle`, `error`, and `stopped` agent states without Claude URL hooks; task cycles are started by terminal submit events and completed when the active session returns to `idle`
 - The workspace UI no longer offers manual browser creation; browser panels are now surfaced only by Dev Server preview or internal automation/link-routing paths
 - Card switches use a selected+retiring handoff so old Ghostty/browser portals are hidden before the previous card unmounts
 - Workspaces can move into detached terminal-only windows and back without changing card identity or worktree routing; detached windows currently host one card workspace and detached cards show a placeholder in the detail pane that focuses the external window
@@ -29,7 +29,7 @@
 - Ghostty reads the user's standard config files and receives the same app/surface color-scheme updates cmux uses, so theme resolution now matches cmux behavior
 - Zenban writes `~/.zenban/tmux.conf` from the active Ghostty selection colors and treats Homebrew plus tmux as required terminal dependencies
 - Bundled `cmux`, `claude`, and `open` helpers are in `Resources/bin`, and the app starts a cmux-compatible local socket controller so shell integration can report pwd/tty/git/pr state back into the owning workspace whether it is embedded or detached
-- The inherited cmux notification store, unread tab badges, and Ghostty notification ring are removed; only Zenban's `NotificationService` sends macOS completion notifications
+- The inherited cmux notification store, unread tab badges, and Ghostty notification ring are removed; only Zenban's `NotificationService` sends macOS completion notifications, and clicking one reselects the owning board/card
 
 ## Git Worktrees
 
