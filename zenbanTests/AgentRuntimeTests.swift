@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import zenban
@@ -136,53 +137,54 @@ struct AgentRuntimeTests {
     }
 
     @Test
-    func workflowMovesInReviewCardsBackToTodoWhenWorkStarts() {
+    func workflowStaysReadyWithoutSubmissionWhenActivityAppears() {
+        var reducer = AgentTaskWorkflowReducer()
+        let cardID = UUID()
+        let snapshot = AgentSessionSnapshot(
+            cardID: cardID,
+            boardID: UUID(),
+            cardTitle: "cc-no-submit",
+            column: .todo,
+            agent: .claude,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: cardID)
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+
+        let outcome = reducer.apply(snapshot: snapshot, rawStatus: .running)
+
+        #expect(outcome == .none)
+        #expect(reducer.cycleState(for: cardID) == .ready)
+    }
+
+    @Test
+    func workflowMovesInReviewCardsBackToTodoOnExplicitSubmission() {
         var reducer = AgentTaskWorkflowReducer()
         let cardID = UUID()
         let boardID = UUID()
+        let snapshot = AgentSessionSnapshot(
+            cardID: cardID,
+            boardID: boardID,
+            cardTitle: "cc-2",
+            column: .inProgress,
+            agent: .claude,
+            tmuxSessionID: UUID().uuidString
+        )
 
         reducer.registerLaunch(for: cardID)
-        _ = reducer.apply(
-            snapshot: AgentSessionSnapshot(
-                cardID: cardID,
-                boardID: boardID,
-                cardTitle: "cc-2",
-                column: .inProgress,
-                agent: .claude,
-                tmuxSessionID: UUID().uuidString
-            ),
-            rawStatus: .idle
-        )
-        _ = reducer.apply(
-            snapshot: AgentSessionSnapshot(
-                cardID: cardID,
-                boardID: boardID,
-                cardTitle: "cc-2",
-                column: .inProgress,
-                agent: .claude,
-                tmuxSessionID: UUID().uuidString
-            ),
-            rawStatus: .idle
-        )
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
 
-        let outcome = reducer.apply(
-            snapshot: AgentSessionSnapshot(
-                cardID: cardID,
-                boardID: boardID,
-                cardTitle: "cc-2",
-                column: .inProgress,
-                agent: .claude,
-                tmuxSessionID: UUID().uuidString
-            ),
-            rawStatus: .running
-        )
+        let outcome = reducer.registerTaskSubmission(snapshot: snapshot)
 
         #expect(outcome == AgentTaskWorkflowOutcome(action: .moveToTodo))
         #expect(reducer.cycleState(for: cardID) == .activeTask)
     }
 
     @Test
-    func workflowCompletesTodoCardsWhenActiveTaskReturnsToIdle() {
+    func workflowCompletesTodoCardsOnlyAfterExplicitSubmissionReturnsToIdle() {
         var reducer = AgentTaskWorkflowReducer()
         let cardID = UUID()
         let boardID = UUID()
@@ -197,12 +199,35 @@ struct AgentRuntimeTests {
             tmuxSessionID: UUID().uuidString
         )
         _ = reducer.apply(snapshot: baseline, rawStatus: .idle)
-        _ = reducer.apply(snapshot: baseline, rawStatus: .waiting)
         _ = reducer.apply(snapshot: baseline, rawStatus: .idle)
+        let submissionOutcome = reducer.registerTaskSubmission(snapshot: baseline)
         _ = reducer.apply(snapshot: baseline, rawStatus: .waiting)
-
         let outcome = reducer.apply(snapshot: baseline, rawStatus: .idle)
 
+        #expect(submissionOutcome == .none)
+        #expect(outcome == AgentTaskWorkflowOutcome(action: .complete))
+        #expect(reducer.cycleState(for: cardID) == .ready)
+    }
+
+    @Test
+    func workflowAllowsSubmissionDuringWarmupWithoutMissingCompletion() {
+        var reducer = AgentTaskWorkflowReducer()
+        let cardID = UUID()
+        let snapshot = AgentSessionSnapshot(
+            cardID: cardID,
+            boardID: UUID(),
+            cardTitle: "warmup-submit",
+            column: .todo,
+            agent: .claude,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: cardID)
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        let submitOutcome = reducer.registerTaskSubmission(snapshot: snapshot)
+        let outcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+
+        #expect(submitOutcome == .none)
         #expect(outcome == AgentTaskWorkflowOutcome(action: .complete))
         #expect(reducer.cycleState(for: cardID) == .ready)
     }
@@ -223,9 +248,48 @@ struct AgentRuntimeTests {
         reducer.registerLaunch(for: cardID)
         _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
         _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        let submitOutcome = reducer.registerTaskSubmission(snapshot: snapshot)
         let outcome = reducer.apply(snapshot: snapshot, rawStatus: .running)
 
+        #expect(submitOutcome == .none)
         #expect(outcome == .none)
         #expect(reducer.cycleState(for: cardID) == .ready)
+    }
+
+    @Test
+    func submitHeuristicsDetectKeyboardSubmit() {
+        #expect(
+            TerminalUserSubmitHeuristics.isKeyboardSubmit(
+                keyCode: 36,
+                modifierFlags: [],
+                isRepeat: false,
+                isComposing: false
+            )
+        )
+        #expect(
+            !TerminalUserSubmitHeuristics.isKeyboardSubmit(
+                keyCode: 36,
+                modifierFlags: [.command],
+                isRepeat: false,
+                isComposing: false
+            )
+        )
+        #expect(
+            !TerminalUserSubmitHeuristics.isKeyboardSubmit(
+                keyCode: 36,
+                modifierFlags: [],
+                isRepeat: false,
+                isComposing: true
+            )
+        )
+    }
+
+    @Test
+    func submitHeuristicsDetectMeaningfulDraftsAndTrailingNewlines() {
+        #expect(TerminalUserSubmitHeuristics.hasMeaningfulDraftInput("fix the failing test"))
+        #expect(!TerminalUserSubmitHeuristics.hasMeaningfulDraftInput("   "))
+        #expect(TerminalUserSubmitHeuristics.textTriggersSubmit("run it\n"))
+        #expect(TerminalUserSubmitHeuristics.textTriggersSubmit("run it\r"))
+        #expect(!TerminalUserSubmitHeuristics.textTriggersSubmit("run it"))
     }
 }

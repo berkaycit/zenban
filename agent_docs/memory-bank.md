@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Gate agent completion on explicit submit
+- **Description**: Changed the tmux-driven agent workflow so task cycles start only after Zenban observes a real terminal submit, matching the centralized send model used in `agent-view`. Typing, startup noise, and other tmux activity no longer move cards or trigger completion notifications. The Ghostty terminal surface now reports Enter/newline submits into `AgentSessionMonitor`, while launch and relaunch paths stay internal-only.
+
 - **Summary**: Add tmux-driven agent runtime workflow
 - **Description**: Replaced the old direct agent launch and Claude URL-hook path with a shared `AgentLauncher` plus `AgentSessionMonitor` that classifies tmux session output and activity. Cards now stay in `To Do` while work is running or waiting, automatically move to `In Review` on completion, and jump back to `To Do` when the same terminal gets new work. The inherited cmux notification store, unread tab badges, Ghostty notification ring, and related socket commands were removed so Zenban now relies only on its own `NotificationService`.
 

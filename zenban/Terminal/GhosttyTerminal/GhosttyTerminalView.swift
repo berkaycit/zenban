@@ -177,6 +177,40 @@ private enum GhosttyPasteboardHelper {
     }
 }
 
+enum TerminalSurfaceTextOrigin {
+    case programmatic
+    case userPaste
+}
+
+enum TerminalUserSubmitHeuristics {
+    static func hasMeaningfulDraftInput(_ text: String) -> Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func textTriggersSubmit(_ text: String) -> Bool {
+        text.last == "\n" || text.last == "\r"
+    }
+
+    static func isKeyboardSubmit(
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags,
+        isRepeat: Bool,
+        isComposing: Bool
+    ) -> Bool {
+        guard !isRepeat, !isComposing else { return false }
+        guard keyCode == 36 || keyCode == 76 else { return false }
+
+        let flags = modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !flags.contains(.command),
+              !flags.contains(.control),
+              !flags.contains(.option) else {
+            return false
+        }
+
+        return true
+    }
+}
+
 enum TerminalOpenURLTarget: Equatable {
     case embeddedBrowser(URL)
     case external(URL)
@@ -2073,6 +2107,8 @@ final class TerminalSurface: Identifiable, ObservableObject {
     }
     @Published private(set) var keyboardCopyModeActive: Bool = false
     private var searchNeedleCancellable: AnyCancellable?
+    var onUserSubmit: (() -> Void)?
+    private var hasPendingUserDraftInput = false
 
 #if DEBUG
     private func debugViewToken(_ view: NSView?) -> String {
@@ -2138,6 +2174,21 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
     var isSuspended: Bool {
         runtimeState == .suspended
+    }
+
+    func recordPendingUserDraftInput(_ text: String) {
+        guard TerminalUserSubmitHeuristics.hasMeaningfulDraftInput(text) else { return }
+        hasPendingUserDraftInput = true
+    }
+
+    func submitPendingUserDraftIfNeeded() {
+        guard hasPendingUserDraftInput else { return }
+        hasPendingUserDraftInput = false
+        onUserSubmit?()
+    }
+
+    func resetPendingUserDraftInput() {
+        hasPendingUserDraftInput = false
     }
 
     func canAcceptPortalBinding(expectedSurfaceId: UUID?, expectedGeneration: UInt64?) -> Bool {
@@ -2863,14 +2914,20 @@ final class TerminalSurface: Identifiable, ObservableObject {
         return ghostty_surface_needs_confirm_quit(surface)
     }
 
-    func sendText(_ text: String) {
+    func sendText(_ text: String, origin: TerminalSurfaceTextOrigin = .programmatic) {
         guard let data = text.data(using: .utf8), !data.isEmpty else { return }
+        if origin == .userPaste {
+            recordPendingUserDraftInput(text)
+        }
         if runtimeState == .suspended,
            TmuxSessionManager.shared.sessionExistsSync(sessionID: tmuxSessionID) {
 #if DEBUG
             debugLogLifecycle("sendText.tmux", detail: "bytes=\(data.count)")
 #endif
             TmuxSessionManager.shared.sendText(sessionID: tmuxSessionID, text: text)
+            if origin == .userPaste, TerminalUserSubmitHeuristics.textTriggersSubmit(text) {
+                submitPendingUserDraftIfNeeded()
+            }
             return
         }
         guard let surface = surface else {
@@ -2878,9 +2935,15 @@ final class TerminalSurface: Identifiable, ObservableObject {
             debugLogLifecycle("sendText.queue", detail: "bytes=\(data.count)")
 #endif
             enqueuePendingText(data)
+            if origin == .userPaste, TerminalUserSubmitHeuristics.textTriggersSubmit(text) {
+                submitPendingUserDraftIfNeeded()
+            }
             return
         }
         writeTextData(data, to: surface)
+        if origin == .userPaste, TerminalUserSubmitHeuristics.textTriggersSubmit(text) {
+            submitPendingUserDraftIfNeeded()
+        }
     }
 
     func requestBackgroundSurfaceStartIfNeeded() {
@@ -3830,12 +3893,27 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     // MARK: - Clipboard paste
 
     @IBAction func paste(_ sender: Any?) {
+        registerClipboardPasteIfNeeded()
         _ = performBindingAction("paste_from_clipboard")
     }
 
     /// Pastes clipboard text as plain text, stripping any rich formatting.
     @IBAction func pasteAsPlainText(_ sender: Any?) {
+        registerClipboardPasteIfNeeded()
         _ = performBindingAction("paste_from_clipboard")
+    }
+
+    private func registerClipboardPasteIfNeeded() {
+        guard let pasteboard = GhosttyPasteboardHelper.pasteboard(for: GHOSTTY_CLIPBOARD_STANDARD),
+              let content = GhosttyPasteboardHelper.stringContents(from: pasteboard),
+              !content.isEmpty else {
+            return
+        }
+
+        terminalSurface?.recordPendingUserDraftInput(content)
+        if TerminalUserSubmitHeuristics.textTriggersSubmit(content) {
+            terminalSurface?.submitPendingUserDraftIfNeeded()
+        }
     }
 
     /// Validates whether edit menu items (copy, paste, split) should be enabled.
@@ -4363,6 +4441,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             keyEvent.composing = false
             for text in accumulatedText {
                 if shouldSendText(text) {
+                    recordPendingUserDraftInputIfNeeded(text)
                     text.withCString { ptr in
                         keyEvent.text = ptr
                         _ = ghostty_surface_key(surface, keyEvent)
@@ -4383,6 +4462,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
                 )
             if let text = textForKeyEvent(translationEvent) {
                 if shouldSendText(text), !suppressShiftSpaceFallbackText {
+                    recordPendingUserDraftInputIfNeeded(text)
                     text.withCString { ptr in
                         keyEvent.text = ptr
                         _ = ghostty_surface_key(surface, keyEvent)
@@ -4396,6 +4476,8 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
                 _ = ghostty_surface_key(surface, keyEvent)
             }
         }
+
+        submitPendingUserDraftIfNeeded(event: translationEvent, isComposing: keyEvent.composing)
 
         // Rendering is driven by Ghostty's wakeups/renderer.
     }
@@ -4541,6 +4623,23 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     private func shouldSendText(_ text: String) -> Bool {
         guard let first = text.utf8.first else { return false }
         return first >= 0x20
+    }
+
+    private func recordPendingUserDraftInputIfNeeded(_ text: String) {
+        terminalSurface?.recordPendingUserDraftInput(text)
+    }
+
+    private func submitPendingUserDraftIfNeeded(event: NSEvent, isComposing: Bool) {
+        guard TerminalUserSubmitHeuristics.isKeyboardSubmit(
+            keyCode: event.keyCode,
+            modifierFlags: event.modifierFlags,
+            isRepeat: event.isARepeat,
+            isComposing: isComposing
+        ) else {
+            return
+        }
+
+        terminalSurface?.submitPendingUserDraftIfNeeded()
     }
 
     /// If AppKit consumed Shift+Space for IME/input-source switching, interpretKeyEvents
@@ -4965,7 +5064,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         // Use the text/paste path (ghostty_surface_text) instead of the key event
         // path (ghostty_surface_key) so bracketed paste mode is triggered and the
         // insertion is instant, matching upstream Ghostty behaviour.
-        terminalSurface?.sendText(content)
+        terminalSurface?.sendText(content, origin: .userPaste)
         return true
     }
 
@@ -6083,7 +6182,7 @@ final class GhosttySurfaceScrollView: NSView {
         #if DEBUG
         dlog("terminal.swiftUIDrop surface=\(surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") urls=\(urls.map(\.lastPathComponent))")
         #endif
-        surfaceView.terminalSurface?.sendText(content)
+        surfaceView.terminalSurface?.sendText(content, origin: .userPaste)
         return true
     }
 
@@ -6751,6 +6850,7 @@ final class GhosttySurfaceScrollView: NSView {
 extension GhosttyNSView: NSTextInputClient {
     fileprivate func sendTextToSurface(_ chars: String) {
         guard let surface = surface else { return }
+        terminalSurface?.recordPendingUserDraftInput(chars)
 #if DEBUG
         cmuxWriteChildExitProbe(
             [
@@ -6769,6 +6869,9 @@ extension GhosttyNSView: NSTextInputClient {
             keyEvent.text = ptr
             keyEvent.composing = false
             _ = ghostty_surface_key(surface, keyEvent)
+        }
+        if TerminalUserSubmitHeuristics.textTriggersSubmit(chars) {
+            terminalSurface?.submitPendingUserDraftIfNeeded()
         }
     }
 

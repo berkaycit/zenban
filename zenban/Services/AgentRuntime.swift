@@ -104,15 +104,6 @@ enum AgentRawStatus: Equatable {
     case error
     case stopped
 
-    var indicatesWorkObserved: Bool {
-        switch self {
-        case .running, .waiting, .error:
-            true
-        case .idle, .stopped:
-            false
-        }
-    }
-
     var establishesReadyBaseline: Bool {
         switch self {
         case .idle, .waiting, .error:
@@ -310,6 +301,29 @@ struct AgentTaskWorkflowReducer {
         lastRawStatusByCardID[cardID]
     }
 
+    mutating func registerTaskSubmission(
+        snapshot: AgentSessionSnapshot
+    ) -> AgentTaskWorkflowOutcome {
+        let cardID = snapshot.cardID
+        let currentState = cycleState(for: cardID)
+
+        guard snapshot.column != .done else {
+            return .none
+        }
+
+        switch currentState {
+        case .activeTask:
+            return .none
+
+        case .bootstrapping, .warmingUp, .ready:
+            cycleStateByCardID[cardID] = .activeTask
+            if snapshot.column == .inProgress {
+                return AgentTaskWorkflowOutcome(action: .moveToTodo)
+            }
+            return .none
+        }
+    }
+
     mutating func apply(
         snapshot: AgentSessionSnapshot,
         rawStatus: AgentRawStatus
@@ -334,16 +348,7 @@ struct AgentTaskWorkflowReducer {
             }
 
         case .ready:
-            guard snapshot.column != .done else {
-                break
-            }
-
-            if rawStatus.indicatesWorkObserved {
-                nextState = .activeTask
-                if snapshot.column == .inProgress {
-                    outcome = AgentTaskWorkflowOutcome(action: .moveToTodo)
-                }
-            }
+            break
 
         case .activeTask:
             guard snapshot.column != .done else {
@@ -403,6 +408,17 @@ final class AgentSessionMonitor {
 
     func registerLaunch(for cardID: UUID) {
         reducer.registerLaunch(for: cardID)
+    }
+
+    func registerTaskSubmission(for cardID: UUID) {
+        guard let terminalManager,
+              let boardStore,
+              let snapshot = terminalManager.agentSessionSnapshot(for: cardID) else {
+            return
+        }
+
+        let outcome = reducer.registerTaskSubmission(snapshot: snapshot)
+        handle(outcome: outcome, snapshot: snapshot, boardStore: boardStore)
     }
 
     func removeCard(_ cardID: UUID) {

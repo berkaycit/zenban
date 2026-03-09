@@ -456,20 +456,17 @@ final class TerminalManager {
         guard let boardStore else { return [] }
 
         return agentSessionRecordByCardID.values.compactMap { session in
-            guard let board = boardStore.board(for: session.boardID),
-                  let card = board.cards.first(where: { $0.id == session.cardID }) else {
-                return nil
-            }
-
-            return AgentSessionSnapshot(
-                cardID: session.cardID,
-                boardID: session.boardID,
-                cardTitle: card.title,
-                column: card.column,
-                agent: card.agent ?? board.agent,
-                tmuxSessionID: session.tmuxSessionID
-            )
+            snapshot(for: session, boardStore: boardStore)
         }
+    }
+
+    func agentSessionSnapshot(for cardID: UUID) -> AgentSessionSnapshot? {
+        guard let boardStore,
+              let session = agentSessionRecordByCardID[cardID] else {
+            return nil
+        }
+
+        return snapshot(for: session, boardStore: boardStore)
     }
 
     private func completePendingCardUnfocus(selectedCardID: UUID?) {
@@ -597,6 +594,10 @@ final class TerminalManager {
             agent: agent,
             workingDirectory: workingDirectory
         )
+        panel.surface.resetPendingUserDraftInput()
+        panel.surface.onUserSubmit = { [weak self] in
+            self?.agentSessionMonitor?.registerTaskSubmission(for: cardID)
+        }
 
         let plan = AgentLauncher.plan(
             for: agent,
@@ -617,5 +618,24 @@ final class TerminalManager {
             return records[cardID]?.workingDirectory
         }
         return session.workingDirectory ?? records[cardID]?.workingDirectory
+    }
+
+    private func snapshot(
+        for session: AgentSessionRecord,
+        boardStore: BoardStore
+    ) -> AgentSessionSnapshot? {
+        guard let board = boardStore.board(for: session.boardID),
+              let card = board.cards.first(where: { $0.id == session.cardID }) else {
+            return nil
+        }
+
+        return AgentSessionSnapshot(
+            cardID: session.cardID,
+            boardID: session.boardID,
+            cardTitle: card.title,
+            column: card.column,
+            agent: card.agent ?? board.agent,
+            tmuxSessionID: session.tmuxSessionID
+        )
     }
 }

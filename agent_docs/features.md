@@ -13,7 +13,7 @@
 - Create cards with Cmd+Shift+A
 - Delete cards via Cmd+Shift+D (with confirmation)
 - Per-card agent override
-- Agent completion monitor keeps unfinished agent cards in `To Do`, moves completed work into `In Review`, and moves the same card back to `To Do` as soon as the agent starts working again
+- Agent completion monitor keeps unfinished agent cards in `To Do`, but only starts a task cycle after a real Zenban terminal submit; typing without Enter does not move the card or notify
 
 ## Terminal Integration
 
@@ -21,7 +21,7 @@
 - The board owns one shared cmux `TabManager`; each card is treated as a cmux workspace with card IDs exported as `CMUX_WORKSPACE_ID`/`CMUX_TAB_ID`, and terminal panels export `CMUX_SURFACE_ID`
 - Every terminal split now runs inside its own tmux session; hidden cards tear down Ghostty surfaces to save memory, then reattach to the same tmux-backed shell when the card becomes visible again
 - Agent startup is centralized: Claude launches with `--dangerously-skip-permissions`, Codex and Gemini with `--yolo`, and tmux session env is refreshed on first launch, worktree handoff, and agent switch
-- Zenban now watches tmux session activity plus pane output to detect `running`, `waiting`, `idle`, `error`, and `stopped` agent states without Claude URL hooks
+- Zenban now watches tmux session activity plus pane output to detect `running`, `waiting`, `idle`, `error`, and `stopped` agent states without Claude URL hooks, while card completion is gated by explicit submit events from the terminal surface
 - The workspace UI no longer offers manual browser creation; browser panels are now surfaced only by Dev Server preview or internal automation/link-routing paths
 - Card switches use a selected+retiring handoff so old Ghostty/browser portals are hidden before the previous card unmounts
 - Workspaces can move into detached terminal-only windows and back without changing card identity or worktree routing; detached windows currently host one card workspace and detached cards show a placeholder in the detail pane that focuses the external window
