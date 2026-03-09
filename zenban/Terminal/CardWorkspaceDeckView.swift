@@ -56,9 +56,9 @@ struct CardWorkspaceDeckView: View {
                         cardID: entry.record.cardID,
                         boardID: entry.record.boardID,
                         cardTitle: entry.record.cardTitle,
-                        isWorkspaceVisible: isVisible,
+                        isWorkspaceVisible: isSelected,
                         isWorkspaceInputActive: isSelected && (NSApp?.isActive ?? false),
-                        workspacePortalPriority: isSelected ? 2 : (isRetiring ? 1 : 0)
+                        workspacePortalPriority: isSelected ? 2 : 0
                     )
                     .opacity(isVisible ? 1 : 0)
                     .allowsHitTesting(isSelected)
@@ -98,6 +98,14 @@ struct CardWorkspaceDeckView: View {
                 handoffFallbackTask?.cancel()
                 handoffFallbackTask = nil
                 retiringCardId = nil
+            }
+
+            // Immediately hide the outgoing card's portal views before the debounce
+            // so the old terminal content doesn't ghost above the incoming card. The
+            // portal layer sits above SwiftUI, so even a single frame of stale portal
+            // content is visible to the user.
+            if let previousSelectedCardId, previousSelectedCardId != newValue {
+                terminalManager.hidePortalViews(for: previousSelectedCardId)
             }
 
             // Defer ALL work (including workspace record creation) behind a debounce.
