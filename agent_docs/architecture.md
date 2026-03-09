@@ -47,7 +47,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `DevServerManager` | Dev server setup/process lifecycle, port detection, and server-output buffering. Ready-state preview is owned by `DevServerView`, not the manager. |
 | `ClaudeHooksInstaller` | Installs Claude Code hooks to ~/.claude/settings.json for Zenban URL scheme integration. |
 | `DependencyCheckService` | Actor for checking/installing dependencies (Homebrew and tmux required; gh and Claude CLI optional). Shows `DependencySetupView` on startup when required terminal runtime deps are missing and can install tmux through Homebrew. |
-| `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). GitDiffViewModel for batch loading with LRU cache and content hash validation. |
+| `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). `GitDiffViewModel` handles cancellable on-demand diff loading with caching and lightweight diff-source fallback logic. |
 | `GitHistoryView` | Commit history list with pagination. Uses GitLogService for async loading. |
 | `GitLogService` | Actor for commit history and diff retrieval via libgit2 and ProcessExecutor. |
 | `DiffView` | NSTableView diff renderer with upfront parsing. Scroll tracking, file navigation, copy support. |

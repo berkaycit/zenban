@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Simplify Zenban quick-win cleanup paths
+- **Description**: Removed unused helper APIs and stale prompt/notification/cmux compatibility shims that no longer had call sites. Simplified `BoardStore`, `GitChangesView`, `GitDiffViewModel`, and `FileBrowserStore` so overlay handling, diff resets, placeholder UI, and file-browser error/session flows are more centralized. `DevServerManager` now avoids rebuilding the full output string on every log chunk, and `ProcessEnvironment` plus board/file-browser lookups now do less repeated work.
+
 - **Summary**: Restore tmux-backed Ghostty card sessions
 - **Description**: Added a new `TmuxSessionManager` and put each terminal split back on its own tmux session without reintroducing `libghostty`. Hidden cards now suspend Ghostty surfaces while their tmux-backed shells keep running, then resume into the same session when the card is shown again. Startup and shutdown now clear stale Zenban tmux sessions, and dependency/settings flows once again require Homebrew plus tmux while keeping `gh` and `claude` optional.
 
