@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Harden tmux completion notifications
+- **Description**: Reworked Zenban's notification path to borrow the defensive pieces of cmux without reintroducing the cmux notification store. `NotificationService` now tracks authorization state, defers the first automatic prompt until the app is active, coalesces notifications per card, and clears stale entries on focus, click, or delete. The tmux workflow also got stricter: launches only arm monitoring after `send-keys` succeeds, board/card reselection on notification click no longer gets cleared by the board-change observer, and repeated pane-capture failures now fall back to `stopped` instead of leaving cards stuck mid-cycle.
+
 - **Summary**: Re-verify notification docs against current code
 - **Description**: Re-read the live notification and agent workflow code after user reversions, then corrected the docs to match the current implementation more precisely. Fixed the column naming to `In Review` and tightened the notification workflow wording so it reflects the actual initial-launch, worktree-ready, and agent-switch launch paths in `TerminalManager`.
 

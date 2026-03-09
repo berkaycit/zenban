@@ -72,6 +72,82 @@ struct AgentRuntimeTests {
     }
 
     @Test
+    func captureFailureHeuristicsEscalateToStoppedAfterThreshold() {
+        #expect(
+            AgentCaptureFailureHeuristics.rawStatus(
+                afterConsecutiveFailures: AgentCaptureFailureHeuristics.stopThreshold - 1,
+                isRecentActivity: true
+            ) == .running
+        )
+        #expect(
+            AgentCaptureFailureHeuristics.rawStatus(
+                afterConsecutiveFailures: AgentCaptureFailureHeuristics.stopThreshold,
+                isRecentActivity: true
+            ) == .stopped
+        )
+    }
+
+    @Test
+    func notificationAuthorizationHelpersMapAndDeferAsExpected() {
+        #expect(NotificationService.authorizationState(from: .notDetermined) == .notDetermined)
+        #expect(NotificationService.authorizationState(from: .denied) == .denied)
+        #expect(NotificationService.authorizationState(from: .authorized) == .authorized)
+        #expect(NotificationService.authorizationState(from: .provisional) == .provisional)
+        #expect(
+            NotificationService.shouldDeferAutomaticAuthorizationRequest(
+                status: .notDetermined,
+                isAppActive: false
+            )
+        )
+        #expect(
+            !NotificationService.shouldDeferAutomaticAuthorizationRequest(
+                status: .notDetermined,
+                isAppActive: true
+            )
+        )
+        #expect(
+            !NotificationService.shouldDeferAutomaticAuthorizationRequest(
+                status: .authorized,
+                isAppActive: false
+            )
+        )
+    }
+
+    @Test
+    func notificationSuppressionRequiresFocusedMatchingSelection() {
+        let boardID = UUID()
+        let cardID = UUID()
+
+        #expect(
+            NotificationService.shouldSuppressNotification(
+                isAppFocused: true,
+                selectedBoardID: boardID,
+                selectedCardID: cardID,
+                notificationBoardID: boardID,
+                notificationCardID: cardID
+            )
+        )
+        #expect(
+            !NotificationService.shouldSuppressNotification(
+                isAppFocused: false,
+                selectedBoardID: boardID,
+                selectedCardID: cardID,
+                notificationBoardID: boardID,
+                notificationCardID: cardID
+            )
+        )
+        #expect(
+            !NotificationService.shouldSuppressNotification(
+                isAppFocused: true,
+                selectedBoardID: boardID,
+                selectedCardID: UUID(),
+                notificationBoardID: boardID,
+                notificationCardID: cardID
+            )
+        )
+    }
+
+    @Test
     func workflowRequiresBaselineBeforeAnyCompletion() {
         var reducer = AgentTaskWorkflowReducer()
         let snapshot = AgentSessionSnapshot(
@@ -254,6 +330,35 @@ struct AgentRuntimeTests {
         #expect(submitOutcome == .none)
         #expect(outcome == .none)
         #expect(reducer.cycleState(for: cardID) == .ready)
+    }
+
+    @Test
+    @MainActor
+    func boardSelectionChangeKeepsMatchingCardSelection() {
+        let boardID = UUID()
+        let card = Card(id: UUID(), title: "task")
+        let store = BoardStore()
+        store.boards = [Board(id: boardID, name: "Board", cards: [card])]
+        store.selectedBoardID = boardID
+        store.selectedCardID = card.id
+
+        store.clearSelectedCardIfNeededForSelectedBoardChange()
+
+        #expect(store.selectedCardID == card.id)
+    }
+
+    @Test
+    @MainActor
+    func boardSelectionChangeClearsStaleCardSelection() {
+        let boardID = UUID()
+        let store = BoardStore()
+        store.boards = [Board(id: boardID, name: "Board", cards: [])]
+        store.selectedBoardID = boardID
+        store.selectedCardID = UUID()
+
+        store.clearSelectedCardIfNeededForSelectedBoardChange()
+
+        #expect(store.selectedCardID == nil)
     }
 
     @Test

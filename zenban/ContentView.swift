@@ -68,9 +68,13 @@ struct ContentView: View {
             }
         }
         .onChange(of: store.selectedBoardID) {
-            store.selectedCardID = nil
+            store.clearSelectedCardIfNeededForSelectedBoardChange()
             store.draggedCardID = nil
             store.stopOverlays()
+        }
+        .onChange(of: store.selectedCardID) { _, newValue in
+            guard let newValue else { return }
+            NotificationService.shared.clearNotifications(for: newValue)
         }
         .onChange(of: store.showDevServer) { wasShowing, isShowing in
             handleDevServerVisibilityChange(wasShowing: wasShowing, isShowing: isShowing)

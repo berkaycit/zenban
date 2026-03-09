@@ -308,6 +308,26 @@ final class BoardStore {
         return boards[index]
     }
 
+    func selectCard(_ cardID: UUID, in boardID: UUID) {
+        guard let board = board(for: boardID),
+              board.cards.contains(where: { $0.id == cardID }) else {
+            return
+        }
+
+        selectedBoardID = boardID
+        selectedCardID = cardID
+        focusRegion = .cards
+    }
+
+    func clearSelectedCardIfNeededForSelectedBoardChange() {
+        guard let cardID = selectedCardID,
+              let board = selectedBoard,
+              board.cards.contains(where: { $0.id == cardID }) else {
+            selectedCardID = nil
+            return
+        }
+    }
+
     func deleteBoard(_ board: Board) {
         let repoPath = board.repositoryPath
         let cardIDs = Set(board.cards.map(\.id))

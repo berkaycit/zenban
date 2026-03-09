@@ -370,9 +370,7 @@ final class TerminalManager {
 
     func selectCardInBoard(for cardID: UUID) {
         guard let record = records[cardID] else { return }
-        boardStore?.selectedBoardID = record.boardID
-        boardStore?.selectedCardID = cardID
-        boardStore?.focusRegion = .cards
+        boardStore?.selectCard(cardID, in: record.boardID)
     }
 
     func switchAgent(for cardID: UUID, to agent: Agent) {
@@ -608,7 +606,13 @@ final class TerminalManager {
         )
 
         Task { @MainActor in
-            await AgentLauncher.launch(plan, on: panel)
+            let didLaunch = await AgentLauncher.launch(plan, on: panel)
+            guard didLaunch else {
+                if reason != .agentSwitch {
+                    self.agentLaunchedForCard.remove(cardID)
+                }
+                return
+            }
             self.agentSessionMonitor?.registerLaunch(for: cardID)
         }
     }

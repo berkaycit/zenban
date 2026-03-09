@@ -95,27 +95,33 @@ actor TmuxSessionManager {
         return now - activityTimestamp < thresholdSeconds
     }
 
-    nonisolated func sendKeys(sessionID: String, keys: String, execute: Bool = false) {
-        guard !keys.isEmpty else { return }
+    @discardableResult
+    nonisolated func sendKeys(sessionID: String, keys: String, execute: Bool = false) -> Bool {
+        guard !keys.isEmpty else { return true }
 
-        _ = runSync(
+        guard let sendResult = runSync(
             arguments: tmuxArguments("send-keys", "-t", sessionName(for: sessionID), keys),
             failureMessage: "Failed to send keys to tmux session \(sessionName(for: sessionID))"
-        )
+        ), sendResult.terminationStatus == 0 else {
+            return false
+        }
         if execute {
-            _ = runSync(
+            guard let enterResult = runSync(
                 arguments: tmuxArguments("send-keys", "-t", sessionName(for: sessionID), "Enter"),
                 failureMessage: "Failed to send Enter to tmux session \(sessionName(for: sessionID))"
-            )
+            ), enterResult.terminationStatus == 0 else {
+                return false
+            }
         }
+        return true
     }
 
-    nonisolated func sendText(sessionID: String, text: String) {
-        guard !text.isEmpty else { return }
+    @discardableResult
+    nonisolated func sendText(sessionID: String, text: String) -> Bool {
+        guard !text.isEmpty else { return true }
 
         if text == "\u{03}" {
-            sendKeys(sessionID: sessionID, keys: "C-c", execute: false)
-            return
+            return sendKeys(sessionID: sessionID, keys: "C-c", execute: false)
         }
 
         let segments = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -124,20 +130,26 @@ actor TmuxSessionManager {
 
         for (index, segment) in segments.enumerated() {
             if !segment.isEmpty {
-                _ = runSync(
+                guard let literalResult = runSync(
                     arguments: tmuxArguments("send-keys", "-t", sessionName, "-l", segment),
                     failureMessage: "Failed to send literal text to tmux session \(sessionName)"
-                )
+                ), literalResult.terminationStatus == 0 else {
+                    return false
+                }
             }
 
             let isLastSegment = index == segments.count - 1
             if !isLastSegment || shouldAppendTrailingEnter {
-                _ = runSync(
+                guard let enterResult = runSync(
                     arguments: tmuxArguments("send-keys", "-t", sessionName, "Enter"),
                     failureMessage: "Failed to send Enter to tmux session \(sessionName)"
-                )
+                ), enterResult.terminationStatus == 0 else {
+                    return false
+                }
             }
         }
+
+        return true
     }
 
     func unsetEnvironment(sessionID: String, names: [String]) {

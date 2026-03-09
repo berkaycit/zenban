@@ -62,7 +62,7 @@ enum AgentLauncher {
     }
 
     @MainActor
-    static func launch(_ plan: AgentLaunchPlan, on panel: TerminalPanel) async {
+    static func launch(_ plan: AgentLaunchPlan, on panel: TerminalPanel) async -> Bool {
         await TmuxSessionManager.shared.unsetEnvironment(
             sessionID: panel.tmuxSessionID,
             names: ["CLAUDECODE"]
@@ -73,13 +73,17 @@ enum AgentLauncher {
         )
 
         if plan.reason == .agentSwitch {
-            TmuxSessionManager.shared.sendText(sessionID: panel.tmuxSessionID, text: "\u{03}")
+            guard TmuxSessionManager.shared.sendText(sessionID: panel.tmuxSessionID, text: "\u{03}") else {
+                return false
+            }
             try? await Task.sleep(for: .milliseconds(300))
-            TmuxSessionManager.shared.sendText(sessionID: panel.tmuxSessionID, text: "\u{03}")
+            guard TmuxSessionManager.shared.sendText(sessionID: panel.tmuxSessionID, text: "\u{03}") else {
+                return false
+            }
             try? await Task.sleep(for: .seconds(2))
         }
 
-        TmuxSessionManager.shared.sendText(
+        return TmuxSessionManager.shared.sendText(
             sessionID: panel.tmuxSessionID,
             text: plan.shellCommand + "\n"
         )
@@ -272,6 +276,20 @@ struct AgentTaskWorkflowOutcome: Equatable {
     static let none = AgentTaskWorkflowOutcome(action: nil)
 }
 
+enum AgentCaptureFailureHeuristics {
+    static let stopThreshold = 3
+
+    static func rawStatus(
+        afterConsecutiveFailures consecutiveFailures: Int,
+        isRecentActivity: Bool
+    ) -> AgentRawStatus {
+        if consecutiveFailures >= stopThreshold {
+            return .stopped
+        }
+        return isRecentActivity ? .running : .idle
+    }
+}
+
 struct AgentTaskWorkflowReducer {
     private(set) var cycleStateByCardID: [UUID: AgentTaskCycleState] = [:]
     private(set) var lastRawStatusByCardID: [UUID: AgentRawStatus] = [:]
@@ -385,6 +403,7 @@ final class AgentSessionMonitor {
     private var pollingTask: Task<Void, Never>?
     private var reducer = AgentTaskWorkflowReducer()
     private var lastActivityBySessionName: [String: Int] = [:]
+    private var consecutiveCaptureFailuresBySessionName: [String: Int] = [:]
 
     func connect(boardStore: BoardStore, terminalManager: TerminalManager) {
         self.boardStore = boardStore
@@ -461,6 +480,7 @@ final class AgentSessionMonitor {
             } else {
                 rawStatus = .stopped
                 lastActivityBySessionName.removeValue(forKey: sessionName)
+                consecutiveCaptureFailuresBySessionName.removeValue(forKey: sessionName)
             }
 
             let outcome = reducer.apply(snapshot: snapshot, rawStatus: rawStatus)
@@ -469,21 +489,31 @@ final class AgentSessionMonitor {
 
         let activeSessionNames = Set(snapshots.map(\.tmuxSessionName))
         lastActivityBySessionName = lastActivityBySessionName.filter { activeSessionNames.contains($0.key) }
+        consecutiveCaptureFailuresBySessionName = consecutiveCaptureFailuresBySessionName.filter {
+            activeSessionNames.contains($0.key)
+        }
     }
 
     private func captureAndParseStatus(
         snapshot: AgentSessionSnapshot,
         activityTimestamp: Int
     ) async -> AgentRawStatus {
+        let sessionName = snapshot.tmuxSessionName
         do {
             let output = try await TmuxSessionManager.shared.capturePane(sessionID: snapshot.tmuxSessionID)
+            consecutiveCaptureFailuresBySessionName[sessionName] = 0
             return AgentStatusParser.parse(
                 output: output,
                 agent: snapshot.agent,
                 isRecentActivity: TmuxSessionManager.shared.isRecentActivity(activityTimestamp)
             )
         } catch {
-            return TmuxSessionManager.shared.isRecentActivity(activityTimestamp) ? .running : .idle
+            let nextFailureCount = (consecutiveCaptureFailuresBySessionName[sessionName] ?? 0) + 1
+            consecutiveCaptureFailuresBySessionName[sessionName] = nextFailureCount
+            return AgentCaptureFailureHeuristics.rawStatus(
+                afterConsecutiveFailures: nextFailureCount,
+                isRecentActivity: TmuxSessionManager.shared.isRecentActivity(activityTimestamp)
+            )
         }
     }
 

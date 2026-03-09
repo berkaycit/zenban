@@ -58,6 +58,16 @@ struct zenbanApp: App {
             }
         }
 
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                NotificationService.shared.handleApplicationDidBecomeActive()
+            }
+        }
+
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
             // Skip if inside a sheet, dialog, or text field
             if NSApp.keyWindow?.sheetParent != nil {
@@ -171,6 +181,7 @@ struct zenbanApp: App {
         appDelegate.terminalManager = terminalManager
         appDelegate.registerMainBoardTabManager(terminalManager.boardWindowTabManager)
         store.onCardDeleted = { [agentSessionMonitor, terminalManager, devServerManager] cardID in
+            NotificationService.shared.clearNotifications(for: cardID)
             agentSessionMonitor.removeCard(cardID)
             terminalManager.killSessionForCard(cardID)
             devServerManager.stopServer(for: cardID)
@@ -185,9 +196,12 @@ struct zenbanApp: App {
 
     private func setupNotifications() {
         NotificationService.shared.requestAuthorization()
-        NotificationService.shared.onNotificationClicked = { [store] boardID, cardID in
-            store.selectedBoardID = boardID
-            store.selectedCardID = cardID
+        NotificationService.shared.activeSelectionProvider = { [store] in
+            (store.selectedBoardID, store.selectedCardID)
+        }
+        NotificationService.shared.onNotificationClicked = { [store, terminalManager] boardID, cardID in
+            store.selectCard(cardID, in: boardID)
+            terminalManager.activateWorkspace(for: cardID)
         }
     }
 }
