@@ -265,6 +265,7 @@ enum AgentStatusParser {
 
 enum AgentTaskCycleState: Equatable {
     case bootstrapping
+    case warmingUp
     case ready
     case activeTask
 }
@@ -321,7 +322,15 @@ struct AgentTaskWorkflowReducer {
         switch currentState {
         case .bootstrapping:
             if rawStatus.establishesReadyBaseline || rawStatus == .stopped {
+                nextState = .warmingUp
+            }
+
+        case .warmingUp:
+            switch rawStatus {
+            case .idle, .stopped:
                 nextState = .ready
+            case .running, .waiting, .error:
+                nextState = .warmingUp
             }
 
         case .ready:

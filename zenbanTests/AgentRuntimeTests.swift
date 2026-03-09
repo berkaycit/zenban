@@ -86,7 +86,7 @@ struct AgentRuntimeTests {
         let outcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
 
         #expect(outcome == .none)
-        #expect(reducer.cycleState(for: snapshot.cardID) == .ready)
+        #expect(reducer.cycleState(for: snapshot.cardID) == .warmingUp)
     }
 
     @Test
@@ -108,6 +108,30 @@ struct AgentRuntimeTests {
 
         #expect(runningOutcome == .none)
         #expect(idleOutcome == .none)
+        #expect(reducer.cycleState(for: cardID) == .warmingUp)
+    }
+
+    @Test
+    func workflowRequiresWarmupIdleBeforeArmingCompletion() {
+        var reducer = AgentTaskWorkflowReducer()
+        let cardID = UUID()
+        let snapshot = AgentSessionSnapshot(
+            cardID: cardID,
+            boardID: UUID(),
+            cardTitle: "claude-warmup",
+            column: .todo,
+            agent: .claude,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: cardID)
+        let baselineOutcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        let startupActivityOutcome = reducer.apply(snapshot: snapshot, rawStatus: .running)
+        let startupIdleOutcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+
+        #expect(baselineOutcome == .none)
+        #expect(startupActivityOutcome == .none)
+        #expect(startupIdleOutcome == .none)
         #expect(reducer.cycleState(for: cardID) == .ready)
     }
 
@@ -118,6 +142,17 @@ struct AgentRuntimeTests {
         let boardID = UUID()
 
         reducer.registerLaunch(for: cardID)
+        _ = reducer.apply(
+            snapshot: AgentSessionSnapshot(
+                cardID: cardID,
+                boardID: boardID,
+                cardTitle: "cc-2",
+                column: .inProgress,
+                agent: .claude,
+                tmuxSessionID: UUID().uuidString
+            ),
+            rawStatus: .idle
+        )
         _ = reducer.apply(
             snapshot: AgentSessionSnapshot(
                 cardID: cardID,
@@ -163,6 +198,8 @@ struct AgentRuntimeTests {
         )
         _ = reducer.apply(snapshot: baseline, rawStatus: .idle)
         _ = reducer.apply(snapshot: baseline, rawStatus: .waiting)
+        _ = reducer.apply(snapshot: baseline, rawStatus: .idle)
+        _ = reducer.apply(snapshot: baseline, rawStatus: .waiting)
 
         let outcome = reducer.apply(snapshot: baseline, rawStatus: .idle)
 
@@ -184,6 +221,7 @@ struct AgentRuntimeTests {
         )
 
         reducer.registerLaunch(for: cardID)
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
         _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
         let outcome = reducer.apply(snapshot: snapshot, rawStatus: .running)
 
