@@ -7297,6 +7297,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 return
             }
             guard let host else {
+                coordinator.lastPortalBindingSignature = nil
 #if DEBUG
                 coordinator.debugLogPortalPass(
                     "skip",
@@ -7309,6 +7310,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 return
             }
             guard let hostedView else {
+                coordinator.lastPortalBindingSignature = nil
 #if DEBUG
                 coordinator.debugLogPortalPass(
                     "skip",
@@ -7321,6 +7323,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 return
             }
             guard coordinator.attachGeneration == generation else {
+                coordinator.lastPortalBindingSignature = nil
 #if DEBUG
                 coordinator.debugLogPortalPass(
                     "skip",
@@ -7338,6 +7341,11 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 hasUsableLayout: host.bounds.width > 1 && host.bounds.height > 1
             )
             guard effectiveMountState == .mounted else {
+                // The mount state changed between scheduling and execution (e.g. rapid
+                // card switches suspended the panel before the async pass ran). Clear the
+                // executed signature so the next pass with the same parameters isn't
+                // incorrectly deduplicated — the binding was never actually applied.
+                coordinator.lastPortalBindingSignature = nil
 #if DEBUG
                 coordinator.debugLogPortalPass(
                     "skip",
@@ -7547,7 +7555,13 @@ struct GhosttyTerminalView: NSViewRepresentable {
             let hostId = ObjectIdentifier(host)
             let didChangeHost = coordinator.lastObservedHostId != hostId
             let didChangeReattachRevision = coordinator.lastProcessedReattachToken != reattachToken
-            if didChangeHost || didChangeReattachRevision {
+            // The hosted view was detached from the portal (suspend/hide removed its superview)
+            // but we still have a stale lastPortalBindingSignature from the previous bind.
+            // Clear the signature cache so the next portal pass isn't incorrectly deduplicated.
+            let didDetachFromPortal = hostedView.superview == nil
+                && coordinator.lastBoundHostId == hostId
+                && coordinator.lastPortalBindingSignature != nil
+            if didChangeHost || didChangeReattachRevision || didDetachFromPortal {
                 coordinator.attachGeneration += 1
                 coordinator.lastProcessedReattachToken = reattachToken
                 coordinator.lastObservedHostId = hostId
