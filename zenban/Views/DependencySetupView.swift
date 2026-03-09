@@ -21,13 +21,14 @@ struct DependencySetupView: View {
                     .font(.system(size: 40))
                     .foregroundStyle(.blue)
 
-                Text("Required Dependencies")
+                Text("Dependency Setup")
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("Zenban requires the following to function properly")
+                Text(headerDescription)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
 
             // Status list
@@ -84,13 +85,13 @@ struct DependencySetupView: View {
                     }
                     .buttonStyle(DependencyButtonStyle(isPrimary: true))
 
-                    Button(action: store.skipDependencySetup) {
-                        Text("Skip for Now")
+                    Button(action: dismiss) {
+                        Text(secondaryActionTitle)
                             .frame(width: 100)
                     }
                     .buttonStyle(DependencyButtonStyle(isPrimary: false))
                 } else if !store.isInstallingDependency {
-                    Button(action: { store.showDependencySetup = false }) {
+                    Button(action: store.dismissDependencySetup) {
                         Text("Continue")
                             .frame(width: 100)
                     }
@@ -100,9 +101,10 @@ struct DependencySetupView: View {
 
             // Warning for skip
             if hasMissingDependencies && !store.isInstallingDependency {
-                Text("Some features may not work without these dependencies")
+                Text(footerDescription)
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(hasMissingRequiredDependencies ? .orange : .secondary)
+                    .multilineTextAlignment(.center)
             }
         }
         .padding(32)
@@ -114,7 +116,7 @@ struct DependencySetupView: View {
         .onAppear { isFocused = true }
         .onKeyPress(.escape) {
             if !store.isInstallingDependency {
-                store.skipDependencySetup()
+                dismiss()
             }
             return .handled
         }
@@ -123,7 +125,7 @@ struct DependencySetupView: View {
                 if hasMissingDependencies {
                     installMissing()
                 } else {
-                    store.showDependencySetup = false
+                    store.dismissDependencySetup()
                 }
             }
             return .handled
@@ -131,33 +133,90 @@ struct DependencySetupView: View {
     }
 
     private var hasMissingDependencies: Bool {
-        guard let status = store.dependencyStatus else { return true }
-        return !status.allSatisfied
+        status?.hasMissingDependencies ?? true
+    }
+
+    private var hasMissingRequiredDependencies: Bool {
+        !(status?.allRequired ?? false)
+    }
+
+    private var hasMissingOptionalDependencies: Bool {
+        status?.hasMissingOptionalDependencies ?? false
+    }
+
+    private var headerDescription: String {
+        if hasMissingRequiredDependencies {
+            return "Zenban needs Homebrew and tmux for terminal cards. GitHub CLI and Claude Code CLI stay optional."
+        }
+        if hasMissingOptionalDependencies {
+            return "Required dependencies are installed. Optional tools can still be added for PR creation and AI commit messages."
+        }
+        return "All runtime dependencies are installed."
+    }
+
+    private var footerDescription: String {
+        if hasMissingRequiredDependencies {
+            return "Zenban's terminal cards will not work correctly until Homebrew and tmux are installed."
+        }
+        return "GitHub CLI and Claude Code CLI can be installed later from Settings."
+    }
+
+    private var secondaryActionTitle: String {
+        if store.dependencySetupIsBlocking && hasMissingRequiredDependencies {
+            return "Skip for Now"
+        }
+        if hasMissingOptionalDependencies && !hasMissingRequiredDependencies {
+            return "Continue"
+        }
+        return "Close"
+    }
+
+    private var status: DependencyCheckService.Status? {
+        store.dependencyStatus
     }
 
     private func isInstalled(_ dependency: DependencyCheckService.Dependency) -> Bool {
         store.dependencyStatus?[dependency] ?? false
     }
 
+    private func dismiss() {
+        if store.dependencySetupIsBlocking && hasMissingRequiredDependencies {
+            store.skipDependencySetup()
+        } else {
+            store.dismissDependencySetup()
+        }
+    }
+
     private func installMissing() {
+        let wasBlocking = store.dependencySetupIsBlocking
         store.isInstallingDependency = true
         store.installationOutput = ""
 
         Task {
             do {
                 try await DependencyCheckService.shared.installMissing { [store] output in
-                    store.installationOutput += output
+                    Task { @MainActor in
+                        store.installationOutput += output
+                    }
                 }
             } catch {
-                store.installationOutput += "\nError: \(error.localizedDescription)\n"
+                await MainActor.run {
+                    store.installationOutput += "\nError: \(error.localizedDescription)\n"
+                }
             }
 
-            store.dependencyStatus = DependencyCheckService.shared.checkAll()
-            store.isInstallingDependency = false
+            let updatedStatus = DependencyCheckService.shared.checkAll()
+            await MainActor.run {
+                store.dependencyStatus = updatedStatus
+                store.isInstallingDependency = false
+            }
 
-            if store.dependencyStatus?.allSatisfied == true {
+            if updatedStatus.allSatisfied ||
+               (wasBlocking && updatedStatus.allRequired) {
                 try? await Task.sleep(for: .seconds(1.5))
-                store.showDependencySetup = false
+                await MainActor.run {
+                    store.dismissDependencySetup()
+                }
             }
         }
     }
@@ -180,11 +239,9 @@ private struct DependencyRow: View {
                 HStack(spacing: 6) {
                     Text(dependency.rawValue)
                         .fontWeight(.medium)
-                    if !isRequired {
-                        Text("(Optional)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(isRequired ? "Required" : "Optional")
+                        .font(.caption)
+                        .foregroundStyle(isRequired ? .blue : .secondary)
                 }
                 Text(dependency.description)
                     .font(.caption)
@@ -195,11 +252,11 @@ private struct DependencyRow: View {
 
             Text(isInstalled ? "Installed" : "Missing")
                 .font(.caption)
-                .foregroundStyle(isInstalled ? .green : .orange)
+                .foregroundStyle(isInstalled ? .green : (isRequired ? .red : .orange))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(
-                    (isInstalled ? Color.green : Color.orange).opacity(0.15),
+                    (isInstalled ? Color.green : (isRequired ? Color.red : Color.orange)).opacity(0.15),
                     in: RoundedRectangle(cornerRadius: 4)
                 )
         }

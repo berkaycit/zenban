@@ -21,6 +21,7 @@ struct TerminalPanelView: View {
             terminalSurface: panel.surface,
             isActive: isFocused,
             isVisibleInUI: isVisibleInUI,
+            mountState: panel.mountState,
             portalZPriority: portalPriority,
             showsInactiveOverlay: isSplit && !isFocused,
             showsUnreadNotificationRing: hasUnreadNotification,

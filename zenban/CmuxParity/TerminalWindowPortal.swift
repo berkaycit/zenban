@@ -14,6 +14,13 @@ private func portalDebugToken(_ view: NSView?) -> String {
     return String(describing: ptr)
 }
 
+private func portalDebugBurstSummary(_ events: [(String, CFTimeInterval)], now: CFTimeInterval) -> String {
+    events
+        .filter { now - $0.1 <= 1.0 }
+        .map(\.0)
+        .joined(separator: ",")
+}
+
 private func portalDebugFrame(_ rect: NSRect) -> String {
     String(format: "%.1f,%.1f %.1fx%.1f", rect.origin.x, rect.origin.y, rect.size.width, rect.size.height)
 }
@@ -557,6 +564,11 @@ final class WindowTerminalPortal: NSObject {
     private var geometryObservers: [NSObjectProtocol] = []
 #if DEBUG
     private var lastLoggedBonsplitContainerSignature: String?
+    private var debugEnsureInstallCount = 0
+    private var debugBindCount = 0
+    private var debugSynchronizeAnchorCount = 0
+    private var debugSynchronizeAllCount = 0
+    private var debugRecentEvents: [(String, CFTimeInterval)] = []
 #endif
 
     private struct Entry {
@@ -569,6 +581,18 @@ final class WindowTerminalPortal: NSObject {
 
     private var entriesByHostedId: [ObjectIdentifier: Entry] = [:]
     private var hostedByAnchorId: [ObjectIdentifier: ObjectIdentifier] = [:]
+
+    private enum DeferredSyncReason: String {
+        case installRecovery
+        case missingAnchorMapping
+        case transientRecovery
+        case hostBoundsRecovery
+    }
+
+    private struct EnsureInstalledOutcome {
+        let installed: Bool
+        let didReinstall: Bool
+    }
 
     init(window: NSWindow) {
         self.window = window
@@ -583,6 +607,16 @@ final class WindowTerminalPortal: NSObject {
         installGeometryObservers(for: window)
         _ = ensureInstalled()
     }
+
+#if DEBUG
+    private func debugLog(_ event: String, message: String) {
+        let now = CACurrentMediaTime()
+        debugRecentEvents.append((event, now))
+        debugRecentEvents.removeAll { now - $0.1 > 1.0 }
+        let burst = debugRecentEvents.filter { $0.0 == event }.count
+        dlog("portal.loop.\(event) burst=\(burst) events=[\(portalDebugBurstSummary(debugRecentEvents, now: now))] \(message)")
+    }
+#endif
 
     private func installGeometryObservers(for window: NSWindow) {
         guard geometryObservers.isEmpty else { return }
@@ -727,16 +761,28 @@ final class WindowTerminalPortal: NSObject {
         dividerOverlayView.needsDisplay = true
     }
 
-    @discardableResult
-    private func ensureInstalled() -> Bool {
-        guard let window else { return false }
+    private func ensureInstalledOutcome() -> EnsureInstalledOutcome {
+        guard let window else { return EnsureInstalledOutcome(installed: false, didReinstall: false) }
         guard let (container, reference) = installedTargetIfStillValid(for: window) ?? installationTarget(for: window)
-        else { return false }
+        else { return EnsureInstalledOutcome(installed: false, didReinstall: false) }
         let browserHost = preferredBrowserHost(in: container)
+#if DEBUG
+        debugEnsureInstallCount += 1
+        debugLog(
+            "ensureInstalled.begin",
+            message:
+                "count=\(debugEnsureInstallCount) window=\(window.windowNumber) hostSuperview=\(portalDebugToken(hostView.superview)) " +
+                "container=\(portalDebugToken(container)) reference=\(portalDebugToken(reference)) " +
+                "installedContainer=\(portalDebugToken(installedContainerView)) installedReference=\(portalDebugToken(installedReferenceView)) " +
+                "browserHost=\(portalDebugToken(browserHost)) entries=\(entriesByHostedId.count)"
+        )
+#endif
+        var didReinstall = false
 
         if hostView.superview !== container ||
             installedContainerView !== container ||
             installedReferenceView !== reference {
+            didReinstall = true
             NSLayoutConstraint.deactivate(installConstraints)
             installConstraints.removeAll()
 
@@ -756,12 +802,34 @@ final class WindowTerminalPortal: NSObject {
             NSLayoutConstraint.activate(installConstraints)
             installedContainerView = container
             installedReferenceView = reference
+#if DEBUG
+            debugLog(
+                "ensureInstalled.reinstall",
+                message:
+                    "window=\(window.windowNumber) host=\(portalDebugToken(hostView)) container=\(portalDebugToken(container)) " +
+                    "reference=\(portalDebugToken(reference)) browserHost=\(portalDebugToken(browserHost))"
+            )
+#endif
         } else if let browserHost {
             if !Self.isView(browserHost, above: hostView, in: container) {
                 container.addSubview(hostView, positioned: .below, relativeTo: browserHost)
+#if DEBUG
+                debugLog(
+                    "ensureInstalled.raiseBelowBrowser",
+                    message:
+                        "window=\(window.windowNumber) host=\(portalDebugToken(hostView)) browserHost=\(portalDebugToken(browserHost))"
+                )
+#endif
             }
         } else if !Self.isView(hostView, above: reference, in: container) {
             container.addSubview(hostView, positioned: .above, relativeTo: reference)
+#if DEBUG
+            debugLog(
+                "ensureInstalled.raiseAboveReference",
+                message:
+                    "window=\(window.windowNumber) host=\(portalDebugToken(hostView)) reference=\(portalDebugToken(reference))"
+            )
+#endif
         }
 
         // Keep the drag/mouse forwarding overlay above portal-hosted terminal views.
@@ -775,7 +843,20 @@ final class WindowTerminalPortal: NSObject {
         _ = synchronizeHostFrameToReference()
         ensureDividerOverlayOnTop()
 
-        return true
+#if DEBUG
+        debugLog(
+            "ensureInstalled.end",
+            message:
+                "window=\(window.windowNumber) hostSuperview=\(portalDebugToken(hostView.superview)) " +
+                "hostFrame=\(portalDebugFrame(hostView.frame)) entries=\(entriesByHostedId.count)"
+        )
+#endif
+        return EnsureInstalledOutcome(installed: true, didReinstall: didReinstall)
+    }
+
+    @discardableResult
+    private func ensureInstalled() -> Bool {
+        ensureInstalledOutcome().installed
     }
 
     private func installedTargetIfStillValid(for window: NSWindow) -> (container: NSView, reference: NSView)? {
@@ -988,11 +1069,23 @@ final class WindowTerminalPortal: NSObject {
     }
 
     func bind(hostedView: GhosttySurfaceScrollView, to anchorView: NSView, visibleInUI: Bool, zPriority: Int = 0) {
-        guard ensureInstalled() else { return }
+        let installOutcome = ensureInstalledOutcome()
+        guard installOutcome.installed else { return }
 
         let hostedId = ObjectIdentifier(hostedView)
         let anchorId = ObjectIdentifier(anchorView)
         let previousEntry = entriesByHostedId[hostedId]
+#if DEBUG
+        debugBindCount += 1
+        debugLog(
+            "bind.begin",
+            message:
+                "count=\(debugBindCount) hosted=\(portalDebugToken(hostedView)) anchor=\(portalDebugToken(anchorView)) " +
+                "visible=\(visibleInUI ? 1 : 0) z=\(zPriority) hostedSuperview=\(portalDebugToken(hostedView.superview)) " +
+                "prevAnchor=\(portalDebugToken(previousEntry?.anchorView)) prevVisible=\((previousEntry?.visibleInUI ?? false) ? 1 : 0) " +
+                "prevZ=\(previousEntry?.zPriority ?? Int.min)"
+        )
+#endif
 
         if let previousHostedId = hostedByAnchorId[anchorId], previousHostedId != hostedId {
 #if DEBUG
@@ -1089,8 +1182,19 @@ final class WindowTerminalPortal: NSObject {
 
         ensureDividerOverlayOnTop()
 
+#if DEBUG
+        debugLog(
+            "bind.end",
+            message:
+                "hosted=\(portalDebugToken(hostedView)) anchor=\(portalDebugToken(anchorView)) " +
+                "hostedSuperview=\(portalDebugToken(hostedView.superview)) hidden=\(hostedView.isHidden ? 1 : 0) " +
+                "frame=\(portalDebugFrame(hostedView.frame)) entries=\(entriesByHostedId.count)"
+        )
+#endif
         synchronizeHostedView(withId: hostedId)
-        scheduleDeferredFullSynchronizeAll()
+        if installOutcome.didReinstall {
+            scheduleDeferredFullSynchronizeAll(reason: .installRecovery)
+        }
         pruneDeadEntries()
     }
 
@@ -1100,23 +1204,35 @@ final class WindowTerminalPortal: NSObject {
         pruneDeadEntries()
         let anchorId = ObjectIdentifier(anchorView)
         let primaryHostedId = hostedByAnchorId[anchorId]
+#if DEBUG
+        debugSynchronizeAnchorCount += 1
+        debugLog(
+            "sync.anchor",
+            message:
+                "count=\(debugSynchronizeAnchorCount) anchor=\(portalDebugToken(anchorView)) " +
+                "primaryHosted=\(String(describing: primaryHostedId)) entries=\(entriesByHostedId.count) " +
+                "anchorFrame=\(portalDebugFrameInWindow(anchorView)) hostFrame=\(portalDebugFrameInWindow(hostView))"
+        )
+#endif
         if let primaryHostedId {
             synchronizeHostedView(withId: primaryHostedId)
+        } else {
+            scheduleDeferredFullSynchronizeAll(reason: .missingAnchorMapping)
         }
-
-        // Failsafe: during aggressive divider drags/structural churn, one anchor can miss a
-        // geometry callback while another fires. Reconcile all mapped hosted views so no stale
-        // frame remains "stuck" onscreen until the next interaction.
-        synchronizeAllHostedViews(excluding: primaryHostedId)
-        scheduleDeferredFullSynchronizeAll()
     }
 
-    private func scheduleDeferredFullSynchronizeAll() {
+    private func scheduleDeferredFullSynchronizeAll(reason: DeferredSyncReason) {
         guard !hasDeferredFullSyncScheduled else { return }
         hasDeferredFullSyncScheduled = true
+#if DEBUG
+        debugLog("sync.defer.schedule", message: "entries=\(entriesByHostedId.count) reason=\(reason.rawValue)")
+#endif
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.hasDeferredFullSyncScheduled = false
+#if DEBUG
+            self.debugLog("sync.defer.tick", message: "entries=\(self.entriesByHostedId.count) reason=\(reason.rawValue)")
+#endif
             self.synchronizeAllHostedViews(excluding: nil)
         }
     }
@@ -1126,6 +1242,14 @@ final class WindowTerminalPortal: NSObject {
         synchronizeLayoutHierarchy()
         pruneDeadEntries()
         let hostedIds = Array(entriesByHostedId.keys)
+#if DEBUG
+        debugSynchronizeAllCount += 1
+        debugLog(
+            "sync.all",
+            message:
+                "count=\(debugSynchronizeAllCount) entries=\(hostedIds.count) skip=\(String(describing: hostedIdToSkip))"
+        )
+#endif
         for hostedId in hostedIds {
             if hostedId == hostedIdToSkip { continue }
             synchronizeHostedView(withId: hostedId)
@@ -1159,7 +1283,7 @@ final class WindowTerminalPortal: NSObject {
         )
 #endif
         if entry.transientRecoveryRetriesRemaining > 0 {
-            scheduleDeferredFullSynchronizeAll()
+            scheduleDeferredFullSynchronizeAll(reason: .transientRecovery)
         }
         return true
     }
@@ -1286,7 +1410,7 @@ final class WindowTerminalPortal: NSObject {
                         reason: "hostBoundsNotReady"
                     )
                 } else {
-                    scheduleDeferredFullSynchronizeAll()
+                    scheduleDeferredFullSynchronizeAll(reason: .hostBoundsRecovery)
                 }
             }
             return
@@ -1685,6 +1809,9 @@ enum TerminalWindowPortalRegistry {
         if let existing = objc_getAssociatedObject(window, &cmuxWindowTerminalPortalKey) as? WindowTerminalPortal {
             portalsByWindowId[ObjectIdentifier(window)] = existing
             installWindowCloseObserverIfNeeded(for: window)
+#if DEBUG
+            dlog("portal.registry.portal.reuse window=\(window.windowNumber) entries=\(existing.debugEntryCount())")
+#endif
             return existing
         }
 
@@ -1692,6 +1819,9 @@ enum TerminalWindowPortalRegistry {
         objc_setAssociatedObject(window, &cmuxWindowTerminalPortalKey, portal, .OBJC_ASSOCIATION_RETAIN)
         portalsByWindowId[ObjectIdentifier(window)] = portal
         installWindowCloseObserverIfNeeded(for: window)
+#if DEBUG
+        dlog("portal.registry.portal.create window=\(window.windowNumber)")
+#endif
         return portal
     }
 
@@ -1708,6 +1838,15 @@ enum TerminalWindowPortalRegistry {
         let windowId = ObjectIdentifier(window)
         let hostedId = ObjectIdentifier(hostedView)
         let guardState = hostedView.portalBindingGuardState()
+#if DEBUG
+        dlog(
+            "portal.registry.bind.begin hosted=\(portalDebugToken(hostedView)) " +
+            "anchor=\(portalDebugToken(anchorView)) window=\(window.windowNumber) visible=\(visibleInUI ? 1 : 0) z=\(zPriority) " +
+            "expectedSurface=\(expectedSurfaceId?.uuidString.prefix(5) ?? "nil") expectedGeneration=\(expectedGeneration.map { String($0) } ?? "nil") " +
+            "actualSurface=\(guardState.surfaceId?.uuidString.prefix(5) ?? "nil") actualGeneration=\(guardState.generation.map { String($0) } ?? "nil") " +
+            "actualState=\(guardState.state)"
+        )
+#endif
         guard hostedView.canAcceptPortalBinding(
             expectedSurfaceId: expectedSurfaceId,
             expectedGeneration: expectedGeneration
@@ -1745,12 +1884,35 @@ enum TerminalWindowPortalRegistry {
         nextPortal.bind(hostedView: hostedView, to: anchorView, visibleInUI: visibleInUI, zPriority: zPriority)
         hostedToWindowId[hostedId] = windowId
         pruneHostedMappings(for: windowId, validHostedIds: nextPortal.hostedIds())
+#if DEBUG
+        dlog(
+            "portal.registry.bind.end hosted=\(portalDebugToken(hostedView)) " +
+            "anchor=\(portalDebugToken(anchorView)) window=\(window.windowNumber) mappedWindow=\(String(describing: hostedToWindowId[hostedId]))"
+        )
+#endif
     }
 
     static func synchronizeForAnchor(_ anchorView: NSView) {
-        guard let window = anchorView.window else { return }
+        guard let window = anchorView.window else {
+#if DEBUG
+            dlog("portal.registry.sync.skip anchor=\(portalDebugToken(anchorView)) reason=noWindow")
+#endif
+            return
+        }
+#if DEBUG
+        dlog(
+            "portal.registry.sync.begin anchor=\(portalDebugToken(anchorView)) " +
+            "window=\(window.windowNumber)"
+        )
+#endif
         let portal = portal(for: window)
         portal.synchronizeHostedViewForAnchor(anchorView)
+#if DEBUG
+        dlog(
+            "portal.registry.sync.end anchor=\(portalDebugToken(anchorView)) " +
+            "window=\(window.windowNumber) entries=\(portal.debugEntryCount())"
+        )
+#endif
     }
 
     static func hideHostedView(_ hostedView: GhosttySurfaceScrollView) {
@@ -1764,8 +1926,19 @@ enum TerminalWindowPortalRegistry {
     /// Use this when a terminal panel is actually closing (not transient SwiftUI dismantle).
     static func detach(hostedView: GhosttySurfaceScrollView) {
         let hostedId = ObjectIdentifier(hostedView)
-        guard let windowId = hostedToWindowId.removeValue(forKey: hostedId) else { return }
+        guard let windowId = hostedToWindowId.removeValue(forKey: hostedId) else {
+#if DEBUG
+            dlog("portal.registry.detach.skip hosted=\(portalDebugToken(hostedView)) reason=missingWindowMapping")
+#endif
+            return
+        }
+#if DEBUG
+        dlog("portal.registry.detach.begin hosted=\(portalDebugToken(hostedView)) windowId=\(windowId)")
+#endif
         portalsByWindowId[windowId]?.detachHostedView(withId: hostedId)
+#if DEBUG
+        dlog("portal.registry.detach.end hosted=\(portalDebugToken(hostedView)) windowId=\(windowId)")
+#endif
     }
 
     /// Update the visibleInUI flag on an existing portal entry without rebinding.
@@ -1774,7 +1947,21 @@ enum TerminalWindowPortalRegistry {
     static func updateEntryVisibility(for hostedView: GhosttySurfaceScrollView, visibleInUI: Bool) {
         let hostedId = ObjectIdentifier(hostedView)
         guard let windowId = hostedToWindowId[hostedId],
-              let portal = portalsByWindowId[windowId] else { return }
+              let portal = portalsByWindowId[windowId] else {
+#if DEBUG
+            dlog(
+                "portal.registry.visibility.skip hosted=\(portalDebugToken(hostedView)) " +
+                "visible=\(visibleInUI ? 1 : 0) reason=missingPortalMapping"
+            )
+#endif
+            return
+        }
+#if DEBUG
+        dlog(
+            "portal.registry.visibility hosted=\(portalDebugToken(hostedView)) " +
+            "visible=\(visibleInUI ? 1 : 0) windowId=\(windowId) entries=\(portal.debugEntryCount())"
+        )
+#endif
         portal.updateEntryVisibility(forHostedId: hostedId, visibleInUI: visibleInUI)
     }
 

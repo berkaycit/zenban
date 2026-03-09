@@ -1,5 +1,8 @@
 import AppKit
 import Foundation
+#if DEBUG
+import Bonsplit
+#endif
 
 @MainActor
 @Observable
@@ -23,12 +26,33 @@ final class TerminalManager {
     private var agentLaunchedForCard: Set<UUID> = []
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
     private var pendingCardUnfocusTarget: (cardID: UUID, panelID: UUID)?
+    private var activeCardID: UUID?
     private let mainBoardTabManager = TabManager(
         createsInitialWorkspace: false,
         keepsBootstrapWorkspaceWhenEmpty: false
     )
 
     weak var boardStore: BoardStore?
+
+#if DEBUG
+    private func debugWorkspaceSummary(_ record: WorkspaceRecord) -> String {
+        let terminalCount = record.workspace.panels.values.reduce(into: 0) { count, panel in
+            if panel is TerminalPanel {
+                count += 1
+            }
+        }
+        let browserCount = record.workspace.panels.values.reduce(into: 0) { count, panel in
+            if panel is BrowserPanel {
+                count += 1
+            }
+        }
+        return
+            "card=\(record.cardID.uuidString.prefix(5)) board=\(record.boardID.uuidString.prefix(5)) " +
+            "workspace=\(record.workspace.id.uuidString.prefix(5)) selectedTab=\(record.tabManager.selectedTabId?.uuidString.prefix(5) ?? "nil") " +
+            "focusedPanel=\(record.workspace.focusedPanelId?.uuidString.prefix(5) ?? "nil") detached=\(record.detachedWindowID?.uuidString.prefix(5) ?? "nil") " +
+            "terminals=\(terminalCount) browsers=\(browserCount) loadedTerminal=\(record.workspace.hasLoadedTerminalSurface() ? 1 : 0)"
+    }
+#endif
 
     var isTerminalAvailable: Bool {
         GhosttyApp.shared.app != nil
@@ -39,6 +63,12 @@ final class TerminalManager {
         AppDelegate.shared?.registerMainBoardTabManager(mainBoardTabManager)
     }
 
+    /// Read-only lookup that returns an existing record without mutating observable state.
+    /// Safe to call from SwiftUI body. Returns nil if the record hasn't been created yet.
+    func existingWorkspaceRecord(for cardID: UUID) -> WorkspaceRecord? {
+        records[cardID]
+    }
+
     func workspaceRecord(for cardID: UUID, boardID: UUID, cardTitle: String) -> WorkspaceRecord {
         if var record = records[cardID] {
             if record.cardTitle != cardTitle {
@@ -47,6 +77,9 @@ final class TerminalManager {
                 records[cardID] = record
                 AppDelegate.shared?.updateWorkspaceTitle(for: cardID, title: cardTitle)
             }
+#if DEBUG
+            dlog("handoff.workspaceRecord.reuse \(debugWorkspaceSummary(record)) title=\(cardTitle)")
+#endif
             return record
         }
 
@@ -82,6 +115,9 @@ final class TerminalManager {
         )
         records[cardID] = record
         AppDelegate.shared?.register(tabManager: mainBoardTabManager, for: cardID, boardID: boardID)
+#if DEBUG
+        dlog("handoff.workspaceRecord.create \(debugWorkspaceSummary(record)) title=\(cardTitle) workdir=\(workingDirectory ?? "nil")")
+#endif
 
         let isGitRepo = board?.repositoryPath.map { GitService.isGitRepository(path: $0) } ?? false
         if let agent, !isGitRepo {
@@ -102,26 +138,69 @@ final class TerminalManager {
 
     func activateWorkspace(for cardID: UUID) {
         guard let record = records[cardID] else { return }
+
+        // Skip redundant activation to prevent first-responder churn
+        // when rapid card switches cause multiple activate calls for the same card.
+        guard activeCardID != cardID else {
+#if DEBUG
+            dlog("handoff.activate.skip \(debugWorkspaceSummary(record)) reason=alreadyActive")
+#endif
+            return
+        }
+        activeCardID = cardID
+
+#if DEBUG
+        dlog("handoff.activate.begin \(debugWorkspaceSummary(record))")
+#endif
+        record.workspace.resumeAllTerminalSurfaces()
         if record.tabManager.selectedTabId != record.workspace.id {
             record.tabManager.selectWorkspace(record.workspace)
         }
         AppDelegate.shared?.activateCard(cardID)
+#if DEBUG
+        dlog("handoff.activate.end \(debugWorkspaceSummary(record))")
+#endif
     }
 
     func deactivateWorkspace(for cardID: UUID) {
+        if activeCardID == cardID {
+            activeCardID = nil
+        }
+#if DEBUG
+        if let record = records[cardID] {
+            dlog("handoff.deactivate \(debugWorkspaceSummary(record))")
+        } else {
+            dlog("handoff.deactivate.missing card=\(cardID.uuidString.prefix(5))")
+        }
+#endif
         AppDelegate.shared?.deactivateCard(cardID)
     }
 
     func clearActiveWorkspace() {
+        activeCardID = nil
         AppDelegate.shared?.clearActiveCard()
     }
 
     func startCardHandoff(from oldCardID: UUID, to newCardID: UUID) {
+        // Skip if already targeting this card (rapid switches may call this multiple times)
+        guard oldCardID != newCardID else { return }
+
+#if DEBUG
+        let oldSummary = records[oldCardID].map(debugWorkspaceSummary) ?? "card=\(oldCardID.uuidString.prefix(5)) missing=1"
+        let newSummary = records[newCardID].map(debugWorkspaceSummary) ?? "card=\(newCardID.uuidString.prefix(5)) missing=1"
+        dlog("handoff.start from={\(oldSummary)} to={\(newSummary)}")
+#endif
         activateWorkspace(for: newCardID)
 
         guard let oldRecord = records[oldCardID],
               let focusedPanelID = oldRecord.workspace.focusedPanelId,
               oldRecord.workspace.panels[focusedPanelID] != nil else {
+#if DEBUG
+            dlog(
+                "handoff.start.noPendingUnfocus oldCard=\(oldCardID.uuidString.prefix(5)) " +
+                "reason=missingFocusedPanel selected=\(newCardID.uuidString.prefix(5))"
+            )
+#endif
             completePendingCardUnfocus(selectedCardID: newCardID)
             return
         }
@@ -132,18 +211,58 @@ final class TerminalManager {
         )
     }
 
-    func completeCardHandoff(retiringCardID: UUID?, selectedCardID: UUID?, reason _: String) {
+    func completeCardHandoff(retiringCardID: UUID?, selectedCardID: UUID?, reason: String) {
+#if DEBUG
+        dlog(
+            "handoff.complete.begin retiring=\(retiringCardID?.uuidString.prefix(5) ?? "nil") " +
+            "selected=\(selectedCardID?.uuidString.prefix(5) ?? "nil") reason=\(reason)"
+        )
+#endif
         if let retiringCardID {
             hidePortalViews(for: retiringCardID)
+            suspendWorkspaceIfPossible(for: retiringCardID)
         }
 
         completePendingCardUnfocus(selectedCardID: selectedCardID)
+#if DEBUG
+        dlog(
+            "handoff.complete.end retiring=\(retiringCardID?.uuidString.prefix(5) ?? "nil") " +
+            "selected=\(selectedCardID?.uuidString.prefix(5) ?? "nil") reason=\(reason) " +
+            "pendingUnfocus=\(pendingCardUnfocusTarget?.cardID.uuidString.prefix(5) ?? "nil")"
+        )
+#endif
     }
 
     func hidePortalViews(for cardID: UUID) {
         guard let record = records[cardID] else { return }
+#if DEBUG
+        dlog("handoff.hidePortals \(debugWorkspaceSummary(record))")
+#endif
         record.workspace.hideAllTerminalPortalViews()
         record.workspace.hideAllBrowserPortalViews()
+    }
+
+    func suspendWorkspaceIfPossible(for cardID: UUID) {
+        guard let record = records[cardID] else { return }
+        guard record.detachedWindowID == nil else {
+#if DEBUG
+            dlog("handoff.suspend.skip \(debugWorkspaceSummary(record)) reason=detached")
+#endif
+            return
+        }
+        guard TmuxSessionManager.shared.isTmuxAvailable() else {
+#if DEBUG
+            dlog("handoff.suspend.skip \(debugWorkspaceSummary(record)) reason=tmuxUnavailable")
+#endif
+            return
+        }
+#if DEBUG
+        dlog("handoff.suspend.begin \(debugWorkspaceSummary(record))")
+#endif
+        record.workspace.suspendAllTerminalSurfaces()
+#if DEBUG
+        dlog("handoff.suspend.end \(debugWorkspaceSummary(record))")
+#endif
     }
 
     func killSessionForCard(_ cardID: UUID) {
@@ -158,6 +277,9 @@ final class TerminalManager {
             pendingCardUnfocusTarget = nil
         }
         guard let record = records.removeValue(forKey: cardID) else { return }
+#if DEBUG
+        dlog("handoff.resetWorkspace \(debugWorkspaceSummary(record))")
+#endif
         AppDelegate.shared?.unregister(cardID: cardID)
         _ = record.tabManager.detachWorkspace(tabId: cardID)
         record.workspace.teardownAllPanels()
@@ -182,6 +304,12 @@ final class TerminalManager {
             record.detachedWindowID = detachedWindowID
             records[cardID] = record
             AppDelegate.shared?.register(tabManager: destinationManager, for: cardID, boardID: record.boardID)
+            if detachedWindowID != nil {
+                record.workspace.resumeAllTerminalSurfaces()
+            }
+#if DEBUG
+            dlog("handoff.moveWorkspace.reuse \(debugWorkspaceSummary(record)) destDetached=\(detachedWindowID?.uuidString.prefix(5) ?? "nil")")
+#endif
             return true
         }
 
@@ -194,6 +322,12 @@ final class TerminalManager {
         record.detachedWindowID = detachedWindowID
         records[cardID] = record
         AppDelegate.shared?.register(tabManager: destinationManager, for: cardID, boardID: record.boardID)
+        if detachedWindowID != nil {
+            workspace.resumeAllTerminalSurfaces()
+        }
+#if DEBUG
+        dlog("handoff.moveWorkspace.move \(debugWorkspaceSummary(record)) destDetached=\(detachedWindowID?.uuidString.prefix(5) ?? "nil")")
+#endif
         return true
     }
 
@@ -251,9 +385,18 @@ final class TerminalManager {
         pendingWorktreeReady.removeAll()
     }
 
-    func suspendAllTerminals() {}
+    func suspendAllTerminals() {
+        guard TmuxSessionManager.shared.isTmuxAvailable() else { return }
+        for record in records.values {
+            record.workspace.suspendAllTerminalSurfaces()
+        }
+    }
 
-    func resumeAllTerminals() {}
+    func resumeAllTerminals() {
+        for record in records.values {
+            record.workspace.resumeAllTerminalSurfaces()
+        }
+    }
 
     func focusTerminal(for cardID: UUID) {
         activateWorkspace(for: cardID)
@@ -279,6 +422,12 @@ final class TerminalManager {
             pendingCardID: pending.cardID,
             selectedCardID: selectedCardID
         ) else {
+#if DEBUG
+            dlog(
+                "handoff.unfocus.skip card=\(pending.cardID.uuidString.prefix(5)) " +
+                "panel=\(pending.panelID.uuidString.prefix(5)) selected=\(selectedCardID?.uuidString.prefix(5) ?? "nil")"
+            )
+#endif
             pendingCardUnfocusTarget = nil
             return
         }
@@ -287,9 +436,18 @@ final class TerminalManager {
 
         guard let record = records[pending.cardID],
               let panel = record.workspace.panels[pending.panelID] else {
+#if DEBUG
+            dlog(
+                "handoff.unfocus.missing card=\(pending.cardID.uuidString.prefix(5)) " +
+                "panel=\(pending.panelID.uuidString.prefix(5))"
+            )
+#endif
             return
         }
 
+#if DEBUG
+        dlog("handoff.unfocus.apply \(debugWorkspaceSummary(record)) targetPanel=\(pending.panelID.uuidString.prefix(5))")
+#endif
         panel.unfocus()
     }
 
@@ -300,6 +458,12 @@ final class TerminalManager {
         if let current = pendingCardUnfocusTarget,
            current.cardID == next.cardID,
            current.panelID == next.panelID {
+#if DEBUG
+            dlog(
+                "handoff.unfocus.replace.skip card=\(next.cardID.uuidString.prefix(5)) " +
+                "panel=\(next.panelID.uuidString.prefix(5)) reason=sameTarget"
+            )
+#endif
             return
         }
 
@@ -310,11 +474,20 @@ final class TerminalManager {
             ),
                let record = records[current.cardID],
                let panel = record.workspace.panels[current.panelID] {
+#if DEBUG
+                dlog("handoff.unfocus.replace.flush \(debugWorkspaceSummary(record)) targetPanel=\(current.panelID.uuidString.prefix(5))")
+#endif
                 panel.unfocus()
             }
         }
 
         pendingCardUnfocusTarget = next
+#if DEBUG
+        dlog(
+            "handoff.unfocus.replace card=\(next.cardID.uuidString.prefix(5)) " +
+            "panel=\(next.panelID.uuidString.prefix(5)) selected=\(selectedCardID?.uuidString.prefix(5) ?? "nil")"
+        )
+#endif
     }
 
     private static func shouldUnfocusPendingCard(pendingCardID: UUID, selectedCardID: UUID?) -> Bool {

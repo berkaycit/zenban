@@ -54,6 +54,7 @@ final class BoardStore {
     var dependencyStatus: DependencyCheckService.Status?
     var isInstallingDependency = false
     var installationOutput = ""
+    var dependencySetupIsBlocking = false
 
     // Unified overlay state (FSM)
     var overlayState: OverlayState = .none
@@ -277,15 +278,29 @@ final class BoardStore {
 
     func checkDependencies() {
         dependencyStatus = DependencyCheckService.shared.checkAll()
-        if let status = dependencyStatus, !status.allRequired,
+        if let status = dependencyStatus,
+           !status.allRequired,
            !UserDefaults.standard.bool(forKey: Self.skipDependencyCheckKey) {
+            dependencySetupIsBlocking = true
             showDependencySetup = true
+        } else if dependencyStatus?.allRequired == true {
+            dependencySetupIsBlocking = false
         }
+    }
+
+    func presentDependencySetup(blocking: Bool = false) {
+        dependencySetupIsBlocking = blocking
+        showDependencySetup = true
+    }
+
+    func dismissDependencySetup() {
+        dependencySetupIsBlocking = false
+        showDependencySetup = false
     }
 
     func skipDependencySetup() {
         UserDefaults.standard.set(true, forKey: Self.skipDependencyCheckKey)
-        showDependencySetup = false
+        dismissDependencySetup()
     }
 
     // MARK: - Board Operations

@@ -11,15 +11,18 @@ struct TerminalContainerView: View {
     @Environment(TerminalManager.self) private var terminalManager
 
     var body: some View {
-        let record = terminalManager.workspaceRecord(for: cardID, boardID: boardID, cardTitle: cardTitle)
-
-        WorkspaceContentView(
-            workspace: record.workspace,
-            isWorkspaceVisible: isWorkspaceVisible,
-            isWorkspaceInputActive: isWorkspaceInputActive,
-            workspacePortalPriority: workspacePortalPriority,
-            onThemeRefreshRequest: nil
-        )
-        .environmentObject(TerminalNotificationStore.shared)
+        // Use read-only lookup to avoid mutating @Observable state during body evaluation.
+        // The record is guaranteed to exist because CardWorkspaceDeckView creates it
+        // in onAppear/onChange before this view is mounted.
+        if let record = terminalManager.existingWorkspaceRecord(for: cardID) {
+            WorkspaceContentView(
+                workspace: record.workspace,
+                isWorkspaceVisible: isWorkspaceVisible,
+                isWorkspaceInputActive: isWorkspaceInputActive,
+                workspacePortalPriority: workspacePortalPriority,
+                onThemeRefreshRequest: nil
+            )
+            .environmentObject(TerminalNotificationStore.shared)
+        }
     }
 }

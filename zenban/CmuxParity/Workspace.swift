@@ -6,6 +6,13 @@ import Combine
 import CoreText
 import WebKit
 
+#if DEBUG
+private func cmuxDebugViewToken(_ view: NSView?) -> String {
+    guard let view else { return "nil" }
+    return String(describing: Unmanaged.passUnretained(view).toOpaque())
+}
+#endif
+
 func cmuxSurfaceContextName(_ context: ghostty_surface_context_e) -> String {
     switch context {
     case GHOSTTY_SURFACE_CONTEXT_WINDOW:
@@ -1486,6 +1493,32 @@ final class Workspace: Identifiable, ObservableObject {
     func requestBackgroundTerminalSurfaceStartIfNeeded() {
         for terminalPanel in panels.values.compactMap({ $0 as? TerminalPanel }) {
             terminalPanel.surface.requestBackgroundSurfaceStartIfNeeded()
+        }
+    }
+
+    func suspendAllTerminalSurfaces() {
+        let terminalPanels = panels.values.compactMap { $0 as? TerminalPanel }
+#if DEBUG
+        dlog(
+            "workspace.terminals.suspend workspace=\(id.uuidString.prefix(5)) " +
+            "count=\(terminalPanels.count) focused=\(focusedPanelId?.uuidString.prefix(5) ?? "nil")"
+        )
+#endif
+        for terminalPanel in terminalPanels {
+            terminalPanel.suspend()
+        }
+    }
+
+    func resumeAllTerminalSurfaces() {
+        let terminalPanels = panels.values.compactMap { $0 as? TerminalPanel }
+#if DEBUG
+        dlog(
+            "workspace.terminals.resume workspace=\(id.uuidString.prefix(5)) " +
+            "count=\(terminalPanels.count) focused=\(focusedPanelId?.uuidString.prefix(5) ?? "nil")"
+        )
+#endif
+        for terminalPanel in terminalPanels {
+            terminalPanel.resume()
         }
     }
 
@@ -3070,19 +3103,47 @@ final class Workspace: Identifiable, ObservableObject {
                 "reason=firstResponderAlreadyConverged"
             )
         }
+        let currentPanelToken = currentlyFocusedPanelId.map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let surfaceTabToken = String(describing: tabId)
+        let targetPaneToken = targetPaneId.map { String($0.id.uuidString.prefix(5)) } ?? "nil"
+        let previousHostedToken = cmuxDebugViewToken(previousTerminalHostedView)
+        dlog(
+            "focus.panel.state workspace=\(id.uuidString.prefix(5)) panel=\(panelId.uuidString.prefix(5)) " +
+            "current=\(currentPanelToken) surfaceTab=\(surfaceTabToken) targetPane=\(targetPaneToken) " +
+            "selectionConverged=\(selectionAlreadyConverged ? 1 : 0) suppressReentrant=\(shouldSuppressReentrantRefocus ? 1 : 0) " +
+            "previousHosted=\(previousHostedToken)"
+        )
 #endif
 
         if let targetPaneId, !selectionAlreadyConverged {
+#if DEBUG
+            dlog(
+                "focus.panel.focusPane workspace=\(id.uuidString.prefix(5)) panel=\(panelId.uuidString.prefix(5)) " +
+                "pane=\(targetPaneId.id.uuidString.prefix(5))"
+            )
+#endif
             bonsplitController.focusPane(targetPaneId)
         }
 
         if !selectionAlreadyConverged {
+#if DEBUG
+            dlog(
+                "focus.panel.selectTab workspace=\(id.uuidString.prefix(5)) panel=\(panelId.uuidString.prefix(5)) " +
+                "tab=\(String(describing: tabId))"
+            )
+#endif
             bonsplitController.selectTab(tabId)
         }
 
         // Also focus the underlying panel
         if let panel = panels[panelId] {
             if (currentlyFocusedPanelId != panelId || !selectionAlreadyConverged) && !shouldSuppressReentrantRefocus {
+#if DEBUG
+                dlog(
+                    "focus.panel.panelFocus workspace=\(id.uuidString.prefix(5)) panel=\(panelId.uuidString.prefix(5)) " +
+                    "kind=\(surfaceKind(for: panel))"
+                )
+#endif
                 panel.focus()
             }
 
@@ -3090,6 +3151,12 @@ final class Workspace: Identifiable, ObservableObject {
                 // Avoid re-entrant focus loops when focus was initiated by AppKit first-responder
                 // (becomeFirstResponder -> onFocus -> focusPanel).
                 if !terminalPanel.hostedView.isSurfaceViewFirstResponder() {
+#if DEBUG
+                    dlog(
+                        "focus.panel.moveFocus workspace=\(id.uuidString.prefix(5)) panel=\(panelId.uuidString.prefix(5)) " +
+                        "from=\(cmuxDebugViewToken(previousTerminalHostedView)) to=\(cmuxDebugViewToken(terminalPanel.hostedView))"
+                    )
+#endif
                     terminalPanel.hostedView.moveFocus(from: previousTerminalHostedView)
                 }
             }
@@ -3108,6 +3175,13 @@ final class Workspace: Identifiable, ObservableObject {
                 maybeAutoFocusBrowserAddressBarOnPanelFocus(browserPanel, trigger: trigger)
             }
         }
+#if DEBUG
+        dlog(
+            "focus.panel.end workspace=\(id.uuidString.prefix(5)) panel=\(panelId.uuidString.prefix(5)) " +
+            "focused=\(focusedPanelId?.uuidString.prefix(5) ?? "nil") " +
+            "pane=\(bonsplitController.focusedPaneId?.id.uuidString.prefix(5) ?? "nil")"
+        )
+#endif
     }
 
     private func maybeAutoFocusBrowserAddressBarOnPanelFocus(
@@ -3276,10 +3350,22 @@ final class Workspace: Identifiable, ObservableObject {
     /// Called before the workspace is unmounted to prevent portal-hosted terminal
     /// views from covering browser panes in the newly selected workspace.
     func hideAllTerminalPortalViews() {
-        for panel in panels.values {
-            guard let terminal = panel as? TerminalPanel else { continue }
+        let terminals = panels.values.compactMap { $0 as? TerminalPanel }
+#if DEBUG
+        dlog(
+            "workspace.terminals.hidePortals workspace=\(id.uuidString.prefix(5)) " +
+            "count=\(terminals.count) focused=\(focusedPanelId?.uuidString.prefix(5) ?? "nil")"
+        )
+#endif
+        for terminal in terminals {
             terminal.hostedView.setVisibleInUI(false)
             TerminalWindowPortalRegistry.hideHostedView(terminal.hostedView)
+#if DEBUG
+            dlog(
+                "workspace.terminals.hidePortals.panel workspace=\(id.uuidString.prefix(5)) " +
+                "panel=\(terminal.id.uuidString.prefix(5)) hidden=\(terminal.hostedView.isHidden ? 1 : 0)"
+            )
+#endif
         }
     }
 
@@ -3415,6 +3501,12 @@ final class Workspace: Identifiable, ObservableObject {
     /// This keeps AppKit bounds and Ghostty surface sizes in sync in the next runloop turn.
     private func reconcileTerminalGeometryPass() -> Bool {
         var needsFollowUpPass = false
+#if DEBUG
+        dlog(
+            "workspace.terminals.reconcile.begin workspace=\(id.uuidString.prefix(5)) " +
+            "panels=\(panels.count) focused=\(focusedPanelId?.uuidString.prefix(5) ?? "nil")"
+        )
+#endif
 
         // Flush pending AppKit layout first so terminal-host bounds reflect latest split topology.
         for window in NSApp.windows {
@@ -3424,29 +3516,112 @@ final class Workspace: Identifiable, ObservableObject {
         for panel in panels.values {
             guard let terminalPanel = panel as? TerminalPanel else { continue }
             let hostedView = terminalPanel.hostedView
+            let isVisibleInUI = hostedView.isVisibleInUI
             let hasUsableBounds = hostedView.bounds.width > 1 && hostedView.bounds.height > 1
             let hasSurface = terminalPanel.surface.surface != nil
-            let isAttached = hostedView.window != nil && hostedView.superview != nil
+            let hasWindow = hostedView.window != nil
+            let hasPortalSuperview = hostedView.superview != nil
+#if DEBUG
+            let boundsText = String(format: "%.1fx%.1f", hostedView.bounds.width, hostedView.bounds.height)
+#endif
 
-            // Split close/reparent churn can transiently detach a surviving terminal view.
-            // Force one SwiftUI representable update so the portal binding reattaches it.
-            if !isAttached || !hasUsableBounds || !hasSurface {
-                terminalPanel.requestViewReattach()
+            if !isVisibleInUI || terminalPanel.surface.isSuspended {
+#if DEBUG
+                dlog(
+                    "workspace.terminals.reconcile.panel workspace=\(id.uuidString.prefix(5)) " +
+                    "panel=\(terminalPanel.id.uuidString.prefix(5)) action=hidden " +
+                    "visible=\(isVisibleInUI ? 1 : 0) suspended=\(terminalPanel.surface.isSuspended ? 1 : 0) " +
+                    "mount=\(terminalPanel.mountState.rawValue) bounds=\(boundsText) " +
+                    "window=\(hasWindow ? 1 : 0) superview=\(hasPortalSuperview ? 1 : 0) surface=\(hasSurface ? 1 : 0)"
+                )
+#endif
+                terminalPanel.requestMountTransition(
+                    visibleInUI: isVisibleInUI,
+                    reason: "workspace.reconcile.hidden"
+                )
+                continue
+            }
+
+            let didChangeMountState = terminalPanel.requestMountTransition(
+                visibleInUI: isVisibleInUI,
+                reason: "workspace.reconcile.visible",
+                forcePortalRebind: hasWindow && hasUsableBounds && (!hasPortalSuperview || !hasSurface)
+            )
+#if DEBUG
+            dlog(
+                "workspace.terminals.reconcile.panel workspace=\(id.uuidString.prefix(5)) " +
+                "panel=\(terminalPanel.id.uuidString.prefix(5)) action=visible " +
+                "mount=\(terminalPanel.mountState.rawValue) changed=\(didChangeMountState ? 1 : 0) " +
+                "bounds=\(boundsText) window=\(hasWindow ? 1 : 0) superview=\(hasPortalSuperview ? 1 : 0) " +
+                "surface=\(hasSurface ? 1 : 0)"
+            )
+#endif
+
+            if !hasWindow {
+#if DEBUG
+                dlog(
+                    "workspace.terminals.reconcile.panel workspace=\(id.uuidString.prefix(5)) " +
+                    "panel=\(terminalPanel.id.uuidString.prefix(5)) action=waitWindow mount=\(terminalPanel.mountState.rawValue)"
+                )
+#endif
+                continue
+            }
+
+            if !hasUsableBounds {
                 needsFollowUpPass = true
+#if DEBUG
+                dlog(
+                    "workspace.terminals.reconcile.panel workspace=\(id.uuidString.prefix(5)) " +
+                    "panel=\(terminalPanel.id.uuidString.prefix(5)) action=waitLayout " +
+                    "mount=\(terminalPanel.mountState.rawValue) bounds=\(boundsText) followUp=1"
+                )
+#endif
+                continue
+            }
+
+            if !hasPortalSuperview {
+                needsFollowUpPass = needsFollowUpPass || didChangeMountState
+#if DEBUG
+                dlog(
+                    "workspace.terminals.reconcile.panel workspace=\(id.uuidString.prefix(5)) " +
+                    "panel=\(terminalPanel.id.uuidString.prefix(5)) action=waitPortal " +
+                    "mount=\(terminalPanel.mountState.rawValue) changed=\(didChangeMountState ? 1 : 0) " +
+                    "followUp=\(needsFollowUpPass ? 1 : 0)"
+                )
+#endif
+                continue
             }
 
             hostedView.reconcileGeometryNow()
             // Re-check surface after reconcileGeometryNow() which can trigger AppKit
             // layout and view lifecycle changes that free surfaces (#432).
             if terminalPanel.surface.surface != nil {
+#if DEBUG
+                dlog(
+                    "workspace.terminals.reconcile.panel workspace=\(id.uuidString.prefix(5)) " +
+                    "panel=\(terminalPanel.id.uuidString.prefix(5)) action=refresh surface=1"
+                )
+#endif
                 terminalPanel.surface.forceRefresh()
             }
-            if terminalPanel.surface.surface == nil, isAttached && hasUsableBounds {
+            if terminalPanel.surface.surface == nil {
                 terminalPanel.surface.requestBackgroundSurfaceStartIfNeeded()
                 needsFollowUpPass = true
+#if DEBUG
+                dlog(
+                    "workspace.terminals.reconcile.panel workspace=\(id.uuidString.prefix(5)) " +
+                    "panel=\(terminalPanel.id.uuidString.prefix(5)) action=backgroundStart followUp=1"
+                )
+#endif
             }
         }
 
+#if DEBUG
+        dlog(
+            "workspace.terminals.reconcile.end workspace=\(id.uuidString.prefix(5)) " +
+            "needsFollowUp=\(needsFollowUpPass ? 1 : 0)"
+        )
+#endif
         return needsFollowUpPass
     }
 
@@ -3490,7 +3665,7 @@ final class Workspace: Identifiable, ObservableObject {
 
         // Force an NSViewRepresentable update after drag/move reparenting. This keeps
         // portal host binding current when a pane auto-closes during tab moves.
-        terminalPanel(for: panelId)?.requestViewReattach()
+        terminalPanel(for: panelId)?.requestMountedPortalRebind(reason: "workspace.moveRefresh")
 
         let runRefreshPass: (TimeInterval) -> Void = { [weak self] delay in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {

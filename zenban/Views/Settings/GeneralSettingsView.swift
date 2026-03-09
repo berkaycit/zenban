@@ -28,23 +28,32 @@ struct GeneralSettingsView: View {
                 .padding(.vertical, 8)
             }
 
-            Section("Dependencies") {
+            Section {
+                Text("Homebrew and tmux are required for Zenban terminals. GitHub CLI and Claude Code CLI remain optional.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 ForEach(DependencyCheckService.Dependency.allCases, id: \.self) { dep in
-                    HStack {
-                        Image(systemName: isInstalled(dep) ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .foregroundStyle(isInstalled(dep) ? .green : (dep.isRequired ? .red : .orange))
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: isInstalled(dep) ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(isInstalled(dep) ? .green : (dep.isRequired ? .red : .orange))
 
-                        Text(dep.rawValue)
+                            Text(dep.rawValue)
+                                .fontWeight(.medium)
 
-                        if !dep.isRequired {
-                            Text("(Optional)")
+                            Text(dep.isRequired ? "Required" : "Optional")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(dep.isRequired ? .blue : .secondary)
+
+                            Spacer()
+
+                            Text(isInstalled(dep) ? "Installed" : "Missing")
+                                .font(.caption)
+                                .foregroundStyle(isInstalled(dep) ? .green : (dep.isRequired ? .red : .orange))
                         }
 
-                        Spacer()
-
-                        Text(isInstalled(dep) ? "Installed" : "Missing")
+                        Text(dep.description)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -55,11 +64,19 @@ struct GeneralSettingsView: View {
                         store.checkDependencies()
                     }
 
-                    if store.dependencyStatus?.allSatisfied == false {
-                        Button("Install Missing") {
-                            store.showDependencySetup = true
+                    if hasMissingDependencies {
+                        Button(hasMissingRequiredDependencies ? "Install Missing" : "Install Optional Tools") {
+                            store.presentDependencySetup()
                         }
                     }
+                }
+            } header: {
+                Text("Dependencies")
+            } footer: {
+                if hasMissingRequiredDependencies {
+                    Text("Zenban will keep prompting for missing required dependencies unless you explicitly skip the startup check.")
+                } else if hasMissingDependencies {
+                    Text("Optional tools can be installed later without affecting terminal behavior.")
                 }
             }
         }
@@ -77,5 +94,13 @@ struct GeneralSettingsView: View {
 
     private func isInstalled(_ dependency: DependencyCheckService.Dependency) -> Bool {
         store.dependencyStatus?[dependency] ?? false
+    }
+
+    private var hasMissingRequiredDependencies: Bool {
+        !(store.dependencyStatus?.allRequired ?? false)
+    }
+
+    private var hasMissingDependencies: Bool {
+        store.dependencyStatus?.hasMissingDependencies ?? true
     }
 }

@@ -7,6 +7,14 @@ import Bonsplit
 /// This allows TerminalSurface to be used within the bonsplit-based layout system.
 @MainActor
 final class TerminalPanel: Panel, ObservableObject {
+    enum MountState: String {
+        case suspended
+        case waitingForWindow
+        case waitingForLayout
+        case mounted
+        case detaching
+    }
+
     let id: UUID
     let panelType: PanelType = .terminal
 
@@ -29,14 +37,13 @@ final class TerminalPanel: Panel, ObservableObject {
         }
     }
 
-    /// Bump this token to force SwiftUI to call `updateNSView` on `GhosttyTerminalView`,
-    /// which re-attaches the hosted view after bonsplit close/reparent operations.
-    ///
-    /// Without this, certain pane-close sequences can leave terminal views detached
-    /// (hostedView.window == nil) until the user switches workspaces.
+    /// Mount revision for the hosted view. Bump only when a terminal transitions back into a
+    /// mounted state and the portal binding actually needs to be refreshed.
     @Published var viewReattachToken: UInt64 = 0
+    @Published private(set) var mountState: MountState = .waitingForWindow
 
     private var cancellables = Set<AnyCancellable>()
+    private var lastMountRevisionSignature: String?
 
     var displayTitle: String {
         title.isEmpty ? "Terminal" : title
@@ -61,6 +68,14 @@ final class TerminalPanel: Panel, ObservableObject {
     /// The hosted NSView for embedding in SwiftUI
     var hostedView: GhosttySurfaceScrollView {
         surface.hostedView
+    }
+
+    var tmuxSessionID: String {
+        surface.tmuxSessionID
+    }
+
+    private var hasUsablePortalLayout: Bool {
+        hostedView.bounds.width > 1 && hostedView.bounds.height > 1
     }
 
     init(workspaceId: UUID, surface: TerminalSurface) {
@@ -118,6 +133,13 @@ final class TerminalPanel: Panel, ObservableObject {
     }
 
     func focus() {
+#if DEBUG
+        dlog(
+            "panel.focus panel=\(id.uuidString.prefix(5)) workspace=\(workspaceId.uuidString.prefix(5)) " +
+            "tmux=\(tmuxSessionID.prefix(8)) suspended=\(surface.isSuspended ? 1 : 0) " +
+            "inWindow=\(hostedView.window != nil ? 1 : 0) hidden=\(hostedView.isHidden ? 1 : 0)"
+        )
+#endif
         surface.setFocus(true)
         // `unfocus()` force-disables active state to stop stale retries from stealing focus.
         // Re-enable it immediately for explicit focus requests (socket/UI) so ensureFocus can run.
@@ -126,6 +148,12 @@ final class TerminalPanel: Panel, ObservableObject {
     }
 
     func unfocus() {
+#if DEBUG
+        dlog(
+            "panel.unfocus panel=\(id.uuidString.prefix(5)) workspace=\(workspaceId.uuidString.prefix(5)) " +
+            "tmux=\(tmuxSessionID.prefix(8)) firstResponder=\(hostedView.isSurfaceViewFirstResponder() ? 1 : 0)"
+        )
+#endif
         surface.setFocus(false)
         // Cancel any pending focus work items so an inactive terminal can't steal first responder
         // back from another surface (notably WKWebView) during rapid focus changes in tests.
@@ -153,6 +181,7 @@ final class TerminalPanel: Panel, ObservableObject {
 #endif
         unfocus()
         hostedView.setVisibleInUI(false)
+        _ = requestMountTransition(to: .detaching, reason: "panel.close")
         TerminalWindowPortalRegistry.detach(hostedView: hostedView)
 #if DEBUG
         dlog(
@@ -161,11 +190,99 @@ final class TerminalPanel: Panel, ObservableObject {
             "hidden=\(hostedView.isHidden ? 1 : 0)"
         )
 #endif
-        surface.teardownSurface()
+        surface.closePermanently()
     }
 
-    func requestViewReattach() {
-        viewReattachToken &+= 1
+    private func mountRevisionSignature(for state: MountState) -> String {
+        [
+            state.rawValue,
+            "runtime=\(surface.runtimeState.rawValue)",
+            "window=\(hostedView.window != nil ? 1 : 0)",
+            "superview=\(hostedView.superview != nil ? 1 : 0)",
+            "visible=\(hostedView.isVisibleInUI ? 1 : 0)",
+            "layout=\(hasUsablePortalLayout ? 1 : 0)",
+            "surface=\(surface.surface != nil ? 1 : 0)",
+        ].joined(separator: "|")
+    }
+
+    func resolvedMountState(visibleInUI: Bool? = nil) -> MountState {
+        let visible = visibleInUI ?? hostedView.isVisibleInUI
+        if surface.runtimeState == .closing {
+            return .detaching
+        }
+        if surface.isSuspended || !visible {
+            return .suspended
+        }
+        if hostedView.window == nil {
+            return .waitingForWindow
+        }
+        if !hasUsablePortalLayout {
+            return .waitingForLayout
+        }
+        return .mounted
+    }
+
+    @discardableResult
+    func requestMountTransition(
+        to nextState: MountState? = nil,
+        visibleInUI: Bool? = nil,
+        reason: String,
+        forcePortalRebind: Bool = false
+    ) -> Bool {
+        let resolvedState = nextState ?? resolvedMountState(visibleInUI: visibleInUI)
+        let previousState = mountState
+        let stateChanged = previousState != resolvedState
+        if stateChanged {
+            mountState = resolvedState
+        }
+
+        var didBumpRevision = false
+        let shouldBumpRevision =
+            forcePortalRebind &&
+            resolvedState == .mounted &&
+            surface.runtimeState == .live
+
+        if shouldBumpRevision {
+            let signature = mountRevisionSignature(for: resolvedState)
+            if lastMountRevisionSignature != signature {
+                lastMountRevisionSignature = signature
+                viewReattachToken &+= 1
+                didBumpRevision = true
+            } else {
+#if DEBUG
+                dlog(
+                    "panel.mount.skip panel=\(id.uuidString.prefix(5)) workspace=\(workspaceId.uuidString.prefix(5)) " +
+                    "reason=\(reason) state=\(resolvedState.rawValue) skip=duplicateMountedSignature " +
+                    "token=\(viewReattachToken) signature=\(signature)"
+                )
+#endif
+            }
+        } else if resolvedState != .mounted {
+            lastMountRevisionSignature = nil
+        }
+
+#if DEBUG
+        if stateChanged || didBumpRevision {
+            dlog(
+                "panel.mount panel=\(id.uuidString.prefix(5)) workspace=\(workspaceId.uuidString.prefix(5)) " +
+                "reason=\(reason) state=\(previousState.rawValue)->\(resolvedState.rawValue) " +
+                "token=\(viewReattachToken) rebind=\(didBumpRevision ? 1 : 0) tmux=\(tmuxSessionID.prefix(8)) " +
+                "window=\(hostedView.window != nil ? 1 : 0) superview=\(hostedView.superview != nil ? 1 : 0) " +
+                "visible=\(hostedView.isVisibleInUI ? 1 : 0) layout=\(hasUsablePortalLayout ? 1 : 0) " +
+                "surfaceLoaded=\(surface.surface != nil ? 1 : 0)"
+            )
+        }
+#endif
+        return stateChanged || didBumpRevision
+    }
+
+    @discardableResult
+    func requestMountedPortalRebind(reason: String, visibleInUI: Bool? = nil) -> Bool {
+        requestMountTransition(
+            visibleInUI: visibleInUI,
+            reason: reason,
+            forcePortalRebind: true
+        )
     }
 
     // MARK: - Terminal-specific methods
@@ -192,5 +309,67 @@ final class TerminalPanel: Panel, ObservableObject {
 
     func applyWindowBackgroundIfActive() {
         surface.applyWindowBackgroundIfActive()
+    }
+
+    func suspend() {
+#if DEBUG
+        dlog(
+            "panel.suspend.begin panel=\(id.uuidString.prefix(5)) workspace=\(workspaceId.uuidString.prefix(5)) " +
+            "tmux=\(tmuxSessionID.prefix(8)) inWindow=\(hostedView.window != nil ? 1 : 0) " +
+            "hasSuperview=\(hostedView.superview != nil ? 1 : 0) hidden=\(hostedView.isHidden ? 1 : 0) " +
+            "surfaceLoaded=\(surface.surface != nil ? 1 : 0)"
+        )
+#endif
+        hostedView.setActive(false)
+        hostedView.setVisibleInUI(false)
+        _ = requestMountTransition(to: .suspended, reason: "panel.suspend")
+        surface.suspendRuntimeSurface()
+        TerminalWindowPortalRegistry.detach(hostedView: hostedView)
+#if DEBUG
+        dlog(
+            "panel.suspend.end panel=\(id.uuidString.prefix(5)) workspace=\(workspaceId.uuidString.prefix(5)) " +
+            "tmux=\(tmuxSessionID.prefix(8)) inWindow=\(hostedView.window != nil ? 1 : 0) " +
+            "hasSuperview=\(hostedView.superview != nil ? 1 : 0) hidden=\(hostedView.isHidden ? 1 : 0) " +
+            "surfaceLoaded=\(surface.surface != nil ? 1 : 0)"
+        )
+#endif
+    }
+
+    func resume() {
+        let hostedView = self.hostedView
+#if DEBUG
+        dlog(
+            "panel.resume.begin panel=\(id.uuidString.prefix(5)) workspace=\(workspaceId.uuidString.prefix(5)) " +
+            "tmux=\(tmuxSessionID.prefix(8)) inWindow=\(hostedView.window != nil ? 1 : 0) " +
+            "hasSuperview=\(hostedView.superview != nil ? 1 : 0) hidden=\(hostedView.isHidden ? 1 : 0) " +
+            "surfaceLoaded=\(surface.surface != nil ? 1 : 0)"
+        )
+#endif
+        hostedView.suppressReparentFocus()
+        surface.resumeRuntimeSurfaceIfNeeded()
+        let shouldRequestPortalRebind =
+            hostedView.window != nil &&
+            hasUsablePortalLayout &&
+            (hostedView.superview == nil || surface.surface == nil)
+        _ = requestMountTransition(
+            reason: "panel.resume",
+            forcePortalRebind: shouldRequestPortalRebind
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            hostedView.clearSuppressReparentFocus()
+#if DEBUG
+            dlog(
+                "panel.resume.clearSuppress panel=\(self.id.uuidString.prefix(5)) " +
+                "workspace=\(self.workspaceId.uuidString.prefix(5)) tmux=\(self.tmuxSessionID.prefix(8))"
+            )
+#endif
+        }
+#if DEBUG
+        dlog(
+            "panel.resume.end panel=\(id.uuidString.prefix(5)) workspace=\(workspaceId.uuidString.prefix(5)) " +
+            "tmux=\(tmuxSessionID.prefix(8)) token=\(viewReattachToken) " +
+            "surfaceLoaded=\(surface.surface != nil ? 1 : 0)"
+        )
+#endif
     }
 }

@@ -1,5 +1,8 @@
 import SwiftUI
 import WebKit
+#if DEBUG
+import Bonsplit
+#endif
 
 struct CardWorkspaceDeckView: View {
     let cardID: UUID
@@ -13,6 +16,20 @@ struct CardWorkspaceDeckView: View {
     @State private var retiringCardId: UUID?
     @State private var handoffGeneration: UInt64 = 0
     @State private var handoffFallbackTask: Task<Void, Never>?
+    @State private var cardSwitchDebounceTask: Task<Void, Never>?
+    /// Cached record for the currently selected card. Updated in onAppear/onChange,
+    /// read in body via the read-only path to avoid mutating @Observable during evaluation.
+    @State private var cachedRecord: TerminalManager.WorkspaceRecord?
+
+#if DEBUG
+    private func debugMountedSummary(_ currentRecord: TerminalManager.WorkspaceRecord? = nil) -> String {
+        let mounted = mountedCardIds.map { String($0.uuidString.prefix(5)) }.joined(separator: ",")
+        return
+            "selected=\(cardID.uuidString.prefix(5)) previous=\(previousSelectedCardId?.uuidString.prefix(5) ?? "nil") " +
+            "retiring=\(retiringCardId?.uuidString.prefix(5) ?? inferredRetiringCardId?.uuidString.prefix(5) ?? "nil") " +
+            "mounted=[\(mounted)] gen=\(handoffGeneration) currentWorkspace=\(currentRecord?.workspace.id.uuidString.prefix(5) ?? "nil")"
+    }
+#endif
 
     init(cardID: UUID, boardID: UUID, cardTitle: String) {
         self.cardID = cardID
@@ -23,47 +40,88 @@ struct CardWorkspaceDeckView: View {
     }
 
     var body: some View {
-        let currentRecord = terminalManager.workspaceRecord(for: cardID, boardID: boardID, cardTitle: cardTitle)
+        // Use the read-only lookup to avoid mutating @Observable state during body evaluation.
+        // The record is created in onAppear/onChange and cached in cachedRecord.
+        let currentRecord = cachedRecord ?? terminalManager.existingWorkspaceRecord(for: cardID)
         let effectiveRetiringCardId = retiringCardId ?? inferredRetiringCardId
 
         ZStack {
-            ForEach(mountedRecords(currentRecord: currentRecord), id: \.record.cardID) { entry in
-                let isSelected = entry.record.cardID == cardID
-                let isRetiring = effectiveRetiringCardId == entry.record.cardID
-                let isVisible = isSelected || isRetiring
+            if let currentRecord {
+                ForEach(mountedRecords(currentRecord: currentRecord), id: \.record.cardID) { entry in
+                    let isSelected = entry.record.cardID == cardID
+                    let isRetiring = effectiveRetiringCardId == entry.record.cardID
+                    let isVisible = isSelected || isRetiring
 
-                TerminalContainerView(
-                    cardID: entry.record.cardID,
-                    boardID: entry.record.boardID,
-                    cardTitle: entry.record.cardTitle,
-                    isWorkspaceVisible: isVisible,
-                    isWorkspaceInputActive: isSelected && (NSApp?.isActive ?? false),
-                    workspacePortalPriority: isSelected ? 2 : (isRetiring ? 1 : 0)
-                )
-                .opacity(isVisible ? 1 : 0)
-                .allowsHitTesting(isSelected)
-                .accessibilityHidden(!isVisible)
-                .zIndex(isSelected ? 2 : (isRetiring ? 1 : 0))
+                    TerminalContainerView(
+                        cardID: entry.record.cardID,
+                        boardID: entry.record.boardID,
+                        cardTitle: entry.record.cardTitle,
+                        isWorkspaceVisible: isVisible,
+                        isWorkspaceInputActive: isSelected && (NSApp?.isActive ?? false),
+                        workspacePortalPriority: isSelected ? 2 : (isRetiring ? 1 : 0)
+                    )
+                    .opacity(isVisible ? 1 : 0)
+                    .allowsHitTesting(isSelected)
+                    .accessibilityHidden(!isVisible)
+                    .zIndex(isSelected ? 2 : (isRetiring ? 1 : 0))
+                }
             }
         }
         .onAppear {
-            terminalManager.activateWorkspace(for: currentRecord.cardID)
+            // Create the record outside of body evaluation to avoid @Observable mutation cascades
+            let record = terminalManager.workspaceRecord(for: cardID, boardID: boardID, cardTitle: cardTitle)
+            cachedRecord = record
+#if DEBUG
+            dlog("deck.appear \(debugMountedSummary(record))")
+#endif
+            terminalManager.activateWorkspace(for: record.cardID)
             terminalManager.completeCardHandoff(
                 retiringCardID: nil,
-                selectedCardID: currentRecord.cardID,
+                selectedCardID: record.cardID,
                 reason: "deck_appear"
             )
-            reconcileMountedCardIds(selectedCardID: currentRecord.cardID)
+            reconcileMountedCardIds(selectedCardID: record.cardID)
         }
         .onChange(of: cardID) { _, newValue in
-            _ = terminalManager.workspaceRecord(for: newValue, boardID: boardID, cardTitle: cardTitle)
-            startCardHandoffIfNeeded(newSelectedCardID: newValue)
-            reconcileMountedCardIds(selectedCardID: newValue)
+#if DEBUG
+            dlog(
+                "deck.cardChange from=\(previousSelectedCardId?.uuidString.prefix(5) ?? "nil") " +
+                "to=\(newValue.uuidString.prefix(5)) mounted=\(mountedCardIds.map { String($0.uuidString.prefix(5)) })"
+            )
+#endif
+
+            // If a previous handoff is still pending, cancel it without running
+            // the full completeCardHandoff (which would hide portals and suspend
+            // surfaces that may be needed moments later). The debounced task will
+            // start a fresh handoff from the correct previous card.
+            if retiringCardId != nil {
+                handoffFallbackTask?.cancel()
+                handoffFallbackTask = nil
+                retiringCardId = nil
+            }
+
+            // Defer ALL work (including workspace record creation) behind a debounce.
+            // Creating a workspace record eagerly for every intermediate card during rapid
+            // switching spawns terminal surfaces that are immediately suspended, causing
+            // Ghostty to destroy and recreate shells in a tight loop until SIGTERM.
+            cardSwitchDebounceTask?.cancel()
+            cardSwitchDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 16_000_000) // ~1 frame
+                guard !Task.isCancelled else { return }
+                let record = terminalManager.workspaceRecord(for: newValue, boardID: boardID, cardTitle: cardTitle)
+                cachedRecord = record
+                startCardHandoffIfNeeded(newSelectedCardID: newValue)
+                reconcileMountedCardIds(selectedCardID: newValue)
+            }
         }
         .onChange(of: cardTitle) { _, newValue in
-            _ = terminalManager.workspaceRecord(for: cardID, boardID: boardID, cardTitle: newValue)
+            let record = terminalManager.workspaceRecord(for: cardID, boardID: boardID, cardTitle: newValue)
+            cachedRecord = record
         }
         .onDisappear {
+#if DEBUG
+            dlog("deck.disappear \(debugMountedSummary(cachedRecord))")
+#endif
             teardownDeck()
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyDidFocusSurface)) { notification in
@@ -134,12 +192,21 @@ struct CardWorkspaceDeckView: View {
                 selectedCardID: newSelectedCardID,
                 reason: "no_handoff"
             )
+#if DEBUG
+            dlog("deck.handoff.skip \(debugMountedSummary()) reason=no_handoff")
+#endif
             return
         }
 
         handoffGeneration &+= 1
         let generation = handoffGeneration
         retiringCardId = oldSelectedCardID
+#if DEBUG
+        dlog(
+            "deck.handoff.start from=\(oldSelectedCardID.uuidString.prefix(5)) to=\(newSelectedCardID.uuidString.prefix(5)) " +
+            "\(debugMountedSummary())"
+        )
+#endif
         terminalManager.startCardHandoff(from: oldSelectedCardID, to: newSelectedCardID)
 
         handoffFallbackTask?.cancel()
@@ -152,6 +219,9 @@ struct CardWorkspaceDeckView: View {
 
             await MainActor.run {
                 guard handoffGeneration == generation else { return }
+#if DEBUG
+                dlog("deck.handoff.timeout \(debugMountedSummary()) generation=\(generation)")
+#endif
                 completeCardHandoff(reason: "timeout")
             }
         }
@@ -160,6 +230,12 @@ struct CardWorkspaceDeckView: View {
     private func completeCardHandoffIfNeeded(focusedCardID: UUID, reason: String) {
         guard focusedCardID == cardID else { return }
         guard retiringCardId != nil else { return }
+#if DEBUG
+        dlog(
+            "deck.handoff.completeIfNeeded focused=\(focusedCardID.uuidString.prefix(5)) " +
+            "reason=\(reason) \(debugMountedSummary())"
+        )
+#endif
         completeCardHandoff(reason: reason)
     }
 
@@ -168,6 +244,12 @@ struct CardWorkspaceDeckView: View {
         handoffFallbackTask = nil
 
         let retiring = retiringCardId
+#if DEBUG
+        dlog(
+            "deck.handoff.complete.begin retiring=\(retiring?.uuidString.prefix(5) ?? "nil") " +
+            "reason=\(reason) \(debugMountedSummary())"
+        )
+#endif
         terminalManager.completeCardHandoff(
             retiringCardID: retiring,
             selectedCardID: cardID,
@@ -175,6 +257,9 @@ struct CardWorkspaceDeckView: View {
         )
         retiringCardId = nil
         reconcileMountedCardIds(selectedCardID: cardID)
+#if DEBUG
+        dlog("deck.handoff.complete.end reason=\(reason) \(debugMountedSummary())")
+#endif
     }
 
     private func reconcileMountedCardIds(selectedCardID: UUID) {
@@ -187,14 +272,27 @@ struct CardWorkspaceDeckView: View {
         }
 
         mountedCardIds = nextMountedCardIds
+#if DEBUG
+        let mounted = nextMountedCardIds.map { String($0.uuidString.prefix(5)) }.joined(separator: ",")
+        dlog(
+            "deck.mounted.reconcile selected=\(selectedCardID.uuidString.prefix(5)) " +
+            "retiring=\(retiringCardId?.uuidString.prefix(5) ?? "nil") mounted=[\(mounted)]"
+        )
+#endif
     }
 
     private func teardownDeck() {
+        cardSwitchDebounceTask?.cancel()
+        cardSwitchDebounceTask = nil
         handoffFallbackTask?.cancel()
         handoffFallbackTask = nil
+#if DEBUG
+        dlog("deck.teardown.begin \(debugMountedSummary())")
+#endif
 
         for mountedCardID in mountedCardIds {
             terminalManager.hidePortalViews(for: mountedCardID)
+            terminalManager.suspendWorkspaceIfPossible(for: mountedCardID)
         }
 
         terminalManager.completeCardHandoff(
@@ -207,6 +305,9 @@ struct CardWorkspaceDeckView: View {
         mountedCardIds = []
         previousSelectedCardId = nil
         retiringCardId = nil
+#if DEBUG
+        dlog("deck.teardown.end \(debugMountedSummary())")
+#endif
     }
 }
 

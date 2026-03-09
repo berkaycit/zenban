@@ -19,6 +19,12 @@ actor DependencyCheckService {
         "/usr/local/bin/brew"      // Intel
     ]
 
+    private static let tmuxPaths = [
+        "/opt/homebrew/bin/tmux",
+        "/usr/local/bin/tmux",
+        "/usr/bin/tmux"
+    ]
+
     private static let ghPaths = [
         "/opt/homebrew/bin/gh",
         "/usr/local/bin/gh"
@@ -72,12 +78,14 @@ actor DependencyCheckService {
 
     enum Dependency: String, CaseIterable {
         case homebrew = "Homebrew"
+        case tmux = "tmux"
         case gh = "GitHub CLI"
         case claude = "Claude Code CLI"
 
         var description: String {
             switch self {
-            case .homebrew: "Package manager for macOS"
+            case .homebrew: "Package manager used to install runtime tools"
+            case .tmux: "Keeps card terminals alive while their UI is hidden"
             case .gh: "Pull request creation"
             case .claude: "AI commit messages"
             }
@@ -85,7 +93,7 @@ actor DependencyCheckService {
 
         var isRequired: Bool {
             switch self {
-            case .homebrew: true
+            case .homebrew, .tmux: true
             case .gh, .claude: false
             }
         }
@@ -93,15 +101,19 @@ actor DependencyCheckService {
 
     struct Status: Equatable {
         var homebrew: Bool
+        var tmux: Bool
         var gh: Bool
         var claude: Bool
 
-        var allRequired: Bool { homebrew }
-        var allSatisfied: Bool { homebrew && gh && claude }
+        var allRequired: Bool { homebrew && tmux }
+        var allSatisfied: Bool { homebrew && tmux && gh && claude }
+        var hasMissingOptionalDependencies: Bool { !gh || !claude }
+        var hasMissingDependencies: Bool { !allSatisfied }
 
         subscript(_ dependency: Dependency) -> Bool {
             switch dependency {
             case .homebrew: homebrew
+            case .tmux: tmux
             case .gh: gh
             case .claude: claude
             }
@@ -115,6 +127,7 @@ actor DependencyCheckService {
     nonisolated func checkAll() -> Status {
         Status(
             homebrew: homebrewPath() != nil,
+            tmux: tmuxPath() != nil,
             gh: ghPath() != nil,
             claude: claudePath() != nil
         )
@@ -122,6 +135,10 @@ actor DependencyCheckService {
 
     nonisolated func homebrewPath() -> String? {
         Self.homebrewPaths.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    nonisolated func tmuxPath() -> String? {
+        Self.findExecutable("tmux", knownPaths: Self.tmuxPaths)
     }
 
     nonisolated func ghPath() -> String? {
@@ -154,6 +171,28 @@ actor DependencyCheckService {
         }
         outputHandler("\nHomebrew installed successfully.\n")
         Self.logger.info("Homebrew installation completed")
+    }
+
+    func installTmux(outputHandler: @escaping @Sendable (String) -> Void) async throws {
+        guard let brewPath = homebrewPath() else {
+            throw DependencyError.homebrewRequired
+        }
+
+        Self.logger.info("Starting tmux installation")
+        outputHandler("Installing tmux...\n")
+
+        try await runInstallCommand(
+            command: brewPath,
+            arguments: ["install", "tmux"],
+            outputHandler: outputHandler
+        )
+
+        guard tmuxPath() != nil else {
+            outputHandler("\ntmux installation may have failed. Please check the output above.\n")
+            throw DependencyError.installationFailed("tmux")
+        }
+        outputHandler("\ntmux installed successfully.\n")
+        Self.logger.info("tmux installation completed")
     }
 
     func installGh(outputHandler: @escaping @Sendable (String) -> Void) async throws {
@@ -246,6 +285,11 @@ actor DependencyCheckService {
 
         if !status.homebrew {
             try await installHomebrew(outputHandler: outputHandler)
+            outputHandler("\n")
+        }
+
+        if !status.tmux {
+            try await installTmux(outputHandler: outputHandler)
             outputHandler("\n")
         }
 

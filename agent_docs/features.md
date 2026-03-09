@@ -19,11 +19,13 @@
 
 - Embedded terminal now uses cmux's Ghostty host stack, including `Workspace`, `TabManager`, Bonsplit splits, browser panels, and find/search state inside the card detail area
 - The board owns one shared cmux `TabManager`; each card is treated as a cmux workspace with card IDs exported as `CMUX_WORKSPACE_ID`/`CMUX_TAB_ID`, and terminal panels export `CMUX_SURFACE_ID`
+- Every terminal split now runs inside its own tmux session; hidden cards tear down Ghostty surfaces to save memory, then reattach to the same tmux-backed shell when the card becomes visible again
 - The workspace UI no longer offers manual browser creation; browser panels are now surfaced only by Dev Server preview or internal automation/link-routing paths
 - Card switches use a selected+retiring handoff so old Ghostty/browser portals are hidden before the previous card unmounts
 - Workspaces can move into detached terminal-only windows and back without changing card identity or worktree routing; detached windows currently host one card workspace and detached cards show a placeholder in the detail pane that focuses the external window
 - Runtime/resources are copied from `clone/cmux` with a build phase that recreates cmux's `ghostty`, `terminfo`, `shell-integration`, and `bin` bundle layout
 - Ghostty reads the user's standard config files and receives the same app/surface color-scheme updates cmux uses, so theme resolution now matches cmux behavior
+- Zenban writes `~/.zenban/tmux.conf` from the active Ghostty selection colors and treats Homebrew plus tmux as required terminal dependencies
 - Bundled `cmux`, `claude`, and `open` helpers are in `Resources/bin`, and the app starts a cmux-compatible local socket controller so shell integration can report pwd/tty/git/pr state back into the owning workspace whether it is embedded or detached
 
 ## Git Worktrees

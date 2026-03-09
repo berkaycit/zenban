@@ -4,7 +4,7 @@ import Foundation
 enum ProcessEnvironment {
     /// Build environment dictionary with PATH that includes common tool locations
     /// Includes: homebrew, nvm node, npm global, macports, and standard paths
-    static func buildWithNodeSupport() -> [String: String] {
+    nonisolated static func buildWithNodeSupport() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path

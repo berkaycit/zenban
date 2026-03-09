@@ -1527,8 +1527,12 @@ class GhosttyApp {
         let callbackContext = Self.callbackContext(from: ghostty_surface_userdata(target.target.surface))
         let callbackTabId = callbackContext?.tabId
         let callbackSurfaceId = callbackContext?.surfaceId
+        let callbackRuntimeState = callbackContext?.terminalSurface?.runtimeState
 
         if action.tag == GHOSTTY_ACTION_SHOW_CHILD_EXITED {
+            if callbackRuntimeState == .suspended || callbackRuntimeState == .closing {
+                return true
+            }
             // The child (shell) exited. Ghostty will fall back to printing
             // "Process exited. Press any key..." into the terminal unless the host
             // handles this action. For cmux, the correct behavior is to close
@@ -1970,7 +1974,7 @@ class GhosttyApp {
             }
             if let handle = try? FileHandle(forWritingTo: backgroundLogURL) {
                 defer { try? handle.close() }
-                try? handle.seekToEnd()
+                _ = try? handle.seekToEnd()
                 try? handle.write(contentsOf: data)
             }
         }
@@ -2005,6 +2009,12 @@ final class GhosttyMetalLayer: CAMetalLayer {
 // MARK: - Terminal Surface (owns the ghostty_surface_t lifecycle)
 
 final class TerminalSurface: Identifiable, ObservableObject {
+    enum RuntimeState: String {
+        case live
+        case suspended
+        case closing
+    }
+
     final class SearchState: ObservableObject {
         @Published var needle: String
         @Published var selected: UInt?
@@ -2026,6 +2036,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
     /// is already in the window.
     var isViewInWindow: Bool { hostedView.window != nil }
     let id: UUID
+    let tmuxSessionID: String
     private(set) var tabId: UUID
     /// Port ordinal for CMUX_PORT range assignment
     var portOrdinal: Int = 0
@@ -2053,6 +2064,11 @@ final class TerminalSurface: Identifiable, ObservableObject {
     private let maxPendingTextBytes = 1_048_576
     private var backgroundSurfaceStartQueued = false
     private var surfaceCallbackContext: Unmanaged<GhosttySurfaceCallbackContext>?
+    @Published private(set) var runtimeState: RuntimeState = .live
+#if DEBUG
+    private var debugLifecycleSequence: UInt64 = 0
+    private var debugRecentLifecycleEvents: [(String, CFTimeInterval)] = []
+#endif
     private enum PortalLifecycleState: String {
         case live
         case closing
@@ -2097,6 +2113,29 @@ final class TerminalSurface: Identifiable, ObservableObject {
     @Published private(set) var keyboardCopyModeActive: Bool = false
     private var searchNeedleCancellable: AnyCancellable?
 
+#if DEBUG
+    private func debugViewToken(_ view: NSView?) -> String {
+        guard let view else { return "nil" }
+        return String(describing: Unmanaged.passUnretained(view).toOpaque())
+    }
+
+    private func debugLogLifecycle(_ event: String, detail: String = "") {
+        debugLifecycleSequence &+= 1
+        let now = CACurrentMediaTime()
+        debugRecentLifecycleEvents.append((event, now))
+        debugRecentLifecycleEvents.removeAll { now - $0.1 > 1.0 }
+        let sameEventBurst = debugRecentLifecycleEvents.filter { $0.0 == event }.count
+        let burstEvents = debugRecentLifecycleEvents.map(\.0).joined(separator: ",")
+        dlog(
+            "surface.loop.\(event) seq=\(debugLifecycleSequence) burst=\(sameEventBurst) " +
+            "events=[\(burstEvents)] surface=\(id.uuidString.prefix(5)) workspace=\(tabId.uuidString.prefix(5)) " +
+            "runtime=\(runtimeState.rawValue) portal=\(portalLifecycleState.rawValue) gen=\(portalLifecycleGeneration) " +
+            "attached=\(debugViewToken(attachedView)) hostedWindow=\(hostedView.window != nil ? 1 : 0) " +
+            "hostedSuperview=\(hostedView.superview != nil ? 1 : 0) hidden=\(hostedView.isHidden ? 1 : 0) \(detail)"
+        )
+    }
+#endif
+
     init(
         tabId: UUID,
         context: ghostty_surface_context_e,
@@ -2105,6 +2144,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
         additionalEnvironment: [String: String] = [:]
     ) {
         self.id = UUID()
+        self.tmuxSessionID = self.id.uuidString
         self.tabId = tabId
         self.surfaceContext = context
         self.configTemplate = configTemplate
@@ -2133,6 +2173,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
     func portalBindingStateLabel() -> String {
         portalLifecycleState.rawValue
+    }
+
+    var isSuspended: Bool {
+        runtimeState == .suspended
     }
 
     func canAcceptPortalBinding(expectedSurfaceId: UUID?, expectedGeneration: UInt64?) -> Bool {
@@ -2173,28 +2217,120 @@ final class TerminalSurface: Identifiable, ObservableObject {
 #endif
     }
 
+    private func invalidatePortalBindingGeneration(reason: String) {
+        guard portalLifecycleState == .live else { return }
+        portalLifecycleGeneration &+= 1
+#if DEBUG
+        dlog(
+            "surface.lifecycle.invalidate surface=\(id.uuidString.prefix(5)) " +
+            "workspace=\(tabId.uuidString.prefix(5)) reason=\(reason) " +
+            "generation=\(portalLifecycleGeneration)"
+        )
+#endif
+    }
+
+    @MainActor
+    func suspendRuntimeSurface() {
+        guard runtimeState != .closing else { return }
+        guard TmuxSessionManager.shared.isTmuxAvailable() else { return }
+        guard surface != nil else {
+            runtimeState = .suspended
+            attachedView = nil
+            invalidatePortalBindingGeneration(reason: "suspend.idle")
+#if DEBUG
+            debugLogLifecycle("suspend.idle")
+#endif
+            return
+        }
+
+        runtimeState = .suspended
+        attachedView = nil
+        invalidatePortalBindingGeneration(reason: "suspend")
+#if DEBUG
+        debugLogLifecycle("suspend.begin")
+#endif
+        releaseRuntimeSurface(markPortalClosed: false, reason: "suspend")
+    }
+
+    @MainActor
+    func resumeRuntimeSurfaceIfNeeded() {
+        guard runtimeState != .closing else { return }
+        if runtimeState == .suspended {
+            runtimeState = .live
+            invalidatePortalBindingGeneration(reason: "resume")
+#if DEBUG
+            debugLogLifecycle("resume.state")
+#endif
+        }
+
+        guard surface == nil, let view = attachedView, view.window != nil else {
+#if DEBUG
+            debugLogLifecycle(
+                "resume.skip",
+                detail:
+                    "hasSurface=\(surface != nil ? 1 : 0) attachedView=\(debugViewToken(attachedView)) " +
+                    "viewWindow=\(attachedView?.window != nil ? 1 : 0)"
+            )
+#endif
+            return
+        }
+#if DEBUG
+        debugLogLifecycle("resume.create", detail: "view=\(debugViewToken(view))")
+#endif
+        createSurface(for: view)
+    }
+
+    @MainActor
+    func closePermanently() {
+        runtimeState = .closing
+        releaseRuntimeSurface(markPortalClosed: true, reason: "close")
+        Task {
+            await TmuxSessionManager.shared.killSession(sessionID: tmuxSessionID)
+        }
+    }
+
     /// Explicitly free the Ghostty runtime surface. Idempotent — safe to call
     /// before deinit; deinit will skip the free if already torn down.
     @MainActor
-    func teardownSurface() {
-        markPortalLifecycleClosed(reason: "teardown")
+    private func releaseRuntimeSurface(markPortalClosed: Bool, reason: String) {
+        if markPortalClosed {
+            markPortalLifecycleClosed(reason: reason)
+        }
 
         let callbackContext = surfaceCallbackContext
         surfaceCallbackContext = nil
 
         let surfaceToFree = surface
         surface = nil
+        backgroundSurfaceStartQueued = false
 
         guard let surfaceToFree else {
+#if DEBUG
+            debugLogLifecycle("release.skip", detail: "reason=\(reason) markClosed=\(markPortalClosed ? 1 : 0)")
+#endif
             callbackContext?.release()
             return
         }
+        let surfaceAddress = UInt(bitPattern: surfaceToFree)
+#if DEBUG
+        debugLogLifecycle(
+            "release.begin",
+            detail:
+                "reason=\(reason) markClosed=\(markPortalClosed ? 1 : 0) " +
+                "surfacePtr=0x\(String(surfaceAddress, radix: 16))"
+        )
+#endif
 
         Task { @MainActor in
             // Keep free behavior aligned with deinit: perform the runtime teardown on
             // the next main-actor turn so SIGHUP delivery is deterministic but non-reentrant.
-            ghostty_surface_free(surfaceToFree)
+            if let surfacePointer = UnsafeMutableRawPointer(bitPattern: surfaceAddress) {
+                ghostty_surface_free(surfacePointer)
+            }
             callbackContext?.release()
+#if DEBUG
+            self.debugLogLifecycle("release.end", detail: "reason=\(reason)")
+#endif
         }
     }
 
@@ -2257,6 +2393,15 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
     func attachToView(_ view: GhosttyNSView) {
 #if DEBUG
+        debugLogLifecycle(
+            "attach.begin",
+            detail:
+                "view=\(debugViewToken(view)) currentAttached=\(debugViewToken(attachedView)) " +
+                "viewWindow=\(view.window != nil ? 1 : 0) viewHidden=\(view.isHidden ? 1 : 0) " +
+                "surfaceLoaded=\(surface != nil ? 1 : 0)"
+        )
+#endif
+#if DEBUG
         dlog(
             "surface.attach surface=\(id.uuidString.prefix(5)) view=\(Unmanaged.passUnretained(view).toOpaque()) " +
             "attached=\(attachedView != nil ? 1 : 0) hasSurface=\(surface != nil ? 1 : 0) inWindow=\(view.window != nil ? 1 : 0)"
@@ -2279,6 +2424,9 @@ final class TerminalSurface: Identifiable, ObservableObject {
                 ghostty_surface_set_display_id(s, displayID)
             }
             view.forceRefreshSurface()
+#if DEBUG
+            debugLogLifecycle("attach.reuse", detail: "view=\(debugViewToken(view))")
+#endif
             return
         }
 
@@ -2287,6 +2435,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
             dlog(
                 "surface.attach.skip surface=\(id.uuidString.prefix(5)) reason=alreadyAttachedToDifferentView " +
                 "current=\(Unmanaged.passUnretained(attachedView).toOpaque()) new=\(Unmanaged.passUnretained(view).toOpaque())"
+            )
+            debugLogLifecycle(
+                "attach.skipDifferentView",
+                detail: "current=\(debugViewToken(attachedView)) new=\(debugViewToken(view))"
             )
 #endif
             return
@@ -2297,11 +2449,18 @@ final class TerminalSurface: Identifiable, ObservableObject {
         // If surface doesn't exist yet, create it once the view is in a real window so
         // content scale and pixel geometry are derived from the actual backing context.
         if surface == nil {
+            guard runtimeState != .suspended else { return }
+            guard runtimeState != .closing else { return }
             guard view.window != nil else {
 #if DEBUG
                 dlog(
                     "surface.attach.defer surface=\(id.uuidString.prefix(5)) reason=noWindow " +
                     "bounds=\(String(format: "%.1fx%.1f", view.bounds.width, view.bounds.height))"
+                )
+                debugLogLifecycle(
+                    "attach.deferNoWindow",
+                    detail:
+                        "view=\(debugViewToken(view)) bounds=\(String(format: "%.1fx%.1f", view.bounds.width, view.bounds.height))"
                 )
 #endif
                 return
@@ -2312,6 +2471,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             createSurface(for: view)
 #if DEBUG
             dlog("surface.attach.create.done surface=\(id.uuidString.prefix(5)) hasSurface=\(surface != nil ? 1 : 0)")
+            debugLogLifecycle("attach.createDone", detail: "view=\(debugViewToken(view)) created=\(surface != nil ? 1 : 0)")
 #endif
         } else if let screen = view.window?.screen ?? NSScreen.main,
                   let displayID = screen.displayID,
@@ -2321,11 +2481,20 @@ final class TerminalSurface: Identifiable, ObservableObject {
             ghostty_surface_set_display_id(s, displayID)
 #if DEBUG
             dlog("surface.attach.displayId surface=\(id.uuidString.prefix(5)) display=\(displayID)")
+            debugLogLifecycle("attach.displayId", detail: "display=\(displayID)")
 #endif
         }
     }
 
     private func createSurface(for view: GhosttyNSView) {
+#if DEBUG
+        debugLogLifecycle(
+            "create.begin",
+            detail:
+                "view=\(debugViewToken(view)) viewWindow=\(view.window != nil ? 1 : 0) " +
+                "bounds=\(String(format: "%.1fx%.1f", view.bounds.width, view.bounds.height)) tmux=\(tmuxSessionID.prefix(8))"
+        )
+#endif
         #if DEBUG
         let resourcesDir = getenv("GHOSTTY_RESOURCES_DIR").flatMap { String(cString: $0) } ?? "(unset)"
         let terminfo = getenv("TERMINFO").flatMap { String(cString: $0) } ?? "(unset)"
@@ -2343,6 +2512,11 @@ final class TerminalSurface: Identifiable, ObservableObject {
         }
 
         let scaleFactors = scaleFactors(for: view)
+        let resolvedWorkingDirectory = if let workingDirectory, !workingDirectory.isEmpty {
+            workingDirectory
+        } else {
+            FileManager.default.homeDirectoryForCurrentUser.path
+        }
 
         var surfaceConfig = configTemplate ?? ghostty_surface_config_new()
         surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
@@ -2391,6 +2565,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
         env["CMUX_PANEL_ID"] = id.uuidString
         env["CMUX_TAB_ID"] = tabId.uuidString
         env["CMUX_SOCKET_PATH"] = SocketControlSettings.socketPath()
+        env["ZENBAN_TERMINAL"] = "1"
         if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
             env["CMUX_BUNDLE_ID"] = bundleId
         }
@@ -2471,6 +2646,22 @@ final class TerminalSurface: Identifiable, ObservableObject {
             }
         }
 
+        var commandStorage: UnsafeMutablePointer<CChar>?
+        defer {
+            if let commandStorage {
+                free(commandStorage)
+            }
+        }
+
+        if let tmuxCommand = TmuxSessionManager.shared.attachOrCreateCommand(
+               sessionID: tmuxSessionID,
+               workingDirectory: resolvedWorkingDirectory
+           ),
+           let commandCString = strdup(tmuxCommand) {
+            commandStorage = commandCString
+            surfaceConfig.command = UnsafePointer(commandCString)
+        }
+
         let createSurface = { [self] in
             if !envVars.isEmpty {
                 let envVarsCount = envVars.count
@@ -2484,13 +2675,9 @@ final class TerminalSurface: Identifiable, ObservableObject {
             }
         }
 
-        if let workingDirectory, !workingDirectory.isEmpty {
-            workingDirectory.withCString { cWorkingDir in
+        resolvedWorkingDirectory.withCString { cWorkingDir in
                 surfaceConfig.working_directory = cWorkingDir
                 createSurface()
-            }
-        } else {
-            createSurface()
         }
 
         if surface == nil {
@@ -2498,6 +2685,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             surfaceCallbackContext = nil
             print("Failed to create ghostty surface")
             #if DEBUG
+            debugLogLifecycle("create.failed", detail: "reason=nilSurface")
             Self.surfaceLog("createSurface FAILED surface=\(id.uuidString): ghostty_surface_new returned nil")
             if let cfg = GhosttyApp.shared.config {
                 let count = Int(ghostty_config_diagnostics_count(cfg))
@@ -2514,6 +2702,15 @@ final class TerminalSurface: Identifiable, ObservableObject {
             return
         }
         guard let createdSurface = surface else { return }
+        runtimeState = .live
+#if DEBUG
+        debugLogLifecycle(
+            "create.end",
+            detail:
+                "surfacePtr=\(String(describing: createdSurface)) displayWindow=\(view.window?.windowNumber ?? -1) " +
+                "backingBounds=\(String(format: "%.1fx%.1f", view.bounds.width, view.bounds.height))"
+        )
+#endif
 
         // For vsync-driven rendering, Ghostty needs to know which display we're on so it can
         // start a CVDisplayLink with the right refresh rate. If we don't set this early, the
@@ -2707,7 +2904,18 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
     func sendText(_ text: String) {
         guard let data = text.data(using: .utf8), !data.isEmpty else { return }
+        if runtimeState == .suspended,
+           TmuxSessionManager.shared.sessionExistsSync(sessionID: tmuxSessionID) {
+#if DEBUG
+            debugLogLifecycle("sendText.tmux", detail: "bytes=\(data.count)")
+#endif
+            TmuxSessionManager.shared.sendText(sessionID: tmuxSessionID, text: text)
+            return
+        }
         guard let surface = surface else {
+#if DEBUG
+            debugLogLifecycle("sendText.queue", detail: "bytes=\(data.count)")
+#endif
             enqueuePendingText(data)
             return
         }
@@ -2722,14 +2930,49 @@ final class TerminalSurface: Identifiable, ObservableObject {
             return
         }
 
-        guard surface == nil, attachedView != nil else { return }
-        guard !backgroundSurfaceStartQueued else { return }
+        guard surface == nil, let view = attachedView else {
+#if DEBUG
+            debugLogLifecycle(
+                "background.skip",
+                detail: "reason=missingViewOrSurface hasSurface=\(surface != nil ? 1 : 0) attached=\(debugViewToken(attachedView))"
+            )
+#endif
+            return
+        }
+        guard runtimeState == .live else {
+#if DEBUG
+            debugLogLifecycle("background.skip", detail: "reason=runtimeState value=\(runtimeState.rawValue)")
+#endif
+            return
+        }
+        guard hostedView.isVisibleInUI else {
+#if DEBUG
+            debugLogLifecycle("background.skip", detail: "reason=hiddenInUI")
+#endif
+            return
+        }
+        guard view.window != nil else {
+#if DEBUG
+            debugLogLifecycle("background.skip", detail: "reason=noWindow view=\(debugViewToken(view))")
+#endif
+            return
+        }
+        guard !backgroundSurfaceStartQueued else {
+#if DEBUG
+            debugLogLifecycle("background.skip", detail: "reason=alreadyQueued")
+#endif
+            return
+        }
         backgroundSurfaceStartQueued = true
+#if DEBUG
+        debugLogLifecycle("background.queue", detail: "attached=\(debugViewToken(attachedView))")
+#endif
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.backgroundSurfaceStartQueued = false
             guard self.surface == nil, let view = self.attachedView else { return }
+            guard self.runtimeState == .live, self.hostedView.isVisibleInUI, view.window != nil else { return }
             #if DEBUG
             let startedAt = ProcessInfo.processInfo.systemUptime
             #endif
@@ -2738,6 +2981,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
             let elapsedMs = (ProcessInfo.processInfo.systemUptime - startedAt) * 1000.0
             dlog(
                 "surface.background_start surface=\(self.id.uuidString.prefix(8)) inWindow=\(view.window != nil ? 1 : 0) ready=\(self.surface != nil ? 1 : 0) ms=\(String(format: "%.2f", elapsedMs))"
+            )
+            self.debugLogLifecycle(
+                "background.end",
+                detail: "view=\(self.debugViewToken(view)) ready=\(self.surface != nil ? 1 : 0) ms=\(String(format: "%.2f", elapsedMs))"
             )
             #endif
         }
@@ -2869,12 +3116,15 @@ final class TerminalSurface: Identifiable, ObservableObject {
             "hostedInWindow=\(hostedView.window != nil ? 1 : 0)"
         )
 #endif
+        let surfaceAddress = UInt(bitPattern: surfaceToFree)
 
         // Keep teardown asynchronous to avoid re-entrant close/deinit loops, but retain
         // callback userdata until surface free completes so callbacks never dereference
         // a deallocated view pointer.
         Task { @MainActor in
-            ghostty_surface_free(surfaceToFree)
+            if let surfacePointer = UnsafeMutableRawPointer(bitPattern: surfaceAddress) {
+                ghostty_surface_free(surfacePointer)
+            }
             callbackContext?.release()
 #if DEBUG
             dlog(
@@ -3142,6 +3392,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             "inWindow=\(window != nil ? 1 : 0) bounds=\(String(format: "%.1fx%.1f", bounds.width, bounds.height)) " +
             "pending=\(String(format: "%.1fx%.1f", pendingSurfaceSize?.width ?? 0, pendingSurfaceSize?.height ?? 0))"
         )
+        dlog(
+            "focus.view.windowMove surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+            "window=\(window?.windowNumber ?? -1) firstResponder=\(String(describing: window?.firstResponder))"
+        )
 #endif
         guard let window else { return }
 
@@ -3382,6 +3636,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     @discardableResult
     private func ensureSurfaceReadyForInput() -> ghostty_surface_t? {
+        guard terminalSurface?.runtimeState == .live else { return nil }
         if let surface = surface {
             return surface
         }
@@ -3710,6 +3965,14 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
+#if DEBUG
+        dlog(
+            "focus.firstResponder.begin surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+            "result=\(result ? 1 : 0) visible=\(isVisibleInUI ? 1 : 0) hidden=\(isHiddenOrHasHiddenAncestor ? 1 : 0) " +
+            "usable=\(hasUsableFocusGeometry ? 1 : 0) suppressReparent=\(suppressingReparentFocus ? 1 : 0) " +
+            "runtime=\(terminalSurface?.runtimeState.rawValue ?? "nil")"
+        )
+#endif
         var shouldApplySurfaceFocus = false
         if result {
             // If we become first responder before the ghostty surface exists (e.g. during
@@ -5686,6 +5949,10 @@ final class GhosttySurfaceScrollView: NSView {
         }
     }
 
+    var isVisibleInUI: Bool {
+        surfaceView.isVisibleInUI
+    }
+
     func setVisibleInUI(_ visible: Bool) {
         let wasVisible = surfaceView.isVisibleInUI
         surfaceView.setVisibleInUI(visible)
@@ -5780,6 +6047,10 @@ final class GhosttySurfaceScrollView: NSView {
         let surfaceShort = self.surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil"
         let searchActive = self.surfaceView.terminalSurface?.searchState != nil
         dlog("find.moveFocus to=\(surfaceShort) searchState=\(searchActive ? "active" : "nil")")
+        dlog(
+            "focus.move.begin to=\(surfaceShort) from=\(String(describing: previous.map { Unmanaged.passUnretained($0).toOpaque() })) " +
+            "delay=\(delay.map { String(format: "%.2f", $0) } ?? "0") window=\(window?.windowNumber ?? -1)"
+        )
 #endif
         let work = { [weak self] in
             guard let self else { return }
@@ -5788,6 +6059,12 @@ final class GhosttySurfaceScrollView: NSView {
                 _ = previous.surfaceView.resignFirstResponder()
             }
             window.makeFirstResponder(self.surfaceView)
+#if DEBUG
+            dlog(
+                "focus.move.end to=\(self.surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+                "window=\(window.windowNumber) firstResponder=\(String(describing: window.firstResponder))"
+            )
+#endif
         }
 
         if let delay, delay > 0 {
@@ -5928,6 +6205,15 @@ final class GhosttySurfaceScrollView: NSView {
         }()
         let isHiddenForFocus = isHiddenOrHasHiddenAncestor || surfaceView.isHiddenOrHasHiddenAncestor
 
+#if DEBUG
+        dlog(
+            "focus.ensure.begin surface=\(surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+            "tab=\(tabId.uuidString.prefix(5)) panel=\(surfaceId.uuidString.prefix(5)) attempts=\(attemptsRemaining) " +
+            "active=\(isActive ? 1 : 0) visible=\(surfaceView.isVisibleInUI ? 1 : 0) hidden=\(isHiddenForFocus ? 1 : 0) " +
+            "window=\(window?.windowNumber ?? -1) firstResponder=\(String(describing: window?.firstResponder))"
+        )
+#endif
+
         guard isActive else { return }
         guard let window else { return }
         guard surfaceView.isVisibleInUI else {
@@ -6014,6 +6300,15 @@ final class GhosttySurfaceScrollView: NSView {
         }()
         let isHiddenForFocus = isHiddenOrHasHiddenAncestor || surfaceView.isHiddenOrHasHiddenAncestor
         let surfaceShort = surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil"
+
+#if DEBUG
+        dlog(
+            "focus.apply.begin surface=\(surfaceShort) active=\(isActive ? 1 : 0) visible=\(surfaceView.isVisibleInUI ? 1 : 0) " +
+            "hidden=\(isHiddenForFocus ? 1 : 0) usable=\(hasUsablePortalGeometry ? 1 : 0) " +
+            "window=\(window?.windowNumber ?? -1) key=\(window?.isKeyWindow == true ? 1 : 0) " +
+            "firstResponder=\(String(describing: window?.firstResponder))"
+        )
+#endif
 
         guard isActive else { return }
         guard surfaceView.isVisibleInUI else { return }
@@ -6668,6 +6963,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
     let terminalSurface: TerminalSurface
     var isActive: Bool = true
     var isVisibleInUI: Bool = true
+    var mountState: TerminalPanel.MountState = .waitingForWindow
     var portalZPriority: Int = 0
     var showsInactiveOverlay: Bool = false
     var showsUnreadNotificationRing: Bool = false
@@ -6682,53 +6978,228 @@ struct GhosttyTerminalView: NSViewRepresentable {
         var onDidMoveToWindow: (() -> Void)?
         var onGeometryChanged: (() -> Void)?
 
+#if DEBUG
+        private var debugRecentEvents: [(String, CFTimeInterval)] = []
+
+        private func debugLogHostEvent(_ event: String) {
+            let now = CACurrentMediaTime()
+            debugRecentEvents.append((event, now))
+            debugRecentEvents.removeAll { now - $0.1 > 1.0 }
+            let burst = debugRecentEvents.filter { $0.0 == event }.count
+            let trail = debugRecentEvents.map(\.0).joined(separator: ",")
+            dlog(
+                "portal.host.\(event) burst=\(burst) events=[\(trail)] " +
+                "host=\(Unmanaged.passUnretained(self).toOpaque()) window=\(window?.windowNumber ?? -1) " +
+                "superview=\(String(describing: superview.map { Unmanaged.passUnretained($0).toOpaque() })) " +
+                "frame=\(String(format: "%.1f,%.1f %.1fx%.1f", frame.origin.x, frame.origin.y, frame.width, frame.height)) " +
+                "bounds=\(String(format: "%.1fx%.1f", bounds.width, bounds.height))"
+            )
+        }
+#endif
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+#if DEBUG
+            debugLogHostEvent("didMoveToWindow")
+#endif
             onDidMoveToWindow?()
             onGeometryChanged?()
         }
 
         override func viewDidMoveToSuperview() {
             super.viewDidMoveToSuperview()
+#if DEBUG
+            debugLogHostEvent("didMoveToSuperview")
+#endif
             onGeometryChanged?()
         }
 
         override func layout() {
             super.layout()
+#if DEBUG
+            debugLogHostEvent("layout")
+#endif
             onGeometryChanged?()
         }
 
         override func setFrameOrigin(_ newOrigin: NSPoint) {
             super.setFrameOrigin(newOrigin)
+#if DEBUG
+            debugLogHostEvent("setFrameOrigin")
+#endif
             onGeometryChanged?()
         }
 
         override func setFrameSize(_ newSize: NSSize) {
             super.setFrameSize(newSize)
+#if DEBUG
+            debugLogHostEvent("setFrameSize")
+#endif
             onGeometryChanged?()
         }
     }
 
     final class Coordinator {
+        struct PortalGeometrySignature: Equatable {
+            let frameX: Int
+            let frameY: Int
+            let frameWidth: Int
+            let frameHeight: Int
+            let boundsWidth: Int
+            let boundsHeight: Int
+
+            init(view: NSView) {
+                func quantize(_ value: CGFloat) -> Int {
+                    Int((value * 100).rounded())
+                }
+
+                frameX = quantize(view.frame.origin.x)
+                frameY = quantize(view.frame.origin.y)
+                frameWidth = quantize(view.frame.width)
+                frameHeight = quantize(view.frame.height)
+                boundsWidth = quantize(view.bounds.width)
+                boundsHeight = quantize(view.bounds.height)
+            }
+        }
+
+        struct PortalBindingSignature: Equatable {
+            let hostId: ObjectIdentifier
+            let windowId: ObjectIdentifier?
+            let geometry: PortalGeometrySignature
+            let visibleInUI: Bool
+            let mountState: TerminalPanel.MountState
+            let expectedSurfaceId: UUID
+            let expectedGeneration: UInt64
+            let zPriority: Int
+        }
+
         var attachGeneration: Int = 0
         // Track the latest desired state so attach retries can re-apply focus after re-parenting.
         var desiredIsActive: Bool = true
         var desiredIsVisibleInUI: Bool = true
         var desiredShowsUnreadNotificationRing: Bool = false
         var desiredPortalZPriority: Int = 0
+        var desiredMountState: TerminalPanel.MountState = .waitingForWindow
         var lastBoundHostId: ObjectIdentifier?
         var lastAppliedPortalZPriority: Int?
         var lastAppliedPortalBindingGeneration: UInt64?
         var lastPaneDropZone: DropZone?
         weak var hostedView: GhosttySurfaceScrollView?
-        private var pendingPortalPassRevision: UInt64 = 0
+        var lastProcessedReattachToken: UInt64 = 0
+        var lastObservedHostId: ObjectIdentifier?
+        fileprivate var pendingPortalPassRevision: UInt64 = 0
+        fileprivate var pendingPortalBindingSignature: PortalBindingSignature?
+        fileprivate var lastPortalBindingSignature: PortalBindingSignature?
 
-        func schedulePortalPass(_ block: @escaping () -> Void) {
+#if DEBUG
+        private var debugRecentPortalPassEvents: [(String, CFTimeInterval)] = []
+
+        fileprivate func debugLogPortalPass(_ event: String, surfaceId: UUID?, revision: UInt64, generation: Int, detail: String) {
+            let now = CACurrentMediaTime()
+            debugRecentPortalPassEvents.append((event, now))
+            debugRecentPortalPassEvents.removeAll { now - $0.1 > 1.0 }
+            let burst = debugRecentPortalPassEvents.filter { $0.0 == event }.count
+            let trail = debugRecentPortalPassEvents.map(\.0).joined(separator: ",")
+            dlog(
+                "portal.pass.\(event) burst=\(burst) events=[\(trail)] surface=\(surfaceId?.uuidString.prefix(5) ?? "nil") " +
+                "revision=\(revision) generation=\(generation) detail=\(detail)"
+            )
+        }
+#endif
+
+        private func debugSignatureText(_ signature: PortalBindingSignature?) -> String {
+            guard let signature else { return "sig=nil" }
+            return
+                "host=\(signature.hostId) window=\(String(describing: signature.windowId)) " +
+                "frame=\(signature.geometry.frameX),\(signature.geometry.frameY) " +
+                "\(signature.geometry.frameWidth)x\(signature.geometry.frameHeight) " +
+                "bounds=\(signature.geometry.boundsWidth)x\(signature.geometry.boundsHeight) " +
+                "visible=\(signature.visibleInUI ? 1 : 0) mount=\(signature.mountState.rawValue) " +
+                "surface=\(signature.expectedSurfaceId.uuidString.prefix(5)) generation=\(signature.expectedGeneration) " +
+                "z=\(signature.zPriority)"
+        }
+
+        func schedulePortalPass(
+            signature: PortalBindingSignature,
+            allowExecutedDedupe: Bool,
+            block: @escaping (_ revision: UInt64) -> Void
+        ) {
+            if pendingPortalBindingSignature == signature {
+#if DEBUG
+                debugLogPortalPass(
+                    "skip",
+                    surfaceId: signature.expectedSurfaceId,
+                    revision: pendingPortalPassRevision,
+                    generation: attachGeneration,
+                    detail: "reason=matchingPendingSignature \(debugSignatureText(signature))"
+                )
+#endif
+                return
+            }
+
+            if allowExecutedDedupe, lastPortalBindingSignature == signature {
+#if DEBUG
+                debugLogPortalPass(
+                    "skip",
+                    surfaceId: signature.expectedSurfaceId,
+                    revision: pendingPortalPassRevision,
+                    generation: attachGeneration,
+                    detail: "reason=matchingExecutedSignature \(debugSignatureText(signature))"
+                )
+#endif
+                return
+            }
+
             pendingPortalPassRevision &+= 1
             let revision = pendingPortalPassRevision
+            pendingPortalBindingSignature = signature
+#if DEBUG
+            debugLogPortalPass(
+                "schedule",
+                surfaceId: signature.expectedSurfaceId,
+                revision: revision,
+                generation: attachGeneration,
+                detail: "\(debugSignatureText(signature)) hosted=\(String(describing: hostedView.map { Unmanaged.passUnretained($0).toOpaque() }))"
+            )
+#endif
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.pendingPortalPassRevision == revision else { return }
-                block()
+                guard let self else { return }
+                guard self.pendingPortalPassRevision == revision else {
+#if DEBUG
+                    self.debugLogPortalPass(
+                        "skip",
+                        surfaceId: signature.expectedSurfaceId,
+                        revision: revision,
+                        generation: self.attachGeneration,
+                        detail: "reason=staleRevision current=\(self.pendingPortalPassRevision)"
+                    )
+#endif
+                    return
+                }
+                guard self.pendingPortalBindingSignature == signature else {
+#if DEBUG
+                    self.debugLogPortalPass(
+                        "skip",
+                        surfaceId: signature.expectedSurfaceId,
+                        revision: revision,
+                        generation: self.attachGeneration,
+                        detail: "reason=signatureReplaced \(self.debugSignatureText(self.pendingPortalBindingSignature))"
+                    )
+#endif
+                    return
+                }
+                self.pendingPortalBindingSignature = nil
+                self.lastPortalBindingSignature = signature
+#if DEBUG
+                self.debugLogPortalPass(
+                    "execute",
+                    surfaceId: signature.expectedSurfaceId,
+                    revision: revision,
+                    generation: self.attachGeneration,
+                    detail: "\(self.debugSignatureText(signature)) hosted=\(String(describing: self.hostedView.map { Unmanaged.passUnretained($0).toOpaque() }))"
+                )
+#endif
+                block(revision)
             }
         }
     }
@@ -6747,18 +7218,137 @@ struct GhosttyTerminalView: NSViewRepresentable {
         return !hostedViewHasSuperview
     }
 
+    private enum PortalPassTrigger {
+        case update
+        case movedToWindow
+        case geometry
+
+        var allowsExecutedDedupe: Bool {
+            true
+        }
+    }
+
+    private static func effectivePortalMountState(
+        requestedMountState: TerminalPanel.MountState,
+        hostWindowAttached: Bool,
+        hasUsableLayout: Bool
+    ) -> TerminalPanel.MountState {
+        switch requestedMountState {
+        case .suspended, .detaching:
+            return requestedMountState
+        case .waitingForWindow, .waitingForLayout, .mounted:
+            if !hostWindowAttached {
+                return .waitingForWindow
+            }
+            if !hasUsableLayout {
+                return .waitingForLayout
+            }
+            return .mounted
+        }
+    }
+
     private static func schedulePortalPass(
         coordinator: Coordinator,
         host: HostContainerView,
         hostedView: GhosttySurfaceScrollView,
         generation: Int,
+        requestedMountState: TerminalPanel.MountState,
         expectedSurfaceId: UUID,
-        expectedGeneration: UInt64
+        expectedGeneration: UInt64,
+        trigger: PortalPassTrigger
     ) {
-        coordinator.schedulePortalPass { [weak host, weak hostedView, weak coordinator] in
-            guard let host, let hostedView, let coordinator else { return }
-            guard coordinator.attachGeneration == generation else { return }
-            guard host.window != nil else { return }
+        let effectiveMountState = effectivePortalMountState(
+            requestedMountState: requestedMountState,
+            hostWindowAttached: host.window != nil,
+            hasUsableLayout: host.bounds.width > 1 && host.bounds.height > 1
+        )
+        guard effectiveMountState == .mounted else {
+#if DEBUG
+            coordinator.debugLogPortalPass(
+                "skip",
+                surfaceId: expectedSurfaceId,
+                revision: coordinator.pendingPortalPassRevision,
+                generation: generation,
+                detail: "reason=mountState trigger=\(String(describing: trigger)) value=\(effectiveMountState.rawValue)"
+            )
+#endif
+            return
+        }
+
+        let signature = Coordinator.PortalBindingSignature(
+            hostId: ObjectIdentifier(host),
+            windowId: host.window.map(ObjectIdentifier.init),
+            geometry: .init(view: host),
+            visibleInUI: coordinator.desiredIsVisibleInUI,
+            mountState: effectiveMountState,
+            expectedSurfaceId: expectedSurfaceId,
+            expectedGeneration: expectedGeneration,
+            zPriority: coordinator.desiredPortalZPriority
+        )
+
+        coordinator.schedulePortalPass(
+            signature: signature,
+            allowExecutedDedupe: trigger.allowsExecutedDedupe
+        ) { [weak host, weak hostedView, weak coordinator] revision in
+            guard let coordinator else {
+#if DEBUG
+                dlog("portal.pass.skip reason=noCoordinator generation=\(generation) expectedGeneration=\(expectedGeneration)")
+#endif
+                return
+            }
+            guard let host else {
+#if DEBUG
+                coordinator.debugLogPortalPass(
+                    "skip",
+                    surfaceId: hostedView?.portalBindingGuardState().surfaceId,
+                    revision: revision,
+                    generation: generation,
+                    detail: "reason=noHost expectedGeneration=\(expectedGeneration)"
+                )
+#endif
+                return
+            }
+            guard let hostedView else {
+#if DEBUG
+                coordinator.debugLogPortalPass(
+                    "skip",
+                    surfaceId: nil,
+                    revision: revision,
+                    generation: generation,
+                    detail: "reason=noHostedView expectedGeneration=\(expectedGeneration)"
+                )
+#endif
+                return
+            }
+            guard coordinator.attachGeneration == generation else {
+#if DEBUG
+                coordinator.debugLogPortalPass(
+                    "skip",
+                    surfaceId: hostedView.portalBindingGuardState().surfaceId,
+                    revision: revision,
+                    generation: generation,
+                    detail: "reason=staleGeneration actualGeneration=\(coordinator.attachGeneration) expectedGeneration=\(expectedGeneration)"
+                )
+#endif
+                return
+            }
+            let effectiveMountState = effectivePortalMountState(
+                requestedMountState: coordinator.desiredMountState,
+                hostWindowAttached: host.window != nil,
+                hasUsableLayout: host.bounds.width > 1 && host.bounds.height > 1
+            )
+            guard effectiveMountState == .mounted else {
+#if DEBUG
+                coordinator.debugLogPortalPass(
+                    "skip",
+                    surfaceId: hostedView.portalBindingGuardState().surfaceId,
+                    revision: revision,
+                    generation: generation,
+                    detail: "reason=mountStateChanged value=\(effectiveMountState.rawValue) expectedGeneration=\(expectedGeneration)"
+                )
+#endif
+                return
+            }
 
             let hostId = ObjectIdentifier(host)
             let isBoundToCurrentHost = TerminalWindowPortalRegistry.isHostedView(hostedView, boundTo: host)
@@ -6768,6 +7358,31 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 !isBoundToCurrentHost ||
                 coordinator.lastAppliedPortalZPriority != coordinator.desiredPortalZPriority ||
                 coordinator.lastAppliedPortalBindingGeneration != expectedGeneration
+
+#if DEBUG
+            let bindReasons = [
+                coordinator.lastBoundHostId != hostId ? "host" : nil,
+                hostedView.superview == nil ? "superview" : nil,
+                !isBoundToCurrentHost ? "anchor" : nil,
+                coordinator.lastAppliedPortalZPriority != coordinator.desiredPortalZPriority ? "z" : nil,
+                coordinator.lastAppliedPortalBindingGeneration != expectedGeneration ? "generation" : nil,
+            ]
+                .compactMap { $0 }
+                .joined(separator: ",")
+            coordinator.debugLogPortalPass(
+                "state",
+                surfaceId: hostedView.portalBindingGuardState().surfaceId,
+                revision: revision,
+                generation: generation,
+                detail:
+                    "host=\(Unmanaged.passUnretained(host).toOpaque()) hosted=\(Unmanaged.passUnretained(hostedView).toOpaque()) " +
+                    "needsBind=\(needsBind ? 1 : 0) reasons=\(bindReasons.isEmpty ? "none" : bindReasons) " +
+                    "visible=\(coordinator.desiredIsVisibleInUI ? 1 : 0) active=\(coordinator.desiredIsActive ? 1 : 0) " +
+                    "mount=\(effectiveMountState.rawValue) z=\(coordinator.desiredPortalZPriority) expectedGeneration=\(expectedGeneration)"
+            )
+#endif
+
+            var didApplyBinding = false
 
             if needsBind {
                 TerminalWindowPortalRegistry.bind(
@@ -6780,19 +7395,60 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 )
 
                 if TerminalWindowPortalRegistry.isHostedView(hostedView, boundTo: host) {
+                    didApplyBinding = true
                     coordinator.lastBoundHostId = hostId
                     coordinator.lastAppliedPortalZPriority = coordinator.desiredPortalZPriority
                     coordinator.lastAppliedPortalBindingGeneration = expectedGeneration
+#if DEBUG
+                    coordinator.debugLogPortalPass(
+                        "bindApplied",
+                        surfaceId: hostedView.portalBindingGuardState().surfaceId,
+                        revision: revision,
+                        generation: generation,
+                        detail: "host=\(Unmanaged.passUnretained(host).toOpaque())"
+                    )
+#endif
                 }
             } else {
                 coordinator.lastBoundHostId = hostId
+#if DEBUG
+                coordinator.debugLogPortalPass(
+                    "bindSkipped",
+                    surfaceId: hostedView.portalBindingGuardState().surfaceId,
+                    revision: revision,
+                    generation: generation,
+                    detail: "reason=alreadyBound host=\(Unmanaged.passUnretained(host).toOpaque())"
+                )
+#endif
             }
 
-            TerminalWindowPortalRegistry.updateEntryVisibility(
-                for: hostedView,
-                visibleInUI: coordinator.desiredIsVisibleInUI
-            )
-            TerminalWindowPortalRegistry.synchronizeForAnchor(host)
+            if !didApplyBinding {
+                TerminalWindowPortalRegistry.updateEntryVisibility(
+                    for: hostedView,
+                    visibleInUI: coordinator.desiredIsVisibleInUI
+                )
+                TerminalWindowPortalRegistry.synchronizeForAnchor(host)
+#if DEBUG
+                coordinator.debugLogPortalPass(
+                    "syncAfterState",
+                    surfaceId: hostedView.portalBindingGuardState().surfaceId,
+                    revision: revision,
+                    generation: generation,
+                    detail: "reason=noBind host=\(Unmanaged.passUnretained(host).toOpaque())"
+                )
+#endif
+            } else {
+#if DEBUG
+                coordinator.debugLogPortalPass(
+                    "syncSuppressed",
+                    surfaceId: hostedView.portalBindingGuardState().surfaceId,
+                    revision: revision,
+                    generation: generation,
+                    detail: "reason=bindAlreadySynced host=\(Unmanaged.passUnretained(host).toOpaque())"
+                )
+#endif
+            }
+
             hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
             hostedView.setActive(coordinator.desiredIsActive)
             hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
@@ -6816,14 +7472,17 @@ struct GhosttyTerminalView: NSViewRepresentable {
         let previousDesiredIsVisibleInUI = coordinator.desiredIsVisibleInUI
         let previousDesiredShowsUnreadNotificationRing = coordinator.desiredShowsUnreadNotificationRing
         let previousDesiredPortalZPriority = coordinator.desiredPortalZPriority
+        let previousDesiredMountState = coordinator.desiredMountState
         let desiredStateChanged =
             previousDesiredIsActive != isActive ||
             previousDesiredIsVisibleInUI != isVisibleInUI ||
-            previousDesiredPortalZPriority != portalZPriority
+            previousDesiredPortalZPriority != portalZPriority ||
+            previousDesiredMountState != mountState
         coordinator.desiredIsActive = isActive
         coordinator.desiredIsVisibleInUI = isVisibleInUI
         coordinator.desiredShowsUnreadNotificationRing = showsUnreadNotificationRing
         coordinator.desiredPortalZPriority = portalZPriority
+        coordinator.desiredMountState = mountState
         coordinator.hostedView = hostedView
 #if DEBUG
         if desiredStateChanged {
@@ -6832,14 +7491,14 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 dlog(
                     "ws.swiftui.update id=\(snapshot.id) dt=\(String(format: "%.2fms", dtMs)) " +
                     "surface=\(terminalSurface.id.uuidString.prefix(5)) visible=\(isVisibleInUI ? 1 : 0) " +
-                    "active=\(isActive ? 1 : 0) z=\(portalZPriority) " +
+                    "active=\(isActive ? 1 : 0) mount=\(mountState.rawValue) z=\(portalZPriority) " +
                     "hostWindow=\(nsView.window != nil ? 1 : 0) hostedWindow=\(hostedView.window != nil ? 1 : 0) " +
                     "hostedSuperview=\(hostedView.superview != nil ? 1 : 0)"
                 )
             } else {
                 dlog(
                     "ws.swiftui.update id=none surface=\(terminalSurface.id.uuidString.prefix(5)) " +
-                    "visible=\(isVisibleInUI ? 1 : 0) active=\(isActive ? 1 : 0) z=\(portalZPriority) " +
+                    "visible=\(isVisibleInUI ? 1 : 0) active=\(isActive ? 1 : 0) mount=\(mountState.rawValue) z=\(portalZPriority) " +
                     "hostWindow=\(nsView.window != nil ? 1 : 0) hostedWindow=\(hostedView.window != nil ? 1 : 0) " +
                     "hostedSuperview=\(hostedView.superview != nil ? 1 : 0)"
                 )
@@ -6883,10 +7542,34 @@ struct GhosttyTerminalView: NSViewRepresentable {
 #endif
         hostedView.setDropZoneOverlay(zone: forwardedDropZone)
 
-        coordinator.attachGeneration += 1
+        let hostContainer = nsView as? HostContainerView
+        if let host = hostContainer {
+            let hostId = ObjectIdentifier(host)
+            let didChangeHost = coordinator.lastObservedHostId != hostId
+            let didChangeReattachRevision = coordinator.lastProcessedReattachToken != reattachToken
+            if didChangeHost || didChangeReattachRevision {
+                coordinator.attachGeneration += 1
+                coordinator.lastProcessedReattachToken = reattachToken
+                coordinator.lastObservedHostId = hostId
+                coordinator.lastPortalBindingSignature = nil
+                coordinator.pendingPortalBindingSignature = nil
+                if didChangeHost {
+                    coordinator.lastBoundHostId = nil
+                }
+#if DEBUG
+                dlog(
+                    "ws.hostState.generation surface=\(terminalSurface.id.uuidString.prefix(5)) " +
+                    "generation=\(coordinator.attachGeneration) hostChanged=\(didChangeHost ? 1 : 0) " +
+                    "reattachChanged=\(didChangeReattachRevision ? 1 : 0) mount=\(mountState.rawValue) " +
+                    "reattachToken=\(reattachToken) host=\(Unmanaged.passUnretained(host).toOpaque()) " +
+                    "window=\(host.window?.windowNumber ?? -1) superview=\(hostedView.superview != nil ? 1 : 0)"
+                )
+#endif
+            }
+        }
+
         let generation = coordinator.attachGeneration
 
-        let hostContainer = nsView as? HostContainerView
         if let host = hostContainer {
             host.onDidMoveToWindow = { [weak host, weak hostedView, weak coordinator] in
                 guard let host, let hostedView, let coordinator else { return }
@@ -6895,8 +7578,10 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     host: host,
                     hostedView: hostedView,
                     generation: generation,
+                    requestedMountState: coordinator.desiredMountState,
                     expectedSurfaceId: portalExpectedSurfaceId,
-                    expectedGeneration: portalExpectedGeneration
+                    expectedGeneration: portalExpectedGeneration,
+                    trigger: .movedToWindow
                 )
             }
             host.onGeometryChanged = { [weak host, weak hostedView, weak coordinator] in
@@ -6918,28 +7603,50 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     host: host,
                     hostedView: hostedView,
                     generation: generation,
+                    requestedMountState: coordinator.desiredMountState,
                     expectedSurfaceId: portalExpectedSurfaceId,
-                    expectedGeneration: portalExpectedGeneration
+                    expectedGeneration: portalExpectedGeneration,
+                    trigger: .geometry
                 )
             }
 
             if host.window != nil {
+                let effectiveMountState = Self.effectivePortalMountState(
+                    requestedMountState: coordinator.desiredMountState,
+                    hostWindowAttached: true,
+                    hasUsableLayout: host.bounds.width > 1 && host.bounds.height > 1
+                )
                 let hostId = ObjectIdentifier(host)
                 let shouldBindNow =
-                    coordinator.lastBoundHostId != hostId ||
-                    hostedView.superview == nil ||
-                    previousDesiredIsVisibleInUI != isVisibleInUI ||
-                    previousDesiredShowsUnreadNotificationRing != showsUnreadNotificationRing ||
-                    previousDesiredPortalZPriority != portalZPriority
+                    effectiveMountState == .mounted &&
+                    (
+                        coordinator.lastBoundHostId != hostId ||
+                            hostedView.superview == nil ||
+                            previousDesiredIsVisibleInUI != isVisibleInUI ||
+                            previousDesiredShowsUnreadNotificationRing != showsUnreadNotificationRing ||
+                            previousDesiredPortalZPriority != portalZPriority ||
+                            previousDesiredMountState != mountState
+                    )
                 if shouldBindNow {
                     Self.schedulePortalPass(
                         coordinator: coordinator,
                         host: host,
                         hostedView: hostedView,
                         generation: generation,
+                        requestedMountState: coordinator.desiredMountState,
                         expectedSurfaceId: portalExpectedSurfaceId,
-                        expectedGeneration: portalExpectedGeneration
+                        expectedGeneration: portalExpectedGeneration,
+                        trigger: .update
                     )
+                } else if desiredStateChanged {
+#if DEBUG
+                    dlog(
+                        "ws.hostState.noBind surface=\(terminalSurface.id.uuidString.prefix(5)) " +
+                        "mount=\(effectiveMountState.rawValue) boundHost=\(coordinator.lastBoundHostId == hostId ? 1 : 0) " +
+                        "hostedSuperview=\(hostedView.superview != nil ? 1 : 0) " +
+                        "visible=\(isVisibleInUI ? 1 : 0) active=\(isActive ? 1 : 0) z=\(portalZPriority)"
+                    )
+#endif
                 }
             } else {
                 // Bind is deferred until host moves into a window. Update the
@@ -7004,9 +7711,13 @@ struct GhosttyTerminalView: NSViewRepresentable {
         coordinator.desiredIsVisibleInUI = false
         coordinator.desiredShowsUnreadNotificationRing = false
         coordinator.desiredPortalZPriority = 0
+        coordinator.desiredMountState = .detaching
         coordinator.lastBoundHostId = nil
         coordinator.lastAppliedPortalZPriority = nil
         coordinator.lastAppliedPortalBindingGeneration = nil
+        coordinator.lastObservedHostId = nil
+        coordinator.pendingPortalBindingSignature = nil
+        coordinator.lastPortalBindingSignature = nil
         let hostedView = coordinator.hostedView
 #if DEBUG
         if let hostedView {

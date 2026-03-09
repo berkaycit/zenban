@@ -35,8 +35,11 @@ struct zenbanApp: App {
             object: nil,
             queue: .main
         ) { [terminalManager, devServerManager] _ in
-            terminalManager.terminateAllSessions()
-            devServerManager.stopAllServers()
+            MainActor.assumeIsolated {
+                terminalManager.terminateAllSessions()
+                devServerManager.stopAllServers()
+                TmuxSessionManager.shared.killAllZenbanSessionsSync()
+            }
         }
 
         NotificationCenter.default.addObserver(
@@ -44,10 +47,12 @@ struct zenbanApp: App {
             object: nil,
             queue: .main
         ) { [terminalManager] _ in
-            if NSApplication.shared.occlusionState.contains(.visible) {
-                terminalManager.resumeAllTerminals()
-            } else {
-                terminalManager.suspendAllTerminals()
+            MainActor.assumeIsolated {
+                if NSApplication.shared.occlusionState.contains(.visible) {
+                    terminalManager.resumeAllTerminals()
+                } else {
+                    terminalManager.suspendAllTerminals()
+                }
             }
         }
 
@@ -135,7 +140,16 @@ struct zenbanApp: App {
                 .onAppear {
                     setupCardDeletionHandler()
                     setupNotifications()
+                    Task {
+                        await TmuxSessionManager.shared.updateConfig()
+                        await TmuxSessionManager.shared.killAllZenbanSessions()
+                    }
                     store.checkDependencies()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .ghosttyConfigDidReload)) { _ in
+                    Task {
+                        await TmuxSessionManager.shared.updateConfig()
+                    }
                 }
                 .onOpenURL { url in
                     handleZenbanURL(url)

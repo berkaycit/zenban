@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Restore tmux-backed Ghostty card sessions
+- **Description**: Added a new `TmuxSessionManager` and put each terminal split back on its own tmux session without reintroducing `libghostty`. Hidden cards now suspend Ghostty surfaces while their tmux-backed shells keep running, then resume into the same session when the card is shown again. Startup and shutdown now clear stale Zenban tmux sessions, and dependency/settings flows once again require Homebrew plus tmux while keeping `gh` and `claude` optional.
+
 - **Summary**: Remove terminal browser create affordances
 - **Description**: Removed the user-facing ways to open browser tabs from the cmux workspace shell, including the empty-pane browser button, browser-create shortcuts, and bonsplit chrome/context-menu affordances. Dev Server preview and internal/socket-driven browser APIs stay intact, so embedded browsers still exist where the app needs them without exposing manual terminal-side creation.
 
