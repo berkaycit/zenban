@@ -190,6 +190,12 @@ final class TerminalManager {
         let newSummary = records[newCardID].map(debugWorkspaceSummary) ?? "card=\(newCardID.uuidString.prefix(5)) missing=1"
         dlog("handoff.start from={\(oldSummary)} to={\(newSummary)}")
 #endif
+        // Hide the retiring card's portal views immediately so the old terminal
+        // content doesn't ghost above the new card for a few frames while the
+        // new card's portal binding is still pending (async). The portal layer
+        // sits above SwiftUI, so SwiftUI z-ordering alone cannot prevent the flash.
+        hidePortalViews(for: oldCardID)
+
         activateWorkspace(for: newCardID)
 
         guard let oldRecord = records[oldCardID],
