@@ -7119,10 +7119,15 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 "z=\(signature.zPriority)"
         }
 
+        /// Schedule a portal binding pass. The block returns `true` if the binding
+        /// was applied (or confirmed to be current), `false` if it was skipped due to
+        /// a transient condition (e.g. mount state changed). Only successful passes
+        /// are recorded for deduplication so that a subsequent pass with identical
+        /// parameters can retry the binding.
         func schedulePortalPass(
             signature: PortalBindingSignature,
             allowExecutedDedupe: Bool,
-            block: @escaping (_ revision: UInt64) -> Void
+            block: @escaping (_ revision: UInt64) -> Bool
         ) {
             if pendingPortalBindingSignature == signature {
 #if DEBUG
@@ -7189,7 +7194,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     return
                 }
                 self.pendingPortalBindingSignature = nil
-                self.lastPortalBindingSignature = signature
 #if DEBUG
                 self.debugLogPortalPass(
                     "execute",
@@ -7199,7 +7203,10 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     detail: "\(self.debugSignatureText(signature)) hosted=\(String(describing: self.hostedView.map { Unmanaged.passUnretained($0).toOpaque() }))"
                 )
 #endif
-                block(revision)
+                let succeeded = block(revision)
+                if succeeded {
+                    self.lastPortalBindingSignature = signature
+                }
             }
         }
     }
@@ -7289,15 +7296,14 @@ struct GhosttyTerminalView: NSViewRepresentable {
         coordinator.schedulePortalPass(
             signature: signature,
             allowExecutedDedupe: trigger.allowsExecutedDedupe
-        ) { [weak host, weak hostedView, weak coordinator] revision in
+        ) { [weak host, weak hostedView, weak coordinator] revision -> Bool in
             guard let coordinator else {
 #if DEBUG
                 dlog("portal.pass.skip reason=noCoordinator generation=\(generation) expectedGeneration=\(expectedGeneration)")
 #endif
-                return
+                return false
             }
             guard let host else {
-                coordinator.lastPortalBindingSignature = nil
 #if DEBUG
                 coordinator.debugLogPortalPass(
                     "skip",
@@ -7307,10 +7313,9 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     detail: "reason=noHost expectedGeneration=\(expectedGeneration)"
                 )
 #endif
-                return
+                return false
             }
             guard let hostedView else {
-                coordinator.lastPortalBindingSignature = nil
 #if DEBUG
                 coordinator.debugLogPortalPass(
                     "skip",
@@ -7320,10 +7325,9 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     detail: "reason=noHostedView expectedGeneration=\(expectedGeneration)"
                 )
 #endif
-                return
+                return false
             }
             guard coordinator.attachGeneration == generation else {
-                coordinator.lastPortalBindingSignature = nil
 #if DEBUG
                 coordinator.debugLogPortalPass(
                     "skip",
@@ -7333,7 +7337,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     detail: "reason=staleGeneration actualGeneration=\(coordinator.attachGeneration) expectedGeneration=\(expectedGeneration)"
                 )
 #endif
-                return
+                return false
             }
             let effectiveMountState = effectivePortalMountState(
                 requestedMountState: coordinator.desiredMountState,
@@ -7341,11 +7345,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 hasUsableLayout: host.bounds.width > 1 && host.bounds.height > 1
             )
             guard effectiveMountState == .mounted else {
-                // The mount state changed between scheduling and execution (e.g. rapid
-                // card switches suspended the panel before the async pass ran). Clear the
-                // executed signature so the next pass with the same parameters isn't
-                // incorrectly deduplicated — the binding was never actually applied.
-                coordinator.lastPortalBindingSignature = nil
 #if DEBUG
                 coordinator.debugLogPortalPass(
                     "skip",
@@ -7355,7 +7354,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     detail: "reason=mountStateChanged value=\(effectiveMountState.rawValue) expectedGeneration=\(expectedGeneration)"
                 )
 #endif
-                return
+                return false
             }
 
             let hostId = ObjectIdentifier(host)
@@ -7460,6 +7459,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
             hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
             hostedView.setActive(coordinator.desiredIsActive)
             hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
+            return true
         }
     }
 
