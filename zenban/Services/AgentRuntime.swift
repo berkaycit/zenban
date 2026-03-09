@@ -73,13 +73,16 @@ enum AgentLauncher {
         )
 
         if plan.reason == .agentSwitch {
-            panel.sendText("\u{03}")
+            TmuxSessionManager.shared.sendText(sessionID: panel.tmuxSessionID, text: "\u{03}")
             try? await Task.sleep(for: .milliseconds(300))
-            panel.sendText("\u{03}")
+            TmuxSessionManager.shared.sendText(sessionID: panel.tmuxSessionID, text: "\u{03}")
             try? await Task.sleep(for: .seconds(2))
         }
 
-        panel.sendText(plan.shellCommand + "\n")
+        TmuxSessionManager.shared.sendText(
+            sessionID: panel.tmuxSessionID,
+            text: plan.shellCommand + "\n"
+        )
     }
 
     private static func baseCommand(for agent: Agent) -> String {

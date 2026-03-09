@@ -597,7 +597,6 @@ final class TerminalManager {
             agent: agent,
             workingDirectory: workingDirectory
         )
-        agentSessionMonitor?.registerLaunch(for: cardID)
 
         let plan = AgentLauncher.plan(
             for: agent,
@@ -609,6 +608,7 @@ final class TerminalManager {
 
         Task { @MainActor in
             await AgentLauncher.launch(plan, on: panel)
+            self.agentSessionMonitor?.registerLaunch(for: cardID)
         }
     }
 

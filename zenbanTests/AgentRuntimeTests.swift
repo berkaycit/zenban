@@ -90,6 +90,28 @@ struct AgentRuntimeTests {
     }
 
     @Test
+    func workflowIgnoresStartupActivityBeforeBaseline() {
+        var reducer = AgentTaskWorkflowReducer()
+        let cardID = UUID()
+        let snapshot = AgentSessionSnapshot(
+            cardID: cardID,
+            boardID: UUID(),
+            cardTitle: "cc-startup",
+            column: .todo,
+            agent: .claude,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: cardID)
+        let runningOutcome = reducer.apply(snapshot: snapshot, rawStatus: .running)
+        let idleOutcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+
+        #expect(runningOutcome == .none)
+        #expect(idleOutcome == .none)
+        #expect(reducer.cycleState(for: cardID) == .ready)
+    }
+
+    @Test
     func workflowMovesInReviewCardsBackToTodoWhenWorkStarts() {
         var reducer = AgentTaskWorkflowReducer()
         let cardID = UUID()
