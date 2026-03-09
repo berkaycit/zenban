@@ -56,12 +56,6 @@ actor GitDiffCache {
         evictIfNeeded()
     }
 
-    func contains(file: String) -> Bool {
-        guard let cached = cache[file] else { return false }
-        // Also check if cache is still fresh
-        return Date().timeIntervalSince(cached.timestamp) <= maxCacheAge
-    }
-
     func invalidate(file: String) {
         cache.removeValue(forKey: file)
         accessOrder.removeAll { $0 == file }

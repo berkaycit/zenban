@@ -9,7 +9,7 @@ struct FileBrowserOverlayView: View {
 
     var body: some View {
         Group {
-            if let worktreePath = card.worktreePath {
+            if card.worktreePath != nil {
                 if let store {
                     HSplitView {
                         VStack(spacing: 0) {

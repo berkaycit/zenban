@@ -12,8 +12,6 @@ nonisolated struct ProcessResult: Sendable {
     let exitCode: Int32
     let stdout: String
     let stderr: String
-
-    var succeeded: Bool { exitCode == 0 }
 }
 
 /// Error types for process execution
@@ -118,48 +116,6 @@ actor ProcessExecutor {
                     try? stdoutPipe.fileHandleForReading.close()
                     try? stderrPipe.fileHandleForReading.close()
 
-                    continuation.resume(throwing: ProcessExecutorError.executionFailed(error.localizedDescription))
-                }
-            }
-        }
-    }
-
-    /// Execute a process without capturing output (just exit code)
-    func execute(
-        executable: String,
-        arguments: [String] = [],
-        environment: [String: String]? = nil,
-        workingDirectory: String? = nil
-    ) async throws -> Int32 {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-
-        if let env = environment {
-            process.environment = env
-        }
-
-        if let workDir = workingDirectory {
-            process.currentDirectoryURL = URL(fileURLWithPath: workDir)
-        }
-
-        // Discard output
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        return try await withCheckedThrowingContinuation { continuation in
-            let resumeGuard = ResumeGuard()
-
-            process.terminationHandler = { [resumeGuard] proc in
-                resumeGuard.runOnce {
-                    continuation.resume(returning: proc.terminationStatus)
-                }
-            }
-
-            do {
-                try process.run()
-            } catch {
-                resumeGuard.runOnce {
                     continuation.resume(throwing: ProcessExecutorError.executionFailed(error.localizedDescription))
                 }
             }

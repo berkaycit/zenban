@@ -5,9 +5,14 @@ struct BoardView: View {
     @Environment(BoardStore.self) private var store
 
     var body: some View {
+        let cardsByColumn = Dictionary(
+            grouping: board.cards.sorted { $0.orderIndex < $1.orderIndex },
+            by: \.column
+        )
+
         HStack(alignment: .top, spacing: 16) {
             ForEach(Column.allCases) { column in
-                ColumnView(column: column, cards: board.cards(in: column), boardID: board.id)
+                ColumnView(column: column, cards: cardsByColumn[column] ?? [], boardID: board.id)
             }
         }
         .padding()

@@ -5,8 +5,6 @@ import Combine
 final class GitDiffViewModel: ObservableObject {
     @Published var loadedDiffs: [String: [DiffLine]] = [:]
     @Published var loadingFiles: Set<String> = []
-    @Published var errors: [String: String] = [:]
-    @Published var isBatchLoading: Bool = false
 
     private let cache: GitDiffCache
     private var activeTasks: [String: Task<Void, Never>] = [:]
@@ -41,7 +39,6 @@ final class GitDiffViewModel: ObservableObject {
 
         activeTasks[file]?.cancel()
         loadingFiles.insert(file)
-        errors.removeValue(forKey: file)
 
         let isUntracked = untrackedFiles.contains(file)
 
@@ -66,7 +63,7 @@ final class GitDiffViewModel: ObservableObject {
             if isUntracked {
                 lines = await self.loadUntrackedFileAsDiff(file)
             } else {
-                let diffOutput = await self.loadDiffOutput(for: file)
+                let diffOutput = await self.preferredDiffOutput(for: file)
                 lines = await Task.detached(priority: .utility) {
                     DiffParser.parseUnifiedDiff(diffOutput ?? "")
                 }.value
@@ -97,57 +94,18 @@ final class GitDiffViewModel: ObservableObject {
         loadedDiffs.removeValue(forKey: file)
     }
 
-    func invalidateCache() async {
-        await cache.invalidateAll()
+    func cancelAll() {
+        for task in activeTasks.values {
+            task.cancel()
+        }
+        activeTasks.removeAll()
+        loadingFiles.removeAll()
+    }
+
+    func reset() async {
+        cancelAll()
         loadedDiffs.removeAll()
-    }
-
-    func invalidateFile(_ file: String) async {
-        await cache.invalidate(file: file)
-        loadedDiffs.removeValue(forKey: file)
-    }
-
-    /// Batch load diffs for multiple files in fewer git calls
-    func loadAllDiffs(for files: [String]) async {
-        let trackedFiles = files.filter { !untrackedFiles.contains($0) }
-        let filesToLoad = trackedFiles.filter { loadedDiffs[$0] == nil && !loadingFiles.contains($0) }
-        let untrackedToLoad = files.filter { untrackedFiles.contains($0) && loadedDiffs[$0] == nil }
-
-        guard !filesToLoad.isEmpty || !untrackedToLoad.isEmpty else {
-            isBatchLoading = false
-            return
-        }
-
-        isBatchLoading = true
-        defer { isBatchLoading = false }
-
-        // Load tracked files with batch diff
-        if !filesToLoad.isEmpty {
-            let diffOutput = await loadBatchDiffOutput()
-
-            let parsedByFile = await Task.detached(priority: .utility) {
-                DiffParser.splitDiffByFile(diffOutput ?? "")
-            }.value
-
-            for file in filesToLoad {
-                let lines = parsedByFile[file] ?? []
-                loadedDiffs[file] = lines
-                if !lines.isEmpty {
-                    let contentHash = Self.computeDiffHash(lines)
-                    await cache.cacheDiff(lines, for: file, contentHash: contentHash)
-                }
-            }
-        }
-
-        // Load untracked files
-        for file in untrackedToLoad {
-            let lines = await loadUntrackedFileAsDiff(file)
-            loadedDiffs[file] = lines
-            if !lines.isEmpty {
-                let contentHash = Self.computeDiffHash(lines)
-                await cache.cacheDiff(lines, for: file, contentHash: contentHash)
-            }
-        }
+        await cache.invalidateAll()
     }
 
     private static func computeDiffHash(_ lines: [DiffLine]) -> String {
@@ -163,24 +121,39 @@ final class GitDiffViewModel: ObservableObject {
         return String(hasher.finalize())
     }
 
-    private func loadBatchDiffOutput() async -> String? {
+    private func preferredDiffOutput(for file: String?) async -> String? {
         if hasCommittedChanges {
-            let branchDiff = try? await GitService.getBranchDiff(
-                worktreePath: repoPath,
-                targetBranch: targetBranch
-            )
-            if let diff = branchDiff, !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return diff
-            }
+            let branchDiff = await branchDiffOutput(for: file)
+            if !isBlank(branchDiff) { return branchDiff }
             guard hasUncommittedChanges else { return branchDiff }
         }
 
         guard hasUncommittedChanges else { return "" }
+        return await workingDiffOutput(for: file)
+    }
 
-        var diffOutput = try? await GitService.getDiff(worktreePath: repoPath, file: nil)
-        if diffOutput?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-            diffOutput = try? await GitService.getUnstagedDiff(worktreePath: repoPath, file: nil)
+    private func branchDiffOutput(for file: String?) async -> String? {
+        if let file {
+            return try? await GitService.getBranchFileDiff(
+                worktreePath: repoPath,
+                targetBranch: targetBranch,
+                file: file
+            )
         }
+
+        return try? await GitService.getBranchDiff(
+            worktreePath: repoPath,
+            targetBranch: targetBranch
+        )
+    }
+
+    private func workingDiffOutput(for file: String?) async -> String? {
+        var diffOutput = try? await GitService.getDiff(worktreePath: repoPath, file: file)
+
+        if isBlank(diffOutput) {
+            diffOutput = try? await GitService.getUnstagedDiff(worktreePath: repoPath, file: file)
+        }
+
         return diffOutput
     }
 
@@ -220,39 +193,7 @@ final class GitDiffViewModel: ObservableObject {
         }.value
     }
 
-    private func loadDiffOutput(for file: String) async -> String? {
-        if hasCommittedChanges {
-            let branchDiff = try? await GitService.getBranchFileDiff(
-                worktreePath: repoPath,
-                targetBranch: targetBranch,
-                file: file
-            )
-
-            if let diff = branchDiff, !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return diff
-            }
-
-            guard hasUncommittedChanges else { return branchDiff }
-            return await loadWorkingDiffOutput(for: file)
-        }
-
-        guard hasUncommittedChanges else { return "" }
-        return await loadWorkingDiffOutput(for: file)
-    }
-
-    private func loadWorkingDiffOutput(for file: String) async -> String? {
-        var diffOutput = try? await GitService.getDiff(worktreePath: repoPath, file: file)
-
-        if diffOutput?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-            diffOutput = try? await GitService.getUnstagedDiff(worktreePath: repoPath, file: file)
-        }
-
-        return diffOutput
-    }
-
-    deinit {
-        for task in activeTasks.values {
-            task.cancel()
-        }
+    private func isBlank(_ diffOutput: String?) -> Bool {
+        diffOutput?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
     }
 }

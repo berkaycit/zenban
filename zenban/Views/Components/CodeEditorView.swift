@@ -48,15 +48,14 @@ struct CodeEditorView: View {
         )
         .disabled(!isEditable)
         .clipped()
-        .onChange(of: content) { newValue in
-            if text != newValue {
-                text = newValue
+        .onChange(of: content) {
+            if text != content {
+                text = content
             }
         }
-        .onChange(of: text) { newValue in
-            if isEditable {
-                onContentChange?(newValue)
-            }
+        .onChange(of: text) {
+            guard isEditable else { return }
+            onContentChange?(text)
         }
     }
 

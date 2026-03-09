@@ -25,7 +25,7 @@ struct FileIconView: View {
             }
         }
         .task(id: path) {
-            icon = await FileIconService.shared.icon(
+            icon = FileIconService.shared.icon(
                 forFile: path,
                 size: CGSize(width: size, height: size)
             )

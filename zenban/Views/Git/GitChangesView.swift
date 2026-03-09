@@ -28,7 +28,6 @@ struct GitChangesView: View {
     @State private var selectedFilePath: String?
     @State private var isMerging = false
     @State private var selectedHistoryCommit: GitCommit?
-    @State private var historyDiffOutput = ""
     @State private var isHistoryDiffLoading = false
     @State private var historyDiffError: String?
 
@@ -43,8 +42,8 @@ struct GitChangesView: View {
     @State private var historyListWidth: CGFloat = 300
 
     // Task handles for cancellation
-    @State private var loadChangesTask: Task<Void, any Error>?
-    @State private var loadBranchesTask: Task<Void, any Error>?
+    @State private var loadChangesTask: Task<Void, Never>?
+    @State private var loadBranchesTask: Task<Void, Never>?
     @State private var historyDiffTask: Task<Void, Never>?
 
     private let historyLogService = GitLogService()
@@ -94,7 +93,6 @@ struct GitChangesView: View {
         .compositingGroup()
         .task {
             loadBranches()
-            loadChanges()
         }
         .onChange(of: selectedFilePath) { oldValue, newValue in
             if let oldValue, oldValue != newValue {
@@ -122,10 +120,7 @@ struct GitChangesView: View {
             loadChangesTask?.cancel()
             loadBranchesTask?.cancel()
             historyDiffTask?.cancel()
-            let loadingFiles = diffViewModel.loadingFiles
-            for file in loadingFiles {
-                diffViewModel.cancelLoad(for: file)
-            }
+            diffViewModel.cancelAll()
         }
         .sheet(isPresented: $showCommit) {
             if let worktreePath = card.worktreePath {
@@ -270,87 +265,77 @@ struct GitChangesView: View {
     // MARK: - Content Views
 
     private var loadingView: some View {
-        VStack {
-            Spacer()
-            ProgressView()
-                .controlSize(.regular)
-            Text("Loading changes...")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
-            Spacer()
-        }
+        placeholderView(message: "Loading changes...", showsSpinner: true)
     }
 
     private func errorView(_ error: String, onRetry: @escaping () -> Void) -> some View {
-        VStack {
-            Spacer()
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-                .foregroundStyle(.orange)
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding()
-            Button("Retry", action: onRetry)
-            Spacer()
-        }
+        placeholderView(
+            icon: "exclamationmark.triangle",
+            title: "Unable to Load",
+            message: error,
+            tint: .orange,
+            actionTitle: "Retry",
+            action: onRetry
+        )
     }
 
     private var emptyChangesView: some View {
-        VStack {
-            Spacer()
-            Image(systemName: "checkmark.circle")
-                .font(.largeTitle)
-                .foregroundStyle(.green)
-            Text("No changes")
-                .font(.headline)
-                .padding(.top, 8)
-            Text("Working tree is clean")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
+        placeholderView(
+            icon: "checkmark.circle",
+            title: "No changes",
+            message: "Working tree is clean",
+            tint: .green
+        )
     }
 
     private var diffLoadingView: some View {
-        VStack {
-            Spacer()
-            ProgressView()
-                .controlSize(.regular)
-            Text("Loading diff...")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
-            Spacer()
-        }
+        placeholderView(message: "Loading diff...", showsSpinner: true)
     }
 
     private var emptySelectionView: some View {
-        VStack {
-            Spacer()
-            Image(systemName: "doc.text")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("Select a file to view its diff")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
-            Spacer()
-        }
+        placeholderView(icon: "doc.text", message: "Select a file to view its diff")
     }
 
     private func noDiffView(_ message: String) -> some View {
-        VStack {
+        placeholderView(icon: "checkmark.circle", message: message, tint: .green)
+    }
+
+    private func placeholderView(
+        icon: String? = nil,
+        title: String? = nil,
+        message: String,
+        tint: Color = .secondary,
+        showsSpinner: Bool = false,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        VStack(spacing: 8) {
             Spacer()
-            Image(systemName: "checkmark.circle")
-                .font(.largeTitle)
-                .foregroundStyle(.green)
+
+            if showsSpinner {
+                ProgressView()
+                    .controlSize(.regular)
+            } else if let icon {
+                Image(systemName: icon)
+                    .font(.largeTitle)
+                    .foregroundStyle(tint)
+            }
+
+            if let title {
+                Text(title)
+                    .font(.headline)
+            }
+
             Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.top, 8)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+            }
+
             Spacer()
         }
     }
@@ -471,7 +456,7 @@ struct GitChangesView: View {
             } else {
                 diffLoadingView
                     .onAppear {
-                        if !diffViewModel.loadingFiles.contains(file.path) && !diffViewModel.isBatchLoading {
+                        if !diffViewModel.loadingFiles.contains(file.path) {
                             loadDiffForFile(file.path)
                         }
                     }
@@ -749,41 +734,34 @@ struct GitChangesView: View {
 
         // Cancel existing tasks
         loadChangesTask?.cancel()
-        let loadingFiles = diffViewModel.loadingFiles
-        for file in loadingFiles {
-            diffViewModel.cancelLoad(for: file)
-        }
-        diffViewModel.errors.removeAll()
-        diffViewModel.loadedDiffs.removeAll()
-        Task {
-            await diffViewModel.invalidateCache()
-        }
 
         isLoading = true
         errorMessage = nil
 
         loadChangesTask = Task {
+            await diffViewModel.reset()
+
             do {
                 try Task.checkCancellation()
-                currentBranch = try await GitService.getCurrentBranch(worktreePath: worktreePath)
 
-                try Task.checkCancellation()
-                let committedChanges = try await GitService.getBranchChangedFiles(
+                async let currentBranchValue = GitService.getCurrentBranch(worktreePath: worktreePath)
+                async let committedChangesValue = GitService.getBranchChangedFiles(
                     worktreePath: worktreePath,
                     targetBranch: selectedTargetBranch
                 )
-                hasCommittedChanges = !committedChanges.isEmpty
-                hasUncommittedChanges = await GitService.hasUncommittedChanges(worktreePath: worktreePath)
 
                 try Task.checkCancellation()
-                // Show committed changes, or uncommitted if no commits yet
+                currentBranch = try await currentBranchValue
+                let committedChanges = try await committedChangesValue
+                hasCommittedChanges = !committedChanges.isEmpty
+
                 if hasCommittedChanges {
+                    hasUncommittedChanges = await GitService.hasUncommittedChanges(worktreePath: worktreePath)
                     branchChanges = committedChanges
-                } else if hasUncommittedChanges {
-                    let status = try await GitService.getStatus(worktreePath: worktreePath)
-                    branchChanges = status.filesChanged
                 } else {
-                    branchChanges = []
+                    let status = try await GitService.getStatus(worktreePath: worktreePath)
+                    hasUncommittedChanges = !status.filesChanged.isEmpty
+                    branchChanges = status.filesChanged
                 }
 
                 totalAdditions = branchChanges.reduce(0) { $0 + $1.additions }
@@ -818,19 +796,29 @@ struct GitChangesView: View {
     }
 
     private func loadBranches() {
-        guard let repoPath = repositoryPath,
-              let worktreePath = card.worktreePath else { return }
+        guard let worktreePath = card.worktreePath else {
+            loadChanges()
+            return
+        }
 
         loadBranchesTask?.cancel()
+        let previousBranch = selectedTargetBranch
 
         loadBranchesTask = Task {
             do {
                 try Task.checkCancellation()
-                guard let branches = try? await GitService.listBranches(repositoryPath: repoPath) else { return }
-                let currentWorktreeBranch = try? await GitService.getCurrentBranch(worktreePath: worktreePath)
+
+                guard let repoPath = repositoryPath else {
+                    loadChanges()
+                    return
+                }
+
+                async let branchesValue = GitService.listBranches(repositoryPath: repoPath)
+                async let currentWorktreeBranchValue = GitService.getCurrentBranch(worktreePath: worktreePath)
+                let branches = try await branchesValue
+                let currentWorktreeBranch = try? await currentWorktreeBranchValue
 
                 try Task.checkCancellation()
-                // Filter out the worktree's branch
                 availableBranches = branches.map { branch in
                     BranchInfo(
                         name: branch.name,
@@ -840,7 +828,6 @@ struct GitChangesView: View {
                 }
 
                 let targetOptions = availableBranches.filter { !$0.isCurrent }
-                let previousBranch = selectedTargetBranch
 
                 // Try to find main or master
                 if let main = targetOptions.first(where: { $0.name == "main" || $0.name == "master" }) {
@@ -848,13 +835,15 @@ struct GitChangesView: View {
                 } else if let first = targetOptions.first {
                     selectedTargetBranch = first.name
                 }
-
-                // Reload changes if branch changed
-                if selectedTargetBranch != previousBranch {
-                    loadChanges()
-                }
             } catch is CancellationError {
-                // Cancelled
+                return
+            } catch {
+                availableBranches = []
+            }
+
+            guard !Task.isCancelled else { return }
+            if selectedTargetBranch == previousBranch {
+                loadChanges()
             }
         }
     }

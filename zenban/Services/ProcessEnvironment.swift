@@ -5,6 +5,10 @@ enum ProcessEnvironment {
     /// Build environment dictionary with PATH that includes common tool locations
     /// Includes: homebrew, nvm node, npm global, macports, and standard paths
     nonisolated static func buildWithNodeSupport() -> [String: String] {
+        cachedEnvironment
+    }
+
+    nonisolated private static let cachedEnvironment: [String: String] = {
         var env = ProcessInfo.processInfo.environment
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -62,5 +66,5 @@ enum ProcessEnvironment {
         env["BROWSER"] = "none"
 
         return env
-    }
+    }()
 }

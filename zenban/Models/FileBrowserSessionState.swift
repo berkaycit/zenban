@@ -1,6 +1,6 @@
 import Foundation
 
-struct FileBrowserSessionState: Codable, Hashable {
+nonisolated struct FileBrowserSessionState: Codable, Hashable, Sendable {
     var currentPath: String?
     var expandedPaths: [String]
     var openFilePaths: [String]

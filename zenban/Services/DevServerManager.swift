@@ -15,12 +15,6 @@ struct OutputLine: Identifiable, Equatable {
         source == .serverStderr
     }
 
-    init(text: String, source: OutputSource, timestamp: Date = Date()) {
-        self.text = text
-        self.source = source
-        self.timestamp = timestamp
-    }
-
     init(text: String, isError: Bool, timestamp: Date = Date()) {
         self.text = text
         self.source = isError ? .serverStderr : .serverStdout
@@ -34,9 +28,9 @@ final class DevServerManager {
 
     enum ServerState: Equatable {
         case idle
-        case runningSetup(output: String)
-        case startingServer(output: String)
-        case detectingPort(output: String)
+        case runningSetup
+        case startingServer
+        case detectingPort
         case ready(url: URL)
         case error(message: String)
     }
@@ -50,9 +44,11 @@ final class DevServerManager {
     private var pendingUIUpdates: [UUID: Bool] = [:]
     private var expectedTerminatedProcesses: Set<ObjectIdentifier> = []
     private var partialLineBuffers: [UUID: (stdout: String, stderr: String)] = [:]
+    private var outputTails: [UUID: String] = [:]
     private var activeRequestIDs: [UUID: UUID] = [:]
 
     private let maxOutputLines = 1000
+    private let outputTailLimit = 4096
     private let uiUpdateInterval: TimeInterval = 0.15
 
     // MARK: - Public API
@@ -87,15 +83,13 @@ final class DevServerManager {
             throw DevServerError.cancelled
         }
 
-        serverStates[cardID] = .runningSetup(output: "")
-        outputLines[cardID] = []
-        partialLineBuffers[cardID] = (stdout: "", stderr: "")
+        prepareOutputState(for: cardID, state: .runningSetup)
 
         try await runCommandToCompletion(
             for: cardID,
             command: command,
             directory: directory,
-            stateBuilder: { output in .runningSetup(output: output) },
+            activeState: .runningSetup,
             timeout: 300,
             requestID: requestID
         )
@@ -111,9 +105,7 @@ final class DevServerManager {
             throw DevServerError.cancelled
         }
 
-        serverStates[cardID] = .startingServer(output: "")
-        outputLines[cardID] = []
-        partialLineBuffers[cardID] = (stdout: "", stderr: "")
+        prepareOutputState(for: cardID, state: .startingServer)
 
         return try await runDevServerProcess(
             for: cardID,
@@ -146,6 +138,7 @@ final class DevServerManager {
         outputVersion[cardID] = nil
         pendingUIUpdates[cardID] = nil
         partialLineBuffers[cardID] = nil
+        outputTails[cardID] = nil
     }
 
     func stopRequest(for cardID: UUID, requestID: UUID) {
@@ -173,19 +166,20 @@ final class DevServerManager {
         outputVersion.removeAll()
         pendingUIUpdates.removeAll()
         partialLineBuffers.removeAll()
+        outputTails.removeAll()
         activeRequestIDs.removeAll()
     }
 
-    func isServerRunning(for cardID: UUID) -> Bool {
-        switch serverStates[cardID] {
-        case .ready, .startingServer, .detectingPort:
-            true
-        case .idle, .runningSetup, .error, nil:
-            false
-        }
-    }
-
     // MARK: - Private
+
+    private func prepareOutputState(for cardID: UUID, state: ServerState) {
+        serverStates[cardID] = state
+        outputLines[cardID] = []
+        outputVersion[cardID] = 0
+        pendingUIUpdates[cardID] = false
+        partialLineBuffers[cardID] = (stdout: "", stderr: "")
+        outputTails[cardID] = ""
+    }
 
     private func isRequestCurrent(_ requestID: UUID, for cardID: UUID) -> Bool {
         activeRequestIDs[cardID] == requestID
@@ -239,6 +233,8 @@ final class DevServerManager {
             return
         }
 
+        appendToOutputTail(str, for: cardID)
+
         var currentLines = outputLines[cardID] ?? []
         var buffers = partialLineBuffers[cardID] ?? (stdout: "", stderr: "")
 
@@ -274,6 +270,15 @@ final class DevServerManager {
 
         outputLines[cardID] = currentLines
         scheduleUIUpdate(for: cardID, requestID: requestID)
+    }
+
+    private func appendToOutputTail(_ str: String, for cardID: UUID) {
+        let updatedTail = (outputTails[cardID] ?? "") + str
+        if updatedTail.count > outputTailLimit {
+            outputTails[cardID] = String(updatedTail.suffix(outputTailLimit))
+        } else {
+            outputTails[cardID] = updatedTail
+        }
     }
 
     private func flushPartialBuffers(for cardID: UUID, requestID: UUID? = nil) {
@@ -337,7 +342,7 @@ final class DevServerManager {
         for cardID: UUID,
         command: String,
         directory: String,
-        stateBuilder: @escaping (String) -> ServerState,
+        activeState: ServerState,
         timeout: TimeInterval,
         requestID: UUID
     ) async throws {
@@ -392,7 +397,7 @@ final class DevServerManager {
                     DispatchQueue.main.async {
                         guard self.isRequestCurrent(requestID, for: cardID) else { return }
                         self.appendOutput(str, for: cardID, isError: false, requestID: requestID)
-                        self.serverStates[cardID] = stateBuilder(self.output(for: cardID))
+                        self.serverStates[cardID] = activeState
                     }
                 }
 
@@ -404,7 +409,7 @@ final class DevServerManager {
                     DispatchQueue.main.async {
                         guard self.isRequestCurrent(requestID, for: cardID) else { return }
                         self.appendOutput(str, for: cardID, isError: true, requestID: requestID)
-                        self.serverStates[cardID] = stateBuilder(self.output(for: cardID))
+                        self.serverStates[cardID] = activeState
                     }
                 }
 
@@ -574,12 +579,11 @@ final class DevServerManager {
                     DispatchQueue.main.async {
                         guard self.isRequestCurrent(requestID, for: cardID) else { return }
                         self.appendOutput(str, for: cardID, isError: isError, requestID: requestID)
-                        let newOutput = self.output(for: cardID)
 
                         if !state.portDetected && !state.isResumed {
-                            self.serverStates[cardID] = .detectingPort(output: newOutput)
+                            self.serverStates[cardID] = .detectingPort
 
-                            if let port = Self.parsePortFromOutput(newOutput) {
+                            if let port = Self.parsePortFromOutput(self.outputTails[cardID] ?? "") {
                                 state.portDetected = true
                                 state.isResumed = true
                                 let url = URL(string: "http://localhost:\(port)")!
@@ -767,7 +771,6 @@ enum DevServerError: LocalizedError {
     case setupFailed(String)
     case serverCrashed(String)
     case portDetectionTimeout
-    case alreadyRunning
 
     var errorDescription: String? {
         switch self {
@@ -781,8 +784,6 @@ enum DevServerError: LocalizedError {
             return "Server crashed: \(output)"
         case .portDetectionTimeout:
             return "Could not detect server port within timeout"
-        case .alreadyRunning:
-            return "Server is already running for this card"
         }
     }
 }

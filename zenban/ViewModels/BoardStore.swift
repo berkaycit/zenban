@@ -34,6 +34,16 @@ enum OverlayState: Equatable {
         default: false
         }
     }
+
+    var isGitChanges: Bool {
+        if case .gitChanges = self { return true }
+        return false
+    }
+
+    var isFileBrowser: Bool {
+        if case .fileBrowser = self { return true }
+        return false
+    }
 }
 
 @MainActor
@@ -73,7 +83,8 @@ final class BoardStore {
     private var _sortedBoardsCache: [Board]?
 
     var selectedBoard: Board? {
-        boards.first { $0.id == selectedBoardID }
+        guard let selectedBoardID, let index = boardIndex(for: selectedBoardID) else { return nil }
+        return boards[index]
     }
 
     var sortedBoards: [Board] {
@@ -128,7 +139,7 @@ final class BoardStore {
         case .devServerConfiguring(let cardID),
              .devServerRunning(let cardID, _, _),
              .devServerReconfiguring(let cardID, _, _):
-            selectedBoard?.cards.first { $0.id == cardID }
+            selectedBoardCard(cardID)
         default:
             nil
         }
@@ -208,59 +219,45 @@ final class BoardStore {
     // MARK: - Git Changes Computed Properties
 
     var showGitChanges: Bool {
-        if case .gitChanges = overlayState { return true }
-        return false
+        overlayState.isGitChanges
     }
 
     var gitChangesCard: Card? {
-        guard case .gitChanges(let cardID) = overlayState else { return nil }
-        return selectedBoard?.cards.first { $0.id == cardID }
+        guard overlayState.isGitChanges, let cardID = overlayState.cardID else { return nil }
+        return selectedBoardCard(cardID)
     }
 
     // MARK: - File Browser Computed Properties
 
     var showFileBrowser: Bool {
-        if case .fileBrowser = overlayState { return true }
-        return false
+        overlayState.isFileBrowser
     }
 
     var fileBrowserCard: Card? {
-        guard case .fileBrowser(let cardID) = overlayState else { return nil }
-        return selectedBoard?.cards.first { $0.id == cardID }
+        guard overlayState.isFileBrowser, let cardID = overlayState.cardID else { return nil }
+        return selectedBoardCard(cardID)
     }
 
     // MARK: - Git Changes Transitions
 
     func toggleGitChanges() {
         guard let card = selectedCard else { return }
-
-        if case .gitChanges(let cardID) = overlayState, cardID == card.id {
-            overlayState = .none
-            return
+        toggleOverlay(for: card.id, matching: { $0.isGitChanges && $0.cardID == $1 }) {
+            .gitChanges(cardID: $0)
         }
-
-        overlayState = .gitChanges(cardID: card.id)
     }
 
     func stopGitChanges() {
-        if case .gitChanges = overlayState { overlayState = .none }
+        clearOverlay { $0.isGitChanges }
     }
 
     // MARK: - File Browser Transitions
 
     func toggleFileBrowser() {
         guard let card = selectedCard else { return }
-
-        if case .fileBrowser(let cardID) = overlayState, cardID == card.id {
-            overlayState = .none
-            return
+        toggleOverlay(for: card.id, matching: { $0.isFileBrowser && $0.cardID == $1 }) {
+            .fileBrowser(cardID: $0)
         }
-
-        overlayState = .fileBrowser(cardID: card.id)
-    }
-
-    func stopFileBrowser() {
-        if case .fileBrowser = overlayState { overlayState = .none }
     }
 
     func stopOverlays() {
@@ -277,14 +274,12 @@ final class BoardStore {
     private static let skipDependencyCheckKey = "skipDependencyCheck"
 
     func checkDependencies() {
-        dependencyStatus = DependencyCheckService.shared.checkAll()
-        if let status = dependencyStatus,
-           !status.allRequired,
-           !UserDefaults.standard.bool(forKey: Self.skipDependencyCheckKey) {
-            dependencySetupIsBlocking = true
-            showDependencySetup = true
-        } else if dependencyStatus?.allRequired == true {
-            dependencySetupIsBlocking = false
+        Task { [weak self] in
+            let status = await Task.detached(priority: .utility) {
+                DependencyCheckService.shared.checkAll()
+            }.value
+            guard let self else { return }
+            self.applyDependencyStatus(status)
         }
     }
 
@@ -313,7 +308,8 @@ final class BoardStore {
     }
 
     func board(for boardID: UUID) -> Board? {
-        boards.first { $0.id == boardID }
+        guard let index = boardIndex(for: boardID) else { return nil }
+        return boards[index]
     }
 
     func deleteBoard(_ board: Board) {
@@ -346,13 +342,13 @@ final class BoardStore {
     }
 
     func renameBoard(_ board: Board, to name: String) {
-        guard let index = boards.firstIndex(where: { $0.id == board.id }) else { return }
+        guard let index = boardIndex(for: board.id) else { return }
         boards[index].name = name
         scheduleSave()
     }
 
     func togglePin(_ board: Board) {
-        guard let index = boards.firstIndex(where: { $0.id == board.id }) else { return }
+        guard let index = boardIndex(for: board.id) else { return }
         boards[index].isPinned.toggle()
         scheduleSave()
     }
@@ -614,6 +610,40 @@ final class BoardStore {
     private func invalidateLookupCache() {
         boardIndexCache = nil
         _sortedBoardsCache = nil
+    }
+
+    private func applyDependencyStatus(_ status: DependencyCheckService.Status) {
+        dependencyStatus = status
+
+        if !status.allRequired,
+           !UserDefaults.standard.bool(forKey: Self.skipDependencyCheckKey) {
+            dependencySetupIsBlocking = true
+            showDependencySetup = true
+        } else if status.allRequired {
+            dependencySetupIsBlocking = false
+        }
+    }
+
+    private func clearOverlay(if predicate: (OverlayState) -> Bool) {
+        if predicate(overlayState) {
+            overlayState = .none
+        }
+    }
+
+    private func toggleOverlay(
+        for cardID: UUID,
+        matching predicate: (OverlayState, UUID) -> Bool,
+        makeState: (UUID) -> OverlayState
+    ) {
+        if predicate(overlayState, cardID) {
+            overlayState = .none
+            return
+        }
+        overlayState = makeState(cardID)
+    }
+
+    private func selectedBoardCard(_ cardID: UUID) -> Card? {
+        selectedBoard?.cards.first { $0.id == cardID }
     }
 
     private func boardIndex(for id: UUID) -> Int? {

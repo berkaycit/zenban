@@ -3,7 +3,7 @@ import SwiftUI
 import AppKit
 import Observation
 
-struct FileItem: Identifiable, Hashable {
+nonisolated struct FileItem: Identifiable, Hashable, Sendable {
     var id: String { path }
     let name: String
     let path: String
@@ -18,7 +18,7 @@ struct FileItem: Identifiable, Hashable {
     }
 }
 
-struct OpenFileInfo: Identifiable, Equatable {
+nonisolated struct OpenFileInfo: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
     let path: String
@@ -38,7 +38,7 @@ struct OpenFileInfo: Identifiable, Equatable {
     }
 }
 
-struct FileBrowserAlert: Identifiable {
+nonisolated struct FileBrowserAlert: Identifiable, Sendable {
     let id = UUID()
     let message: String
 }
@@ -142,8 +142,9 @@ final class FileBrowserStore {
 
                 let items: [FileItem] = contents.compactMap { fileURL in
                     let name = fileURL.lastPathComponent
-                    let isHidden = name.hasPrefix(".")
-                    let isDirectory = (try? fileURL.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                    let resourceValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey])
+                    let isHidden = resourceValues?.isHidden ?? name.hasPrefix(".")
+                    let isDirectory = resourceValues?.isDirectory ?? false
 
                     return FileItem(
                         name: name,
@@ -170,7 +171,7 @@ final class FileBrowserStore {
                     self.directoryItems[path] = []
                     self.touchDirectoryCache(path)
                     self.loadingPaths.remove(path)
-                    self.alert = FileBrowserAlert(message: error.localizedDescription)
+                    self.present(error)
                 }
             }
         }
@@ -185,7 +186,7 @@ final class FileBrowserStore {
         do {
             let size = try await fileService.fileSize(path: path)
             if size > maxOpenFileBytes {
-                alert = FileBrowserAlert(message: FileServiceError.fileTooLarge(size).localizedDescription)
+                showAlert(FileServiceError.fileTooLarge(size).localizedDescription)
                 return
             }
 
@@ -204,7 +205,7 @@ final class FileBrowserStore {
                 persistSession()
             }
         } catch {
-            alert = FileBrowserAlert(message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            present(error)
         }
     }
 
@@ -238,7 +239,7 @@ final class FileBrowserStore {
             try await fileService.saveFile(path: file.path, content: file.content)
             openFiles[index].hasUnsavedChanges = false
         } catch {
-            alert = FileBrowserAlert(message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            present(error)
         }
     }
 
@@ -251,7 +252,7 @@ final class FileBrowserStore {
             openFiles[index].content = content
             openFiles[index].hasUnsavedChanges = false
         } catch {
-            alert = FileBrowserAlert(message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            present(error)
         }
     }
 
@@ -263,7 +264,7 @@ final class FileBrowserStore {
             refreshDirectory(path: parentPath)
             await openFile(path: filePath)
         } catch {
-            alert = FileBrowserAlert(message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            present(error)
         }
     }
 
@@ -273,11 +274,9 @@ final class FileBrowserStore {
         do {
             try await fileService.createDirectory(at: folderPath)
             expandedPaths.insert(folderPath)
-            refreshDirectory(path: parentPath)
-            loadDirectory(path: folderPath)
-            persistSession()
+            refreshDirectoryTree(parentPath: parentPath, expandedPath: folderPath)
         } catch {
-            alert = FileBrowserAlert(message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            present(error)
         }
     }
 
@@ -304,10 +303,9 @@ final class FileBrowserStore {
                 expandedPaths.insert(newPath)
             }
 
-            refreshDirectory(path: parentPath)
-            persistSession()
+            refreshDirectoryTree(parentPath: parentPath)
         } catch {
-            alert = FileBrowserAlert(message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            present(error)
         }
     }
 
@@ -322,10 +320,9 @@ final class FileBrowserStore {
 
             expandedPaths.remove(path)
             let parentPath = (path as NSString).deletingLastPathComponent
-            refreshDirectory(path: parentPath)
-            persistSession()
+            refreshDirectoryTree(parentPath: parentPath)
         } catch {
-            alert = FileBrowserAlert(message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            present(error)
         }
     }
 
@@ -340,6 +337,14 @@ final class FileBrowserStore {
     private func refreshDirectory(path: String) {
         directoryItems[path] = nil
         loadDirectory(path: path)
+    }
+
+    private func refreshDirectoryTree(parentPath: String, expandedPath: String? = nil) {
+        refreshDirectory(path: parentPath)
+        if let expandedPath {
+            loadDirectory(path: expandedPath)
+        }
+        persistSession()
     }
 
     private func restoreSession(_ session: FileBrowserSessionState) async {
@@ -364,5 +369,14 @@ final class FileBrowserStore {
                 selectedFilePath: openFiles.first(where: { $0.id == selectedFileId })?.path
             )
         )
+    }
+
+    private func showAlert(_ message: String?) {
+        guard let message else { return }
+        alert = FileBrowserAlert(message: message)
+    }
+
+    private func present(_ error: Error) {
+        showAlert((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
     }
 }

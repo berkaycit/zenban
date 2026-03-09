@@ -456,7 +456,7 @@ struct GitService {
 
             return DefaultCommitMessageParser().parse(response)
         } catch let error as AIProviderError {
-            throw GitError.claudeGenerationFailed(error.localizedDescription ?? "Unknown error")
+            throw GitError.claudeGenerationFailed(error.localizedDescription)
         }
     }
 

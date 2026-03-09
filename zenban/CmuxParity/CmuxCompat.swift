@@ -59,10 +59,6 @@ func cmuxWithWindowFirstResponderBypass<T>(_ body: () -> T) -> T {
     return body()
 }
 
-func cmuxIsWindowFirstResponderBypassActive() -> Bool {
-    cmuxWindowFirstResponderBypassDepth > 0
-}
-
 func cmuxOwningGhosttyView(for responder: NSResponder?) -> GhosttyNSView? {
     guard let responder else { return nil }
     if let ghosttyView = responder as? GhosttyNSView {
@@ -131,20 +127,6 @@ func sentryBreadcrumb(_ message: String, category: String = "ui", data: [String:
     crumb.message = message
     crumb.data = data
     SentrySDK.addBreadcrumb(crumb)
-}
-
-enum WindowGlassEffect {
-    static var isAvailable: Bool { false }
-
-    static func apply(to window: NSWindow, tintColor: NSColor? = nil) {
-        _ = window
-        _ = tintColor
-    }
-
-    static func updateTint(to window: NSWindow, color: NSColor?) {
-        _ = window
-        _ = color
-    }
 }
 
 enum ClaudeCodeIntegrationSettings {

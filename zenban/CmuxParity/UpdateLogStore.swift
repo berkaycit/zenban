@@ -33,16 +33,6 @@ final class FocusLogStore {
         #endif
     }
 
-    func snapshot() -> String {
-        queue.sync {
-            entries.joined(separator: "\n")
-        }
-    }
-
-    func logPath() -> String {
-        logURL.path
-    }
-
     private func ensureLogFile() {
         let directory = logURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -54,7 +44,7 @@ final class FocusLogStore {
     private func appendToFile(line: String) {
         let data = Data((line + "\n").utf8)
         if let handle = try? FileHandle(forWritingTo: logURL) {
-            try? handle.seekToEnd()
+            _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: data)
             try? handle.close()
         } else {
