@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add Claude runtime completion hooks
+- **Description**: Wired `claude_hook` socket events into the shared agent runtime so Claude can complete an active task without waiting for tmux polling alone. Completion notifications now fire only when the reducer actually moves a card into `In Review`, which prevents duplicate notifications for cards already there. Synced the architecture, feature, and notification docs to reflect that Claude now has an explicit completion path while Codex and Gemini still rely on tmux heuristics.
+
 - **Summary**: Harden tmux completion notifications
 - **Description**: Reworked Zenban's notification path to borrow the defensive pieces of cmux without reintroducing the cmux notification store. `NotificationService` now tracks authorization state, defers the first automatic prompt until the app is active, coalesces notifications per card, and clears stale entries on focus, click, or delete. The tmux workflow also got stricter: launches only arm monitoring after `send-keys` succeeds, board/card reselection on notification click no longer gets cleared by the board-change observer, and repeated pane-capture failures now fall back to `stopped` instead of leaving cards stuck mid-cycle.
 

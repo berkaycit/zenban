@@ -1442,6 +1442,9 @@ class TerminalController {
         case "report_pwd":
             return reportPwd(args)
 
+        case "claude_hook":
+            return claudeHook(args)
+
         case "sidebar_state":
             return sidebarState(args)
 
@@ -9423,6 +9426,7 @@ class TerminalController {
           report_tty <tty_name> [--tab=X] [--panel=Y] - Register TTY for batched port scanning
           ports_kick [--tab=X] [--panel=Y] - Request batched port scan for panel
           report_pwd <path> [--tab=X] [--panel=Y] - Report current working directory
+          claude_hook <session-start|active|stop|idle|notification|notify|prompt-submit> [--tab=X] [--panel=Y] - Forward Claude runtime signal
           clear_ports [--tab=X] [--panel=Y] - Clear listening ports
           sidebar_state [--tab=X] - Dump sidebar metadata
           reset_sidebar [--tab=X] - Clear sidebar metadata
@@ -13192,6 +13196,28 @@ class TerminalController {
             tabManager.updateSurfaceDirectory(tabId: tab.id, surfaceId: surfaceId, directory: directory)
         }
         return result
+    }
+
+    private func claudeHook(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        guard let rawSignal = parsed.positional.first else {
+            return "ERROR: Missing hook kind — usage: claude_hook <session-start|active|stop|idle|notification|notify|prompt-submit> [--tab=X] [--panel=Y]"
+        }
+        guard let signal = AgentRuntimeSignal(rawValue: rawSignal.lowercased()) else {
+            return "ERROR: Invalid claude hook '\(rawSignal)'"
+        }
+        guard let scope = Self.explicitSocketScope(options: parsed.options) else {
+            return "ERROR: Missing panel scope — usage: claude_hook <session-start|active|stop|idle|notification|notify|prompt-submit> [--tab=X] [--panel=Y]"
+        }
+
+        DispatchQueue.main.async {
+            AppDelegate.shared?.terminalManager?.handleRuntimeSignal(
+                signal,
+                workspaceID: scope.workspaceId,
+                panelID: scope.panelId
+            )
+        }
+        return "OK"
     }
 
     private func clearPorts(_ args: String) -> String {

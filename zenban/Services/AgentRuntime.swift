@@ -118,6 +118,16 @@ enum AgentRawStatus: Equatable {
     }
 }
 
+enum AgentRuntimeSignal: String {
+    case sessionStart = "session-start"
+    case active
+    case stop
+    case idle
+    case notification
+    case notify
+    case promptSubmit = "prompt-submit"
+}
+
 struct AgentSessionSnapshot: Equatable {
     let cardID: UUID
     let boardID: UUID
@@ -342,6 +352,15 @@ struct AgentTaskWorkflowReducer {
         }
     }
 
+    mutating func registerCompletionSignal(
+        snapshot: AgentSessionSnapshot
+    ) -> AgentTaskWorkflowOutcome {
+        guard cycleState(for: snapshot.cardID) == .activeTask else {
+            return .none
+        }
+        return apply(snapshot: snapshot, rawStatus: .idle)
+    }
+
     mutating func apply(
         snapshot: AgentSessionSnapshot,
         rawStatus: AgentRawStatus
@@ -440,6 +459,25 @@ final class AgentSessionMonitor {
         handle(outcome: outcome, snapshot: snapshot, boardStore: boardStore)
     }
 
+    func registerRuntimeSignal(_ signal: AgentRuntimeSignal, for cardID: UUID) {
+        switch signal {
+        case .promptSubmit:
+            registerTaskSubmission(for: cardID)
+
+        case .stop, .idle:
+            guard let terminalManager,
+                  let boardStore,
+                  let snapshot = terminalManager.agentSessionSnapshot(for: cardID) else {
+                return
+            }
+            let outcome = reducer.registerCompletionSignal(snapshot: snapshot)
+            handle(outcome: outcome, snapshot: snapshot, boardStore: boardStore)
+
+        case .sessionStart, .active, .notification, .notify:
+            return
+        }
+    }
+
     func removeCard(_ cardID: UUID) {
         reducer.removeCard(cardID)
     }
@@ -530,7 +568,12 @@ final class AgentSessionMonitor {
             boardStore.moveCard(snapshot.cardID, to: .todo, in: snapshot.boardID)
 
         case .complete:
-            boardStore.moveCard(snapshot.cardID, to: .inProgress, in: snapshot.boardID)
+            let didMoveToInReview = boardStore.moveCard(
+                snapshot.cardID,
+                to: .inProgress,
+                in: snapshot.boardID
+            )
+            guard didMoveToInReview else { return }
             NotificationService.shared.showNotification(
                 title: snapshot.cardTitle,
                 body: "Task completed",

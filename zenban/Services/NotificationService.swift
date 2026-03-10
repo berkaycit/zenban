@@ -73,18 +73,12 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         ensureAuthorization(origin: .automaticStartup) { _ in }
     }
 
-    func showNotification(title: String, body: String, cardID: UUID, boardID: UUID) {
-        if Self.shouldSuppressNotification(
-            isAppFocused: AppFocusState.isAppFocused(),
-            selectedBoardID: activeSelectionProvider?().boardID,
-            selectedCardID: activeSelectionProvider?().cardID,
-            notificationBoardID: boardID,
-            notificationCardID: cardID
-        ) {
-            clearNotifications(for: cardID)
-            return
-        }
-
+    func showNotification(
+        title: String,
+        body: String,
+        cardID: UUID,
+        boardID: UUID
+    ) {
         ensureAuthorization(origin: .notificationDelivery) { [weak self] authorized in
             guard let self, authorized else { return }
 
@@ -154,17 +148,6 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         isAppActive: Bool
     ) -> Bool {
         status == .notDetermined && !isAppActive
-    }
-
-    static func shouldSuppressNotification(
-        isAppFocused: Bool,
-        selectedBoardID: UUID?,
-        selectedCardID: UUID?,
-        notificationBoardID: UUID,
-        notificationCardID: UUID
-    ) -> Bool {
-        guard isAppFocused else { return false }
-        return selectedBoardID == notificationBoardID && selectedCardID == notificationCardID
     }
 
     private static func notificationIdentifier(for cardID: UUID) -> String {

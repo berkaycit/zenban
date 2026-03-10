@@ -467,6 +467,19 @@ final class TerminalManager {
         return snapshot(for: session, boardStore: boardStore)
     }
 
+    func handleRuntimeSignal(
+        _ signal: AgentRuntimeSignal,
+        workspaceID: UUID,
+        panelID: UUID
+    ) {
+        guard let session = agentSessionRecordByCardID[workspaceID],
+              session.panelID == panelID,
+              session.agent == .claude else {
+            return
+        }
+        agentSessionMonitor?.registerRuntimeSignal(signal, for: workspaceID)
+    }
+
     private func completePendingCardUnfocus(selectedCardID: UUID?) {
         guard let pending = pendingCardUnfocusTarget else { return }
 

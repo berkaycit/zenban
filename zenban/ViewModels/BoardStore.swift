@@ -405,9 +405,10 @@ final class BoardStore {
 
     // Skip if card is already in target column to prevent reordering.
     // Agent detection triggers this frequently when card is already in correct column.
-    func moveCard(_ cardID: UUID, to column: Column, in boardID: UUID) {
+    @discardableResult
+    func moveCard(_ cardID: UUID, to column: Column, in boardID: UUID) -> Bool {
         guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID),
-              boards[bi].cards[ci].column != column else { return }
+              boards[bi].cards[ci].column != column else { return false }
         let minOrderIndex = boards[bi].cards
             .filter { $0.column == column }
             .map(\.orderIndex)
@@ -415,6 +416,7 @@ final class BoardStore {
         boards[bi].cards[ci].column = column
         boards[bi].cards[ci].orderIndex = minOrderIndex - 1
         scheduleSave()
+        return true
     }
 
     func updateCard(_ cardID: UUID, title: String, in boardID: UUID) {

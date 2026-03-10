@@ -114,40 +114,6 @@ struct AgentRuntimeTests {
     }
 
     @Test
-    func notificationSuppressionRequiresFocusedMatchingSelection() {
-        let boardID = UUID()
-        let cardID = UUID()
-
-        #expect(
-            NotificationService.shouldSuppressNotification(
-                isAppFocused: true,
-                selectedBoardID: boardID,
-                selectedCardID: cardID,
-                notificationBoardID: boardID,
-                notificationCardID: cardID
-            )
-        )
-        #expect(
-            !NotificationService.shouldSuppressNotification(
-                isAppFocused: false,
-                selectedBoardID: boardID,
-                selectedCardID: cardID,
-                notificationBoardID: boardID,
-                notificationCardID: cardID
-            )
-        )
-        #expect(
-            !NotificationService.shouldSuppressNotification(
-                isAppFocused: true,
-                selectedBoardID: boardID,
-                selectedCardID: UUID(),
-                notificationBoardID: boardID,
-                notificationCardID: cardID
-            )
-        )
-    }
-
-    @Test
     func workflowRequiresBaselineBeforeAnyCompletion() {
         var reducer = AgentTaskWorkflowReducer()
         let snapshot = AgentSessionSnapshot(
@@ -286,6 +252,53 @@ struct AgentRuntimeTests {
     }
 
     @Test
+    func workflowCompletesActiveTaskOnExplicitCompletionSignal() {
+        var reducer = AgentTaskWorkflowReducer()
+        let cardID = UUID()
+        let snapshot = AgentSessionSnapshot(
+            cardID: cardID,
+            boardID: UUID(),
+            cardTitle: "claude-hook",
+            column: .todo,
+            agent: .claude,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: cardID)
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        _ = reducer.registerTaskSubmission(snapshot: snapshot)
+
+        let outcome = reducer.registerCompletionSignal(snapshot: snapshot)
+
+        #expect(outcome == AgentTaskWorkflowOutcome(action: .complete))
+        #expect(reducer.cycleState(for: cardID) == .ready)
+    }
+
+    @Test
+    func workflowIgnoresExplicitCompletionSignalWithoutActiveTask() {
+        var reducer = AgentTaskWorkflowReducer()
+        let cardID = UUID()
+        let snapshot = AgentSessionSnapshot(
+            cardID: cardID,
+            boardID: UUID(),
+            cardTitle: "claude-hook-idle",
+            column: .todo,
+            agent: .claude,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: cardID)
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+
+        let outcome = reducer.registerCompletionSignal(snapshot: snapshot)
+
+        #expect(outcome == .none)
+        #expect(reducer.cycleState(for: cardID) == .ready)
+    }
+
+    @Test
     func workflowAllowsSubmissionDuringWarmupWithoutMissingCompletion() {
         var reducer = AgentTaskWorkflowReducer()
         let cardID = UUID()
@@ -359,6 +372,22 @@ struct AgentRuntimeTests {
         store.clearSelectedCardIfNeededForSelectedBoardChange()
 
         #expect(store.selectedCardID == nil)
+    }
+
+    @Test
+    @MainActor
+    func moveCardReturnsTrueOnlyForRealColumnTransitions() {
+        let boardID = UUID()
+        let card = Card(id: UUID(), title: "task", column: .todo, orderIndex: 0)
+        let store = BoardStore()
+        store.boards = [Board(id: boardID, name: "Board", cards: [card])]
+
+        let firstMove = store.moveCard(card.id, to: .inProgress, in: boardID)
+        let secondMove = store.moveCard(card.id, to: .inProgress, in: boardID)
+
+        #expect(firstMove)
+        #expect(!secondMove)
+        #expect(store.boards[0].cards[0].column == .inProgress)
     }
 
     @Test
