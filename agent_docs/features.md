@@ -13,7 +13,7 @@
 - Create cards with Cmd+Shift+A
 - Delete cards via Cmd+Shift+D (with confirmation)
 - Per-card agent override
-- Agent completion monitor keeps unfinished agent cards in `To Do`, only starts a task cycle after Zenban sees meaningful draft input followed by Enter or newline paste, and only notifies when completion actually moves the card into `In Review`
+- Agent completion monitor uses a simple explicit lifecycle: Enter/newline submit starts the task, wrapper callbacks finish it, unfinished work stays in `To Do`, and notifications only fire when completion actually moves the card into `In Review`
 
 ## Terminal Integration
 
@@ -21,7 +21,8 @@
 - The board owns one shared cmux `TabManager`; each card is treated as a cmux workspace with card IDs exported as `CMUX_WORKSPACE_ID`/`CMUX_TAB_ID`, and terminal panels export `CMUX_SURFACE_ID`
 - Every terminal split now runs inside its own tmux session; hidden cards tear down Ghostty surfaces to save memory, then reattach to the same tmux-backed shell when the card becomes visible again
 - Agent startup is centralized: Claude launches with `--dangerously-skip-permissions`, Codex and Gemini with `--yolo`, and tmux session env is refreshed on first launch, worktree handoff, and agent switch
-- Zenban now watches tmux session activity plus pane output to detect raw `running`, `waiting`, `idle`, `error`, and `stopped` agent states without Claude URL hooks; Claude also forwards explicit runtime completion hooks, while Codex and Gemini still complete through tmux heuristics
+- Claude, Codex, and Gemini now all use the same explicit lifecycle contract: Zenban treats terminal submit as `started`, bundled wrappers emit explicit `completed` callbacks over the local cmux-compatible socket, and tmux pane polling/raw status heuristics are no longer used for task movement
+- Wrapper callbacks authenticate over the local socket with a per-session token when `cmuxOnly` ancestry checks fail inside tmux/agent subprocess trees, so completion still works without opening the socket to unrelated local processes
 - The workspace UI no longer offers manual browser creation; browser panels are now surfaced only by Dev Server preview or internal automation/link-routing paths
 - Card switches use a selected+retiring handoff so old Ghostty/browser portals are hidden before the previous card unmounts
 - Workspaces can move into detached terminal-only windows and back without changing card identity or worktree routing; detached windows currently host one card workspace and detached cards show a placeholder in the detail pane that focuses the external window

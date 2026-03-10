@@ -44,6 +44,7 @@ class TerminalController {
     private nonisolated(unsafe) var nextAcceptLoopGeneration: UInt64 = 0
     private nonisolated(unsafe) var pendingAcceptLoopRearmGeneration: UInt64?
     private nonisolated(unsafe) var listenerStartInProgress = false
+    private nonisolated(unsafe) let trustedSocketAuthToken = UUID().uuidString
     private nonisolated let listenerStateLock = NSLock()
     private var clientHandlers: [Int32: Thread] = [:]
     private var tabManager: TabManager?
@@ -926,6 +927,10 @@ class TerminalController {
         }
     }
 
+    func socketAuthToken() -> String {
+        trustedSocketAuthToken
+    }
+
     private func passwordAuthRequiredResponse(for command: String) -> String {
         let message = "Authentication required. Send auth <password> first."
         guard command.hasPrefix("{"),
@@ -994,7 +999,48 @@ class TerminalController {
         return v2Ok(id: id, result: ["authenticated": true])
     }
 
-    private func authResponseIfNeeded(for command: String, authenticated: inout Bool) -> String? {
+    private func trustedTokenLoginResponseIfNeeded(
+        for command: String,
+        authenticated: inout Bool,
+        required: Bool
+    ) -> String? {
+        guard required, !authenticated else {
+            return nil
+        }
+
+        let lowered = command.lowercased()
+        guard lowered == "auth" || lowered.hasPrefix("auth ") else {
+            return "ERROR: Authentication required — send auth <password> first"
+        }
+
+        let provided: String
+        if lowered == "auth" {
+            provided = ""
+        } else {
+            provided = String(command.dropFirst(5))
+        }
+        guard !provided.isEmpty else {
+            return "ERROR: Missing password. Usage: auth <password>"
+        }
+        guard provided == trustedSocketAuthToken else {
+            return "ERROR: Invalid password"
+        }
+        authenticated = true
+        return "OK: Authenticated"
+    }
+
+    private func authResponseIfNeeded(
+        for command: String,
+        authenticated: inout Bool,
+        requiresTrustedToken: Bool = false
+    ) -> String? {
+        if let trustedTokenResponse = trustedTokenLoginResponseIfNeeded(
+            for: command,
+            authenticated: &authenticated,
+            required: requiresTrustedToken
+        ) {
+            return trustedTokenResponse
+        }
         guard accessMode.requiresPasswordAuth else {
             return nil
         }
@@ -1226,6 +1272,8 @@ class TerminalController {
     private func handleClient(_ socket: Int32, peerPid: pid_t? = nil) {
         defer { close(socket) }
 
+        var requiresTrustedToken = false
+
         // In cmuxOnly mode, verify the connecting process is a descendant of cmux.
         // Other modes allow external clients and apply separate auth controls.
         if accessMode == .cmuxOnly {
@@ -1233,10 +1281,19 @@ class TerminalController {
             // the peer can disconnect), falling back to live lookup.
             let pid = peerPid ?? getPeerPid(socket)
             if let pid {
-                guard isDescendant(pid) else {
-                    let msg = "ERROR: Access denied — only processes started inside cmux can connect\n"
-                    msg.withCString { ptr in _ = write(socket, ptr, strlen(ptr)) }
-                    return
+                if !isDescendant(pid) {
+                    guard peerHasSameUID(socket) else {
+                        agentLifecycleDebugLog(
+                            "socket.client.reject reason=notDescendant pid=\(pid) accessMode=\(accessMode.rawValue)"
+                        )
+                        let msg = "ERROR: Access denied — only processes started inside cmux can connect\n"
+                        msg.withCString { ptr in _ = write(socket, ptr, strlen(ptr)) }
+                        return
+                    }
+                    requiresTrustedToken = true
+                    agentLifecycleDebugLog(
+                        "socket.client.accept fallback=trustedToken pid=\(pid) accessMode=\(accessMode.rawValue)"
+                    )
                 }
             }
             // If pid is nil, LOCAL_PEERPID failed (peer disconnected before we
@@ -1248,10 +1305,17 @@ class TerminalController {
             // with no data is harmless.
             if pid == nil {
                 guard peerHasSameUID(socket) else {
+                    agentLifecycleDebugLog(
+                        "socket.client.reject reason=unverifiedPeer accessMode=\(accessMode.rawValue)"
+                    )
                     let msg = "ERROR: Unable to verify client process\n"
                     msg.withCString { ptr in _ = write(socket, ptr, strlen(ptr)) }
                     return
                 }
+                requiresTrustedToken = true
+                agentLifecycleDebugLog(
+                    "socket.client.accept fallback=trustedTokenNoPid accessMode=\(accessMode.rawValue)"
+                )
             }
         }
 
@@ -1272,7 +1336,11 @@ class TerminalController {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
 
-                if let authResponse = authResponseIfNeeded(for: trimmed, authenticated: &authenticated) {
+                if let authResponse = authResponseIfNeeded(
+                    for: trimmed,
+                    authenticated: &authenticated,
+                    requiresTrustedToken: requiresTrustedToken
+                ) {
                     writeSocketResponse(authResponse, to: socket)
                     continue
                 }
@@ -1281,6 +1349,22 @@ class TerminalController {
                 writeSocketResponse(response, to: socket)
             }
         }
+
+        let trailing = pending.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trailing.isEmpty else { return }
+
+        agentLifecycleDebugLog("socket.client.flushTrailingCommand command=\(trailing)")
+        if let authResponse = authResponseIfNeeded(
+            for: trailing,
+            authenticated: &authenticated,
+            requiresTrustedToken: requiresTrustedToken
+        ) {
+            writeSocketResponse(authResponse, to: socket)
+            return
+        }
+
+        let response = processCommand(trailing)
+        writeSocketResponse(response, to: socket)
     }
 
     private func processCommand(_ command: String) -> String {
@@ -1441,6 +1525,9 @@ class TerminalController {
 
         case "report_pwd":
             return reportPwd(args)
+
+        case "agent_hook":
+            return agentHook(args)
 
         case "claude_hook":
             return claudeHook(args)
@@ -9426,7 +9513,8 @@ class TerminalController {
           report_tty <tty_name> [--tab=X] [--panel=Y] - Register TTY for batched port scanning
           ports_kick [--tab=X] [--panel=Y] - Request batched port scan for panel
           report_pwd <path> [--tab=X] [--panel=Y] - Report current working directory
-          claude_hook <session-start|active|stop|idle|notification|notify|prompt-submit> [--tab=X] [--panel=Y] - Forward Claude runtime signal
+          agent_hook <agent> <started|completed> [--tab=X] [--panel=Y] - Forward agent runtime signal
+          claude_hook <session-start|active|stop|idle|notification|notify|prompt-submit> [--tab=X] [--panel=Y] - Legacy Claude runtime alias
           clear_ports [--tab=X] [--panel=Y] - Clear listening ports
           sidebar_state [--tab=X] - Dump sidebar metadata
           reset_sidebar [--tab=X] - Clear sidebar metadata
@@ -13201,18 +13289,64 @@ class TerminalController {
     private func claudeHook(_ args: String) -> String {
         let parsed = parseOptions(args)
         guard let rawSignal = parsed.positional.first else {
+            agentLifecycleDebugLog("socket.claudeHook.reject reason=missingSignal args=\(args)")
             return "ERROR: Missing hook kind — usage: claude_hook <session-start|active|stop|idle|notification|notify|prompt-submit> [--tab=X] [--panel=Y]"
         }
-        guard let signal = AgentRuntimeSignal(rawValue: rawSignal.lowercased()) else {
+        if AgentRuntimeSignal.shouldIgnoreLegacyClaudeHook(rawSignal) {
+            agentLifecycleDebugLog("socket.claudeHook.ignore raw=\(rawSignal) args=\(args)")
+            return "OK"
+        }
+        guard let signal = AgentRuntimeSignal(legacyClaudeHook: rawSignal) else {
+            agentLifecycleDebugLog("socket.claudeHook.reject reason=invalidSignal raw=\(rawSignal) args=\(args)")
             return "ERROR: Invalid claude hook '\(rawSignal)'"
         }
         guard let scope = Self.explicitSocketScope(options: parsed.options) else {
+            agentLifecycleDebugLog("socket.claudeHook.reject reason=missingScope raw=\(rawSignal) args=\(args)")
             return "ERROR: Missing panel scope — usage: claude_hook <session-start|active|stop|idle|notification|notify|prompt-submit> [--tab=X] [--panel=Y]"
         }
+        agentLifecycleDebugLog(
+            "socket.claudeHook.accept raw=\(rawSignal) signal=\(signal.rawValue) " +
+            "workspace=\(scope.workspaceId.uuidString) panel=\(scope.panelId.uuidString)"
+        )
 
         DispatchQueue.main.async {
             AppDelegate.shared?.terminalManager?.handleRuntimeSignal(
                 signal,
+                agent: .claude,
+                workspaceID: scope.workspaceId,
+                panelID: scope.panelId
+            )
+        }
+        return "OK"
+    }
+
+    private func agentHook(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        guard parsed.positional.count >= 2 else {
+            agentLifecycleDebugLog("socket.agentHook.reject reason=missingArgs args=\(args)")
+            return "ERROR: Missing agent hook arguments — usage: agent_hook <agent> <started|completed> [--tab=X] [--panel=Y]"
+        }
+        guard let agent = Agent.fromRuntimeID(parsed.positional[0]) else {
+            agentLifecycleDebugLog("socket.agentHook.reject reason=invalidAgent args=\(args)")
+            return "ERROR: Invalid agent '\(parsed.positional[0])'"
+        }
+        guard let signal = AgentRuntimeSignal(rawValue: parsed.positional[1].lowercased()) else {
+            agentLifecycleDebugLog("socket.agentHook.reject reason=invalidSignal args=\(args)")
+            return "ERROR: Invalid agent hook '\(parsed.positional[1])'"
+        }
+        guard let scope = Self.explicitSocketScope(options: parsed.options) else {
+            agentLifecycleDebugLog("socket.agentHook.reject reason=missingScope agent=\(agent.runtimeID) signal=\(parsed.positional[1]) args=\(args)")
+            return "ERROR: Missing panel scope — usage: agent_hook <agent> <started|completed> [--tab=X] [--panel=Y]"
+        }
+        agentLifecycleDebugLog(
+            "socket.agentHook.accept agent=\(agent.runtimeID) signal=\(signal.rawValue) " +
+            "workspace=\(scope.workspaceId.uuidString) panel=\(scope.panelId.uuidString)"
+        )
+
+        DispatchQueue.main.async {
+            AppDelegate.shared?.terminalManager?.handleRuntimeSignal(
+                signal,
+                agent: agent,
                 workspaceID: scope.workspaceId,
                 panelID: scope.panelId
             )

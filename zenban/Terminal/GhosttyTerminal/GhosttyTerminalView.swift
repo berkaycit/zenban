@@ -2651,6 +2651,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
         env["CMUX_PANEL_ID"] = id.uuidString
         env["CMUX_TAB_ID"] = tabId.uuidString
         env["CMUX_SOCKET_PATH"] = SocketControlSettings.socketPath()
+        env["CMUX_SOCKET_AUTH_TOKEN"] = TerminalController.shared.socketAuthToken()
         env["ZENBAN_TERMINAL"] = "1"
         if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
             env["CMUX_BUNDLE_ID"] = bundleId

@@ -469,14 +469,36 @@ final class TerminalManager {
 
     func handleRuntimeSignal(
         _ signal: AgentRuntimeSignal,
+        agent: Agent,
         workspaceID: UUID,
         panelID: UUID
     ) {
-        guard let session = agentSessionRecordByCardID[workspaceID],
-              session.panelID == panelID,
-              session.agent == .claude else {
+        guard let session = agentSessionRecordByCardID[workspaceID] else {
+            agentLifecycleDebugLog(
+                "terminal.signal.ignore reason=missingSession signal=\(signal.rawValue) " +
+                "agent=\(agent.runtimeID) workspace=\(workspaceID.uuidString) panel=\(panelID.uuidString)"
+            )
             return
         }
+        guard session.panelID == panelID else {
+            agentLifecycleDebugLog(
+                "terminal.signal.ignore reason=panelMismatch signal=\(signal.rawValue) " +
+                "agent=\(agent.runtimeID) workspace=\(workspaceID.uuidString) expectedPanel=\(session.panelID.uuidString) " +
+                "actualPanel=\(panelID.uuidString)"
+            )
+            return
+        }
+        guard session.agent == agent else {
+            agentLifecycleDebugLog(
+                "terminal.signal.ignore reason=agentMismatch signal=\(signal.rawValue) " +
+                "workspace=\(workspaceID.uuidString) expectedAgent=\(session.agent.runtimeID) actualAgent=\(agent.runtimeID)"
+            )
+            return
+        }
+        agentLifecycleDebugLog(
+            "terminal.signal.accept signal=\(signal.rawValue) agent=\(agent.runtimeID) " +
+            "workspace=\(workspaceID.uuidString) panel=\(panelID.uuidString)"
+        )
         agentSessionMonitor?.registerRuntimeSignal(signal, for: workspaceID)
     }
 
@@ -607,19 +629,32 @@ final class TerminalManager {
         )
         panel.surface.resetPendingUserDraftInput()
         panel.surface.onUserSubmit = { [weak self] in
-            self?.agentSessionMonitor?.registerTaskSubmission(for: cardID)
+            agentLifecycleDebugLog(
+                "terminal.submit card=\(cardID.uuidString) panel=\(panel.id.uuidString) agent=\(agent.runtimeID)"
+            )
+            self?.agentSessionMonitor?.registerRuntimeSignal(.started, for: cardID)
         }
 
         let plan = AgentLauncher.plan(
             for: agent,
             cardID: cardID,
             boardID: record.boardID,
+            panelID: panel.id,
             workingDirectory: workingDirectory,
             reason: reason
+        )
+        agentLifecycleDebugLog(
+            "terminal.plan card=\(cardID.uuidString) panel=\(panel.id.uuidString) agent=\(agent.runtimeID) " +
+            "workspaceEnv=\(plan.environment["CMUX_WORKSPACE_ID"] ?? "nil") " +
+            "surfaceEnv=\(plan.environment["CMUX_SURFACE_ID"] ?? "nil")"
         )
 
         Task { @MainActor in
             let didLaunch = await AgentLauncher.launch(plan, on: panel)
+            agentLifecycleDebugLog(
+                "terminal.launch result=\(didLaunch ? "success" : "failure") card=\(cardID.uuidString) " +
+                "panel=\(panel.id.uuidString) agent=\(agent.runtimeID) reason=\(reason.rawValue)"
+            )
             guard didLaunch else {
                 if reason != .agentSwitch {
                     self.agentLaunchedForCard.remove(cardID)

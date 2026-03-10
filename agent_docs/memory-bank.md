@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Fix explicit agent completion delivery under `cmuxOnly` socket mode
+- **Description**: Completion hooks were firing from the Claude/Codex/Gemini wrappers but the local socket rejected them because tmux/agent subprocess ancestry did not always satisfy the inherited `cmuxOnly` check. The socket path now accepts same-user wrapper callbacks when they first authenticate with a per-session token injected into the agent launch environment, and the bundled `cmux` helper now treats socket `ERROR` responses as failures instead of logging false success.
+
+- **Summary**: Simplify agent lifecycle to explicit hooks
+- **Description**: Replaced Zenban's tmux pane polling and raw-status parsing with a minimal explicit lifecycle: terminal submit now means `started`, and bundled Claude/Codex/Gemini wrappers report `completed` over the local cmux-compatible socket. The runtime reducer now tracks only whether a card has an active task, still moves `In Review` back to `To Do` on new work, and only notifies when completion actually changes the card back to `In Review`. Synced the architecture, features, and notification docs to describe the new wrapper-based flow.
+
 - **Summary**: Add Claude runtime completion hooks
 - **Description**: Wired `claude_hook` socket events into the shared agent runtime so Claude can complete an active task without waiting for tmux polling alone. Completion notifications now fire only when the reducer actually moves a card into `In Review`, which prevents duplicate notifications for cards already there. Synced the architecture, feature, and notification docs to reflect that Claude now has an explicit completion path while Codex and Gemini still rely on tmux heuristics.
 

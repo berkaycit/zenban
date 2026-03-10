@@ -1,5 +1,39 @@
 import Foundation
 
+#if DEBUG
+private let agentLifecycleDebugLogURL = URL(fileURLWithPath: "/tmp/zenban-agent-lifecycle.log")
+private let agentLifecycleDebugLogLock = NSLock()
+private let agentLifecycleDebugTimestampFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+}()
+
+func agentLifecycleDebugLog(_ message: @autoclosure () -> String) {
+    let line = "\(agentLifecycleDebugTimestampFormatter.string(from: Date())) [app] \(message())\n"
+    guard let data = line.data(using: .utf8) else { return }
+    agentLifecycleDebugLogLock.lock()
+    defer { agentLifecycleDebugLogLock.unlock() }
+
+    let url = agentLifecycleDebugLogURL
+    let fileManager = FileManager.default
+    if !fileManager.fileExists(atPath: url.path) {
+        fileManager.createFile(atPath: url.path, contents: nil)
+    }
+    guard let handle = try? FileHandle(forWritingTo: url) else { return }
+    defer { try? handle.close() }
+    do {
+        try handle.seekToEnd()
+        try handle.write(contentsOf: data)
+    } catch {
+        return
+    }
+}
+#else
+@inline(__always)
+func agentLifecycleDebugLog(_ message: @autoclosure () -> String) {}
+#endif
+
 enum AgentLaunchReason: String {
     case initialLaunch
     case worktreeReady
@@ -44,19 +78,36 @@ enum AgentLauncher {
         for agent: Agent,
         cardID: UUID,
         boardID: UUID,
+        panelID: UUID,
         workingDirectory: String?,
         reason: AgentLaunchReason
     ) -> AgentLaunchPlan {
-        AgentLaunchPlan(
+        var environment: [String: String] = [
+            "CMUX_PANEL_ID": panelID.uuidString,
+            "CMUX_SOCKET_AUTH_TOKEN": TerminalController.shared.socketAuthToken(),
+            "CMUX_SOCKET_PATH": SocketControlSettings.socketPath(),
+            "CMUX_SURFACE_ID": panelID.uuidString,
+            "CMUX_TAB_ID": cardID.uuidString,
+            "CMUX_WORKSPACE_ID": cardID.uuidString,
+            "ZENBAN_AGENT": agent.runtimeID,
+            "ZENBAN_AGENT_BOARD_ID": boardID.uuidString,
+            "ZENBAN_AGENT_CARD_ID": cardID.uuidString,
+            "ZENBAN_AGENT_LAUNCH_REASON": reason.rawValue,
+            "ZENBAN_TERMINAL": "1",
+        ]
+        if let bundleID = Bundle.main.bundleIdentifier,
+           !bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            environment["CMUX_BUNDLE_ID"] = bundleID
+        }
+        if !ClaudeCodeIntegrationSettings.hooksEnabled() {
+            environment["CMUX_CLAUDE_HOOKS_DISABLED"] = "1"
+        }
+
+        return AgentLaunchPlan(
             agent: agent,
             command: baseCommand(for: agent),
             workingDirectory: workingDirectory,
-            environment: [
-                "ZENBAN_AGENT": agent.runtimeID,
-                "ZENBAN_AGENT_CARD_ID": cardID.uuidString,
-                "ZENBAN_AGENT_BOARD_ID": boardID.uuidString,
-                "ZENBAN_AGENT_LAUNCH_REASON": reason.rawValue,
-            ],
+            environment: environment,
             reason: reason
         )
     }
@@ -101,31 +152,36 @@ enum AgentLauncher {
     }
 }
 
-enum AgentRawStatus: Equatable {
-    case running
-    case waiting
-    case idle
-    case error
-    case stopped
-
-    var establishesReadyBaseline: Bool {
-        switch self {
-        case .idle, .waiting, .error:
-            true
-        case .running, .stopped:
-            false
-        }
+extension Agent {
+    static func fromRuntimeID(_ rawValue: String) -> Agent? {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return allCases.first { $0.runtimeID == normalized }
     }
 }
 
 enum AgentRuntimeSignal: String {
-    case sessionStart = "session-start"
-    case active
-    case stop
-    case idle
-    case notification
-    case notify
-    case promptSubmit = "prompt-submit"
+    case started
+    case completed
+
+    init?(legacyClaudeHook rawValue: String) {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "prompt-submit":
+            self = .started
+        case "stop", "idle":
+            self = .completed
+        default:
+            return nil
+        }
+    }
+
+    static func shouldIgnoreLegacyClaudeHook(_ rawValue: String) -> Bool {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "session-start", "active", "notification", "notify":
+            true
+        default:
+            false
+        }
+    }
 }
 
 struct AgentSessionSnapshot: Equatable {
@@ -135,144 +191,6 @@ struct AgentSessionSnapshot: Equatable {
     let column: Column
     let agent: Agent
     let tmuxSessionID: String
-
-    var tmuxSessionName: String {
-        TmuxSessionManager.shared.sessionName(for: tmuxSessionID)
-    }
-}
-
-private struct AgentParsedStatus {
-    let rawStatus: AgentRawStatus
-    let shouldTrustActivity: Bool
-}
-
-enum AgentStatusParser {
-    private static let spinnerCharacters = [
-        "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✳", "✽", "✶", "✢",
-    ]
-
-    private static let claudeBusyPatterns = [
-        #"ctrl\+c to interrupt"#,
-        #"….*tokens"#,
-    ]
-
-    private static let claudeWaitingPatterns = [
-        #"Do you want to proceed\?"#,
-        #"\d\.\s*Yes\b"#,
-        #"Esc to cancel.*Tab to amend"#,
-        #"Enter to select.*to navigate"#,
-        #"\(Y\/n\)"#,
-        #"Continue\?"#,
-        #"Approve this plan\?"#,
-        #"\[Y\/n\]"#,
-        #"\[y\/N\]"#,
-        #"Yes,? allow once"#,
-        #"Allow always"#,
-        #"No,? and tell Claude"#,
-    ]
-
-    private static let claudeStoppedPatterns = [
-        #"Resume this session with:"#,
-        #"claude --resume"#,
-        #"Press Ctrl-C again to exit"#,
-    ]
-
-    private static let genericWaitingPatterns = [
-        #"\? \(y\/n\)"#,
-        #"\[Y\/n\]"#,
-        #"Press enter to continue"#,
-        #"waiting for.*input"#,
-        #"do you want to"#,
-    ]
-
-    private static let genericErrorPatterns = [
-        #"error:"#,
-        #"failed:"#,
-        #"exception:"#,
-        #"traceback"#,
-        #"panic:"#,
-    ]
-
-    static func stripANSI(from text: String) -> String {
-        text
-            .replacingOccurrences(of: #"\x1b\[[0-9;]*[a-zA-Z]"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\x1b\][^\x07]*\x07"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\x1b[PX^_][^\x1b]*\x1b\\"#, with: "", options: .regularExpression)
-    }
-
-    static func parse(
-        output: String,
-        agent: Agent,
-        isRecentActivity: Bool
-    ) -> AgentRawStatus {
-        let parsed = parse(output: output, agent: agent)
-
-        switch parsed.rawStatus {
-        case .waiting, .error, .stopped:
-            return parsed.rawStatus
-        case .running:
-            return .running
-        case .idle:
-            return (parsed.shouldTrustActivity && isRecentActivity) ? .running : .idle
-        }
-    }
-
-    private static func parse(output: String, agent: Agent) -> AgentParsedStatus {
-        let cleaned = stripANSI(from: output)
-        var relevantLines = cleaned.components(separatedBy: .newlines)
-        while let last = relevantLines.last,
-              last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            relevantLines.removeLast()
-        }
-        let lastLines = relevantLines.suffix(30).joined(separator: "\n")
-        let lastFewLines = relevantLines.suffix(10).joined(separator: "\n")
-
-        switch agent {
-        case .claude:
-            if matchesAny(patterns: claudeStoppedPatterns, in: lastLines) {
-                return AgentParsedStatus(rawStatus: .stopped, shouldTrustActivity: false)
-            }
-            if matchesAny(patterns: claudeWaitingPatterns, in: lastLines) {
-                return AgentParsedStatus(rawStatus: .waiting, shouldTrustActivity: false)
-            }
-            if matchesAny(patterns: genericErrorPatterns, in: lastLines) {
-                return AgentParsedStatus(rawStatus: .error, shouldTrustActivity: false)
-            }
-            if matchesAny(patterns: claudeBusyPatterns, in: lastLines) || containsSpinner(in: lastFewLines) {
-                return AgentParsedStatus(rawStatus: .running, shouldTrustActivity: true)
-            }
-            return AgentParsedStatus(rawStatus: .idle, shouldTrustActivity: true)
-
-        case .codex, .gemini:
-            if matchesAny(patterns: genericWaitingPatterns, in: lastLines) {
-                return AgentParsedStatus(rawStatus: .waiting, shouldTrustActivity: false)
-            }
-            if matchesAny(patterns: genericErrorPatterns, in: lastLines) {
-                return AgentParsedStatus(rawStatus: .error, shouldTrustActivity: false)
-            }
-            if containsSpinner(in: lastFewLines) {
-                return AgentParsedStatus(rawStatus: .running, shouldTrustActivity: true)
-            }
-            return AgentParsedStatus(rawStatus: .idle, shouldTrustActivity: true)
-        }
-    }
-
-    private static func containsSpinner(in text: String) -> Bool {
-        spinnerCharacters.contains { text.contains($0) }
-    }
-
-    private static func matchesAny(patterns: [String], in text: String) -> Bool {
-        patterns.contains { pattern in
-            text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
-        }
-    }
-}
-
-enum AgentTaskCycleState: Equatable {
-    case bootstrapping
-    case warmingUp
-    case ready
-    case activeTask
 }
 
 struct AgentTaskWorkflowOutcome: Equatable {
@@ -286,131 +204,49 @@ struct AgentTaskWorkflowOutcome: Equatable {
     static let none = AgentTaskWorkflowOutcome(action: nil)
 }
 
-enum AgentCaptureFailureHeuristics {
-    static let stopThreshold = 3
-
-    static func rawStatus(
-        afterConsecutiveFailures consecutiveFailures: Int,
-        isRecentActivity: Bool
-    ) -> AgentRawStatus {
-        if consecutiveFailures >= stopThreshold {
-            return .stopped
-        }
-        return isRecentActivity ? .running : .idle
-    }
-}
-
 struct AgentTaskWorkflowReducer {
-    private(set) var cycleStateByCardID: [UUID: AgentTaskCycleState] = [:]
-    private(set) var lastRawStatusByCardID: [UUID: AgentRawStatus] = [:]
+    private(set) var activeTaskCardIDs: Set<UUID> = []
 
     mutating func registerLaunch(for cardID: UUID) {
-        cycleStateByCardID[cardID] = .bootstrapping
-        lastRawStatusByCardID.removeValue(forKey: cardID)
+        activeTaskCardIDs.remove(cardID)
     }
 
     mutating func removeCard(_ cardID: UUID) {
-        cycleStateByCardID.removeValue(forKey: cardID)
-        lastRawStatusByCardID.removeValue(forKey: cardID)
+        activeTaskCardIDs.remove(cardID)
     }
 
     mutating func prune(to cardIDs: Set<UUID>) {
-        let staleCardIDs = cycleStateByCardID.keys.filter { !cardIDs.contains($0) }
-        for cardID in staleCardIDs {
-            removeCard(cardID)
-        }
+        activeTaskCardIDs = activeTaskCardIDs.intersection(cardIDs)
     }
 
-    func cycleState(for cardID: UUID) -> AgentTaskCycleState {
-        cycleStateByCardID[cardID] ?? .bootstrapping
+    func hasActiveTask(for cardID: UUID) -> Bool {
+        activeTaskCardIDs.contains(cardID)
     }
 
-    func lastRawStatus(for cardID: UUID) -> AgentRawStatus? {
-        lastRawStatusByCardID[cardID]
-    }
-
-    mutating func registerTaskSubmission(
+    mutating func apply(
+        signal: AgentRuntimeSignal,
         snapshot: AgentSessionSnapshot
     ) -> AgentTaskWorkflowOutcome {
-        let cardID = snapshot.cardID
-        let currentState = cycleState(for: cardID)
-
-        guard snapshot.column != .done else {
-            return .none
-        }
-
-        switch currentState {
-        case .activeTask:
-            return .none
-
-        case .bootstrapping, .warmingUp, .ready:
-            cycleStateByCardID[cardID] = .activeTask
+        switch signal {
+        case .started:
+            guard snapshot.column != .done else {
+                activeTaskCardIDs.remove(snapshot.cardID)
+                return .none
+            }
+            let inserted = activeTaskCardIDs.insert(snapshot.cardID).inserted
+            guard inserted else { return .none }
             if snapshot.column == .inProgress {
                 return AgentTaskWorkflowOutcome(action: .moveToTodo)
             }
             return .none
+
+        case .completed:
+            let wasActive = activeTaskCardIDs.remove(snapshot.cardID) != nil
+            guard wasActive, snapshot.column != .done else {
+                return .none
+            }
+            return AgentTaskWorkflowOutcome(action: .complete)
         }
-    }
-
-    mutating func registerCompletionSignal(
-        snapshot: AgentSessionSnapshot
-    ) -> AgentTaskWorkflowOutcome {
-        guard cycleState(for: snapshot.cardID) == .activeTask else {
-            return .none
-        }
-        return apply(snapshot: snapshot, rawStatus: .idle)
-    }
-
-    mutating func apply(
-        snapshot: AgentSessionSnapshot,
-        rawStatus: AgentRawStatus
-    ) -> AgentTaskWorkflowOutcome {
-        let cardID = snapshot.cardID
-        let currentState = cycleState(for: cardID)
-        var nextState = currentState
-        var outcome = AgentTaskWorkflowOutcome.none
-
-        switch currentState {
-        case .bootstrapping:
-            if rawStatus.establishesReadyBaseline || rawStatus == .stopped {
-                nextState = .warmingUp
-            }
-
-        case .warmingUp:
-            switch rawStatus {
-            case .idle, .stopped:
-                nextState = .ready
-            case .running, .waiting, .error:
-                nextState = .warmingUp
-            }
-
-        case .ready:
-            break
-
-        case .activeTask:
-            guard snapshot.column != .done else {
-                if rawStatus == .idle || rawStatus == .stopped {
-                    nextState = .ready
-                }
-                break
-            }
-
-            switch rawStatus {
-            case .idle:
-                nextState = .ready
-                if snapshot.column == .todo {
-                    outcome = AgentTaskWorkflowOutcome(action: .complete)
-                }
-            case .stopped:
-                nextState = .ready
-            case .running, .waiting, .error:
-                nextState = .activeTask
-            }
-        }
-
-        cycleStateByCardID[cardID] = nextState
-        lastRawStatusByCardID[cardID] = rawStatus
-        return outcome
     }
 }
 
@@ -419,140 +255,51 @@ final class AgentSessionMonitor {
     weak var boardStore: BoardStore?
     weak var terminalManager: TerminalManager?
 
-    private var pollingTask: Task<Void, Never>?
     private var reducer = AgentTaskWorkflowReducer()
-    private var lastActivityBySessionName: [String: Int] = [:]
-    private var consecutiveCaptureFailuresBySessionName: [String: Int] = [:]
 
     func connect(boardStore: BoardStore, terminalManager: TerminalManager) {
         self.boardStore = boardStore
         self.terminalManager = terminalManager
     }
 
-    func start() {
-        guard pollingTask == nil else { return }
-        pollingTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.pollOnce()
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
-    }
-
-    func stop() {
-        pollingTask?.cancel()
-        pollingTask = nil
-    }
-
     func registerLaunch(for cardID: UUID) {
+        synchronizeTrackedCards()
         reducer.registerLaunch(for: cardID)
-    }
-
-    func registerTaskSubmission(for cardID: UUID) {
-        guard let terminalManager,
-              let boardStore,
-              let snapshot = terminalManager.agentSessionSnapshot(for: cardID) else {
-            return
-        }
-
-        let outcome = reducer.registerTaskSubmission(snapshot: snapshot)
-        handle(outcome: outcome, snapshot: snapshot, boardStore: boardStore)
+        agentLifecycleDebugLog(
+            "runtime.launch card=\(cardID.uuidString) activeCount=\(reducer.activeTaskCardIDs.count)"
+        )
     }
 
     func registerRuntimeSignal(_ signal: AgentRuntimeSignal, for cardID: UUID) {
-        switch signal {
-        case .promptSubmit:
-            registerTaskSubmission(for: cardID)
+        synchronizeTrackedCards()
 
-        case .stop, .idle:
-            guard let terminalManager,
-                  let boardStore,
-                  let snapshot = terminalManager.agentSessionSnapshot(for: cardID) else {
-                return
-            }
-            let outcome = reducer.registerCompletionSignal(snapshot: snapshot)
-            handle(outcome: outcome, snapshot: snapshot, boardStore: boardStore)
-
-        case .sessionStart, .active, .notification, .notify:
+        guard let terminalManager,
+              let boardStore,
+              let snapshot = terminalManager.agentSessionSnapshot(for: cardID) else {
+            agentLifecycleDebugLog(
+                "runtime.signal.missingSnapshot signal=\(signal.rawValue) card=\(cardID.uuidString)"
+            )
             return
         }
+
+        let outcome = reducer.apply(signal: signal, snapshot: snapshot)
+        agentLifecycleDebugLog(
+            "runtime.signal signal=\(signal.rawValue) card=\(snapshot.cardID.uuidString) " +
+            "board=\(snapshot.boardID.uuidString) agent=\(snapshot.agent.runtimeID) " +
+            "column=\(snapshot.column.rawValue) outcome=\(String(describing: outcome.action)) " +
+            "active=\(reducer.hasActiveTask(for: snapshot.cardID) ? 1 : 0)"
+        )
+        handle(outcome: outcome, snapshot: snapshot, boardStore: boardStore)
     }
 
     func removeCard(_ cardID: UUID) {
         reducer.removeCard(cardID)
     }
 
-    private func pollOnce() async {
-        guard let terminalManager, let boardStore else { return }
-
-        let snapshots = terminalManager.allAgentSessionSnapshots()
-        let trackedCardIDs = Set(snapshots.map(\.cardID))
+    private func synchronizeTrackedCards() {
+        guard let terminalManager else { return }
+        let trackedCardIDs = Set(terminalManager.allAgentSessionSnapshots().map(\.cardID))
         reducer.prune(to: trackedCardIDs)
-
-        let activityBySessionName = await TmuxSessionManager.shared.refreshSessionActivityCache()
-
-        for snapshot in snapshots {
-            let sessionName = snapshot.tmuxSessionName
-            let currentActivity = activityBySessionName[sessionName]
-            let previousActivity = lastActivityBySessionName[sessionName]
-
-            let rawStatus: AgentRawStatus
-            if let currentActivity {
-                let shouldCapture =
-                    previousActivity != currentActivity ||
-                    reducer.cycleState(for: snapshot.cardID) != .ready ||
-                    reducer.lastRawStatus(for: snapshot.cardID) == nil
-
-                if shouldCapture {
-                    rawStatus = await captureAndParseStatus(
-                        snapshot: snapshot,
-                        activityTimestamp: currentActivity
-                    )
-                } else if let cachedStatus = reducer.lastRawStatus(for: snapshot.cardID) {
-                    rawStatus = cachedStatus
-                } else {
-                    rawStatus = TmuxSessionManager.shared.isRecentActivity(currentActivity) ? .running : .idle
-                }
-
-                lastActivityBySessionName[sessionName] = currentActivity
-            } else {
-                rawStatus = .stopped
-                lastActivityBySessionName.removeValue(forKey: sessionName)
-                consecutiveCaptureFailuresBySessionName.removeValue(forKey: sessionName)
-            }
-
-            let outcome = reducer.apply(snapshot: snapshot, rawStatus: rawStatus)
-            handle(outcome: outcome, snapshot: snapshot, boardStore: boardStore)
-        }
-
-        let activeSessionNames = Set(snapshots.map(\.tmuxSessionName))
-        lastActivityBySessionName = lastActivityBySessionName.filter { activeSessionNames.contains($0.key) }
-        consecutiveCaptureFailuresBySessionName = consecutiveCaptureFailuresBySessionName.filter {
-            activeSessionNames.contains($0.key)
-        }
-    }
-
-    private func captureAndParseStatus(
-        snapshot: AgentSessionSnapshot,
-        activityTimestamp: Int
-    ) async -> AgentRawStatus {
-        let sessionName = snapshot.tmuxSessionName
-        do {
-            let output = try await TmuxSessionManager.shared.capturePane(sessionID: snapshot.tmuxSessionID)
-            consecutiveCaptureFailuresBySessionName[sessionName] = 0
-            return AgentStatusParser.parse(
-                output: output,
-                agent: snapshot.agent,
-                isRecentActivity: TmuxSessionManager.shared.isRecentActivity(activityTimestamp)
-            )
-        } catch {
-            let nextFailureCount = (consecutiveCaptureFailuresBySessionName[sessionName] ?? 0) + 1
-            consecutiveCaptureFailuresBySessionName[sessionName] = nextFailureCount
-            return AgentCaptureFailureHeuristics.rawStatus(
-                afterConsecutiveFailures: nextFailureCount,
-                isRecentActivity: TmuxSessionManager.shared.isRecentActivity(activityTimestamp)
-            )
-        }
     }
 
     private func handle(
@@ -562,9 +309,15 @@ final class AgentSessionMonitor {
     ) {
         switch outcome.action {
         case .none:
+            agentLifecycleDebugLog(
+                "runtime.handle.none card=\(snapshot.cardID.uuidString) agent=\(snapshot.agent.runtimeID)"
+            )
             return
 
         case .moveToTodo:
+            agentLifecycleDebugLog(
+                "runtime.handle.moveToTodo card=\(snapshot.cardID.uuidString) board=\(snapshot.boardID.uuidString)"
+            )
             boardStore.moveCard(snapshot.cardID, to: .todo, in: snapshot.boardID)
 
         case .complete:
@@ -572,6 +325,10 @@ final class AgentSessionMonitor {
                 snapshot.cardID,
                 to: .inProgress,
                 in: snapshot.boardID
+            )
+            agentLifecycleDebugLog(
+                "runtime.handle.complete card=\(snapshot.cardID.uuidString) board=\(snapshot.boardID.uuidString) " +
+                "didMoveToInReview=\(didMoveToInReview ? 1 : 0)"
             )
             guard didMoveToInReview else { return }
             NotificationService.shared.showNotification(

@@ -35,9 +35,8 @@ struct zenbanApp: App {
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
-        ) { [agentSessionMonitor, terminalManager, devServerManager] _ in
+        ) { [terminalManager, devServerManager] _ in
             MainActor.assumeIsolated {
-                agentSessionMonitor.stop()
                 terminalManager.terminateAllSessions()
                 devServerManager.stopAllServers()
                 TmuxSessionManager.shared.killAllZenbanSessionsSync()
@@ -191,7 +190,6 @@ struct zenbanApp: App {
     private func setupAgentMonitoring() {
         terminalManager.agentSessionMonitor = agentSessionMonitor
         agentSessionMonitor.connect(boardStore: store, terminalManager: terminalManager)
-        agentSessionMonitor.start()
     }
 
     private func setupNotifications() {

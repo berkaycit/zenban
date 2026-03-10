@@ -3,10 +3,14 @@
 
 _cmux_send() {
     local payload="$1"
+    local envelope="$payload"
+    if [[ -n "${CMUX_SOCKET_AUTH_TOKEN:-}" ]]; then
+        envelope="auth ${CMUX_SOCKET_AUTH_TOKEN}"$'\n'"$payload"
+    fi
     if command -v ncat >/dev/null 2>&1; then
-        print -r -- "$payload" | ncat -w 1 -U "$CMUX_SOCKET_PATH" --send-only
+        print -r -- "$envelope" | ncat -w 1 -U "$CMUX_SOCKET_PATH" --send-only
     elif command -v socat >/dev/null 2>&1; then
-        print -r -- "$payload" | socat -T 1 - "UNIX-CONNECT:$CMUX_SOCKET_PATH"
+        print -r -- "$envelope" | socat -T 1 - "UNIX-CONNECT:$CMUX_SOCKET_PATH"
     elif command -v nc >/dev/null 2>&1; then
         # Some nc builds don't support unix sockets, but keep as a last-ditch fallback.
         #
@@ -16,10 +20,10 @@ _cmux_send() {
         #
         # Prefer flags that guarantee we exit after sending, and fall back to a
         # short timeout so we never block sidebar updates.
-        if print -r -- "$payload" | nc -N -U "$CMUX_SOCKET_PATH" >/dev/null 2>&1; then
+        if print -r -- "$envelope" | nc -N -U "$CMUX_SOCKET_PATH" >/dev/null 2>&1; then
             :
         else
-            print -r -- "$payload" | nc -w 1 -U "$CMUX_SOCKET_PATH" >/dev/null 2>&1 || true
+            print -r -- "$envelope" | nc -w 1 -U "$CMUX_SOCKET_PATH" >/dev/null 2>&1 || true
         fi
     fi
 }

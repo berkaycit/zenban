@@ -8,11 +8,13 @@ struct AgentRuntimeTests {
     func launchPlanBuildsExpectedShellCommand() {
         let cardID = UUID()
         let boardID = UUID()
+        let panelID = UUID()
 
         let plan = AgentLauncher.plan(
             for: .claude,
             cardID: cardID,
             boardID: boardID,
+            panelID: panelID,
             workingDirectory: "/tmp/demo project",
             reason: .worktreeReady
         )
@@ -20,71 +22,32 @@ struct AgentRuntimeTests {
         #expect(plan.command == "claude --dangerously-skip-permissions")
         #expect(plan.shellCommand.contains("cd -- '/tmp/demo project' &&"))
         #expect(plan.shellCommand.contains("env -u CLAUDECODE"))
+        #expect(plan.shellCommand.contains("CMUX_WORKSPACE_ID='\(cardID.uuidString)'"))
+        #expect(plan.shellCommand.contains("CMUX_SURFACE_ID='\(panelID.uuidString)'"))
         #expect(plan.shellCommand.contains("ZENBAN_AGENT='claude'"))
         #expect(plan.shellCommand.contains("ZENBAN_AGENT_LAUNCH_REASON='worktreeReady'"))
     }
 
     @Test
-    func parserDetectsClaudeWaitingAndBusyStates() {
-        let waitingOutput = """
-        Do you want to proceed?
-          1. Yes
-          2. No
-        Esc to cancel · Tab to amend
-        """
-        let waitingStatus = AgentStatusParser.parse(
-            output: waitingOutput,
-            agent: .claude,
-            isRecentActivity: true
-        )
-        #expect(waitingStatus == .waiting)
-
-        let busyStatus = AgentStatusParser.parse(
-            output: "⠹ Working on your request...",
-            agent: .claude,
-            isRecentActivity: true
-        )
-        #expect(busyStatus == .running)
-
-        let idleStatus = AgentStatusParser.parse(
-            output: "Claude finished the task.\n  ? for shortcuts",
-            agent: .claude,
-            isRecentActivity: false
-        )
-        #expect(idleStatus == .idle)
+    func runtimeAgentLookupUsesRuntimeIDs() {
+        #expect(Agent.fromRuntimeID("claude") == .claude)
+        #expect(Agent.fromRuntimeID("codex") == .codex)
+        #expect(Agent.fromRuntimeID("gemini") == .gemini)
+        #expect(Agent.fromRuntimeID("Claude") == .claude)
+        #expect(Agent.fromRuntimeID("unknown") == nil)
     }
 
     @Test
-    func parserDetectsGenericWaitingAndErrors() {
-        let waitingStatus = AgentStatusParser.parse(
-            output: "Install packages? [Y/n]",
-            agent: .codex,
-            isRecentActivity: true
-        )
-        #expect(waitingStatus == .waiting)
-
-        let errorStatus = AgentStatusParser.parse(
-            output: "panic: runtime error",
-            agent: .gemini,
-            isRecentActivity: true
-        )
-        #expect(errorStatus == .error)
-    }
-
-    @Test
-    func captureFailureHeuristicsEscalateToStoppedAfterThreshold() {
-        #expect(
-            AgentCaptureFailureHeuristics.rawStatus(
-                afterConsecutiveFailures: AgentCaptureFailureHeuristics.stopThreshold - 1,
-                isRecentActivity: true
-            ) == .running
-        )
-        #expect(
-            AgentCaptureFailureHeuristics.rawStatus(
-                afterConsecutiveFailures: AgentCaptureFailureHeuristics.stopThreshold,
-                isRecentActivity: true
-            ) == .stopped
-        )
+    func legacyClaudeHookSignalsMapToSimpleLifecycle() {
+        #expect(AgentRuntimeSignal(legacyClaudeHook: "prompt-submit") == .started)
+        #expect(AgentRuntimeSignal(legacyClaudeHook: "stop") == .completed)
+        #expect(AgentRuntimeSignal(legacyClaudeHook: "idle") == .completed)
+        #expect(AgentRuntimeSignal(legacyClaudeHook: "notification") == nil)
+        #expect(AgentRuntimeSignal.shouldIgnoreLegacyClaudeHook("session-start"))
+        #expect(AgentRuntimeSignal.shouldIgnoreLegacyClaudeHook("active"))
+        #expect(AgentRuntimeSignal.shouldIgnoreLegacyClaudeHook("notification"))
+        #expect(AgentRuntimeSignal.shouldIgnoreLegacyClaudeHook("notify"))
+        #expect(!AgentRuntimeSignal.shouldIgnoreLegacyClaudeHook("prompt-submit"))
     }
 
     @Test
@@ -114,235 +77,162 @@ struct AgentRuntimeTests {
     }
 
     @Test
-    func workflowRequiresBaselineBeforeAnyCompletion() {
+    func workflowStartedArmsTodoCard() {
         var reducer = AgentTaskWorkflowReducer()
         let snapshot = AgentSessionSnapshot(
             cardID: UUID(),
             boardID: UUID(),
-            cardTitle: "cc-1",
+            cardTitle: "codex-1",
+            column: .todo,
+            agent: .codex,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: snapshot.cardID)
+        let outcome = reducer.apply(signal: .started, snapshot: snapshot)
+
+        #expect(outcome == .none)
+        #expect(reducer.hasActiveTask(for: snapshot.cardID))
+    }
+
+    @Test
+    func workflowMovesInReviewCardsBackToTodoOnStart() {
+        var reducer = AgentTaskWorkflowReducer()
+        let snapshot = AgentSessionSnapshot(
+            cardID: UUID(),
+            boardID: UUID(),
+            cardTitle: "claude-1",
+            column: .inProgress,
+            agent: .claude,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: snapshot.cardID)
+        let outcome = reducer.apply(signal: .started, snapshot: snapshot)
+
+        #expect(outcome == AgentTaskWorkflowOutcome(action: .moveToTodo))
+        #expect(reducer.hasActiveTask(for: snapshot.cardID))
+    }
+
+    @Test
+    func workflowIgnoresSecondStartWhileAlreadyActive() {
+        var reducer = AgentTaskWorkflowReducer()
+        let snapshot = AgentSessionSnapshot(
+            cardID: UUID(),
+            boardID: UUID(),
+            cardTitle: "gemini-1",
+            column: .todo,
+            agent: .gemini,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: snapshot.cardID)
+        _ = reducer.apply(signal: .started, snapshot: snapshot)
+        let outcome = reducer.apply(signal: .started, snapshot: snapshot)
+
+        #expect(outcome == .none)
+        #expect(reducer.hasActiveTask(for: snapshot.cardID))
+    }
+
+    @Test
+    func workflowCompletesOnlyAfterStarted() {
+        var reducer = AgentTaskWorkflowReducer()
+        let snapshot = AgentSessionSnapshot(
+            cardID: UUID(),
+            boardID: UUID(),
+            cardTitle: "claude-2",
             column: .todo,
             agent: .claude,
             tmuxSessionID: UUID().uuidString
         )
 
         reducer.registerLaunch(for: snapshot.cardID)
-        let outcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        _ = reducer.apply(signal: .started, snapshot: snapshot)
+        let outcome = reducer.apply(signal: .completed, snapshot: snapshot)
 
-        #expect(outcome == .none)
-        #expect(reducer.cycleState(for: snapshot.cardID) == .warmingUp)
+        #expect(outcome == AgentTaskWorkflowOutcome(action: .complete))
+        #expect(!reducer.hasActiveTask(for: snapshot.cardID))
     }
 
     @Test
-    func workflowIgnoresStartupActivityBeforeBaseline() {
+    func workflowIgnoresCompletionWithoutActiveTask() {
         var reducer = AgentTaskWorkflowReducer()
-        let cardID = UUID()
         let snapshot = AgentSessionSnapshot(
-            cardID: cardID,
+            cardID: UUID(),
             boardID: UUID(),
-            cardTitle: "cc-startup",
-            column: .todo,
-            agent: .claude,
-            tmuxSessionID: UUID().uuidString
-        )
-
-        reducer.registerLaunch(for: cardID)
-        let runningOutcome = reducer.apply(snapshot: snapshot, rawStatus: .running)
-        let idleOutcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-
-        #expect(runningOutcome == .none)
-        #expect(idleOutcome == .none)
-        #expect(reducer.cycleState(for: cardID) == .warmingUp)
-    }
-
-    @Test
-    func workflowRequiresWarmupIdleBeforeArmingCompletion() {
-        var reducer = AgentTaskWorkflowReducer()
-        let cardID = UUID()
-        let snapshot = AgentSessionSnapshot(
-            cardID: cardID,
-            boardID: UUID(),
-            cardTitle: "claude-warmup",
-            column: .todo,
-            agent: .claude,
-            tmuxSessionID: UUID().uuidString
-        )
-
-        reducer.registerLaunch(for: cardID)
-        let baselineOutcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-        let startupActivityOutcome = reducer.apply(snapshot: snapshot, rawStatus: .running)
-        let startupIdleOutcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-
-        #expect(baselineOutcome == .none)
-        #expect(startupActivityOutcome == .none)
-        #expect(startupIdleOutcome == .none)
-        #expect(reducer.cycleState(for: cardID) == .ready)
-    }
-
-    @Test
-    func workflowStaysReadyWithoutSubmissionWhenActivityAppears() {
-        var reducer = AgentTaskWorkflowReducer()
-        let cardID = UUID()
-        let snapshot = AgentSessionSnapshot(
-            cardID: cardID,
-            boardID: UUID(),
-            cardTitle: "cc-no-submit",
-            column: .todo,
-            agent: .claude,
-            tmuxSessionID: UUID().uuidString
-        )
-
-        reducer.registerLaunch(for: cardID)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-
-        let outcome = reducer.apply(snapshot: snapshot, rawStatus: .running)
-
-        #expect(outcome == .none)
-        #expect(reducer.cycleState(for: cardID) == .ready)
-    }
-
-    @Test
-    func workflowMovesInReviewCardsBackToTodoOnExplicitSubmission() {
-        var reducer = AgentTaskWorkflowReducer()
-        let cardID = UUID()
-        let boardID = UUID()
-        let snapshot = AgentSessionSnapshot(
-            cardID: cardID,
-            boardID: boardID,
-            cardTitle: "cc-2",
-            column: .inProgress,
-            agent: .claude,
-            tmuxSessionID: UUID().uuidString
-        )
-
-        reducer.registerLaunch(for: cardID)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-
-        let outcome = reducer.registerTaskSubmission(snapshot: snapshot)
-
-        #expect(outcome == AgentTaskWorkflowOutcome(action: .moveToTodo))
-        #expect(reducer.cycleState(for: cardID) == .activeTask)
-    }
-
-    @Test
-    func workflowCompletesTodoCardsOnlyAfterExplicitSubmissionReturnsToIdle() {
-        var reducer = AgentTaskWorkflowReducer()
-        let cardID = UUID()
-        let boardID = UUID()
-
-        reducer.registerLaunch(for: cardID)
-        let baseline = AgentSessionSnapshot(
-            cardID: cardID,
-            boardID: boardID,
-            cardTitle: "codex-1",
+            cardTitle: "codex-2",
             column: .todo,
             agent: .codex,
             tmuxSessionID: UUID().uuidString
         )
-        _ = reducer.apply(snapshot: baseline, rawStatus: .idle)
-        _ = reducer.apply(snapshot: baseline, rawStatus: .idle)
-        let submissionOutcome = reducer.registerTaskSubmission(snapshot: baseline)
-        _ = reducer.apply(snapshot: baseline, rawStatus: .waiting)
-        let outcome = reducer.apply(snapshot: baseline, rawStatus: .idle)
 
-        #expect(submissionOutcome == .none)
-        #expect(outcome == AgentTaskWorkflowOutcome(action: .complete))
-        #expect(reducer.cycleState(for: cardID) == .ready)
-    }
-
-    @Test
-    func workflowCompletesActiveTaskOnExplicitCompletionSignal() {
-        var reducer = AgentTaskWorkflowReducer()
-        let cardID = UUID()
-        let snapshot = AgentSessionSnapshot(
-            cardID: cardID,
-            boardID: UUID(),
-            cardTitle: "claude-hook",
-            column: .todo,
-            agent: .claude,
-            tmuxSessionID: UUID().uuidString
-        )
-
-        reducer.registerLaunch(for: cardID)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-        _ = reducer.registerTaskSubmission(snapshot: snapshot)
-
-        let outcome = reducer.registerCompletionSignal(snapshot: snapshot)
-
-        #expect(outcome == AgentTaskWorkflowOutcome(action: .complete))
-        #expect(reducer.cycleState(for: cardID) == .ready)
-    }
-
-    @Test
-    func workflowIgnoresExplicitCompletionSignalWithoutActiveTask() {
-        var reducer = AgentTaskWorkflowReducer()
-        let cardID = UUID()
-        let snapshot = AgentSessionSnapshot(
-            cardID: cardID,
-            boardID: UUID(),
-            cardTitle: "claude-hook-idle",
-            column: .todo,
-            agent: .claude,
-            tmuxSessionID: UUID().uuidString
-        )
-
-        reducer.registerLaunch(for: cardID)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-
-        let outcome = reducer.registerCompletionSignal(snapshot: snapshot)
+        reducer.registerLaunch(for: snapshot.cardID)
+        let outcome = reducer.apply(signal: .completed, snapshot: snapshot)
 
         #expect(outcome == .none)
-        #expect(reducer.cycleState(for: cardID) == .ready)
+        #expect(!reducer.hasActiveTask(for: snapshot.cardID))
     }
 
     @Test
-    func workflowAllowsSubmissionDuringWarmupWithoutMissingCompletion() {
+    func workflowCompletionOnlyFiresOnce() {
         var reducer = AgentTaskWorkflowReducer()
-        let cardID = UUID()
         let snapshot = AgentSessionSnapshot(
-            cardID: cardID,
+            cardID: UUID(),
             boardID: UUID(),
-            cardTitle: "warmup-submit",
+            cardTitle: "gemini-2",
             column: .todo,
-            agent: .claude,
+            agent: .gemini,
             tmuxSessionID: UUID().uuidString
         )
 
-        reducer.registerLaunch(for: cardID)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-        let submitOutcome = reducer.registerTaskSubmission(snapshot: snapshot)
-        let outcome = reducer.apply(snapshot: snapshot, rawStatus: .idle)
+        reducer.registerLaunch(for: snapshot.cardID)
+        _ = reducer.apply(signal: .started, snapshot: snapshot)
+        let firstOutcome = reducer.apply(signal: .completed, snapshot: snapshot)
+        let secondOutcome = reducer.apply(signal: .completed, snapshot: snapshot)
 
-        #expect(submitOutcome == .none)
-        #expect(outcome == AgentTaskWorkflowOutcome(action: .complete))
-        #expect(reducer.cycleState(for: cardID) == .ready)
+        #expect(firstOutcome == AgentTaskWorkflowOutcome(action: .complete))
+        #expect(secondOutcome == .none)
     }
 
     @Test
     func workflowLeavesDoneCardsUntouched() {
         var reducer = AgentTaskWorkflowReducer()
-        let cardID = UUID()
         let snapshot = AgentSessionSnapshot(
-            cardID: cardID,
+            cardID: UUID(),
             boardID: UUID(),
-            cardTitle: "gemini-1",
+            cardTitle: "done-card",
             column: .done,
             agent: .gemini,
             tmuxSessionID: UUID().uuidString
         )
 
-        reducer.registerLaunch(for: cardID)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-        _ = reducer.apply(snapshot: snapshot, rawStatus: .idle)
-        let submitOutcome = reducer.registerTaskSubmission(snapshot: snapshot)
-        let outcome = reducer.apply(snapshot: snapshot, rawStatus: .running)
+        reducer.registerLaunch(for: snapshot.cardID)
+        let startedOutcome = reducer.apply(signal: .started, snapshot: snapshot)
+        let completedOutcome = reducer.apply(signal: .completed, snapshot: snapshot)
 
-        #expect(submitOutcome == .none)
-        #expect(outcome == .none)
-        #expect(reducer.cycleState(for: cardID) == .ready)
+        #expect(startedOutcome == .none)
+        #expect(completedOutcome == .none)
+        #expect(!reducer.hasActiveTask(for: snapshot.cardID))
+    }
+
+    @Test
+    func registerLaunchClearsPreviouslyActiveTask() {
+        var reducer = AgentTaskWorkflowReducer()
+        let cardID = UUID()
+        let snapshot = AgentSessionSnapshot(
+            cardID: cardID,
+            boardID: UUID(),
+            cardTitle: "restart-card",
+            column: .todo,
+            agent: .claude,
+            tmuxSessionID: UUID().uuidString
+        )
+
+        reducer.registerLaunch(for: cardID)
+        _ = reducer.apply(signal: .started, snapshot: snapshot)
+        reducer.registerLaunch(for: cardID)
+
+        #expect(!reducer.hasActiveTask(for: cardID))
     }
 
     @Test

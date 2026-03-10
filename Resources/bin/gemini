@@ -5,16 +5,16 @@ debug_log_path="${ZENBAN_AGENT_LIFECYCLE_LOG:-/tmp/zenban-agent-lifecycle.log}"
 debug_log() {
     local timestamp
     timestamp="$(date '+%Y-%m-%dT%H:%M:%S%z')"
-    printf '%s [claude-wrapper] %s\n' "$timestamp" "$*" >> "$debug_log_path" 2>/dev/null || true
+    printf '%s [gemini-wrapper] %s\n' "$timestamp" "$*" >> "$debug_log_path" 2>/dev/null || true
 }
 
-find_real_claude() {
+find_real_gemini() {
     local self_dir
     self_dir="$(cd "$(dirname "$0")" && pwd)"
     local IFS=:
     for d in $PATH; do
         [[ "$d" == "$self_dir" ]] && continue
-        [[ -x "$d/claude" ]] && printf '%s' "$d/claude" && return 0
+        [[ -x "$d/gemini" ]] && printf '%s' "$d/gemini" && return 0
     done
     return 1
 }
@@ -39,7 +39,7 @@ build_agent_hook_command() {
     workspace_id="${CMUX_WORKSPACE_ID:-${CMUX_TAB_ID:-}}"
     surface_id="${CMUX_SURFACE_ID:-${CMUX_PANEL_ID:-}}"
 
-    command="$(shell_quote "$cmux_bin") agent-hook claude completed"
+    command="$(shell_quote "$cmux_bin") agent-hook gemini completed"
     if [[ -n "$workspace_id" ]]; then
         command+=" --workspace $(shell_quote "$workspace_id")"
     fi
@@ -64,10 +64,52 @@ cmux_socket_available() {
         "$cmux_bin" --socket "$socket" ping >/dev/null 2>&1
 }
 
+should_passthrough_subcommand() {
+    case "${1:-}" in
+        mcp|extensions|skills|hooks|help)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+create_hook_settings_file() {
+    local hook_command="$1"
+    local tmp_root tmpfile
+    tmp_root="${TMPDIR:-/tmp}"
+    tmpfile="$(mktemp "$tmp_root/zenban-gemini-hook.XXXXXX")"
+    cat > "$tmpfile" <<EOF
+{
+  "hooksConfig": {
+    "enabled": true,
+    "notifications": false
+  },
+  "hooks": {
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$(json_escape "$hook_command")",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+    printf '%s' "$tmpfile"
+}
+
 in_cmux=0
 if [[ -n "${CMUX_SURFACE_ID:-}" ]]; then
     in_cmux=1
 fi
+
+real_gemini="$(find_real_gemini)" || { echo "Error: gemini not found in PATH" >&2; exit 127; }
 
 socket_ready=0
 if cmux_socket_available; then
@@ -75,28 +117,24 @@ if cmux_socket_available; then
 fi
 
 debug_log \
-    "start in_cmux=$in_cmux socket_ready=$socket_ready hooks_disabled=${CMUX_CLAUDE_HOOKS_DISABLED:-0} " \
+    "start in_cmux=$in_cmux socket_ready=$socket_ready hooks_disabled=${CMUX_GEMINI_HOOKS_DISABLED:-0} " \
     "workspace=${CMUX_WORKSPACE_ID:-${CMUX_TAB_ID:-nil}} surface=${CMUX_SURFACE_ID:-${CMUX_PANEL_ID:-nil}} argv0=${1:-}"
 
-if [[ "$in_cmux" == "0" || "${CMUX_CLAUDE_HOOKS_DISABLED:-0}" == "1" || "$socket_ready" == "0" ]]; then
-    debug_log "passthrough in_cmux=$in_cmux socket_ready=$socket_ready hooks_disabled=${CMUX_CLAUDE_HOOKS_DISABLED:-0}"
-    if [[ "$in_cmux" == "1" ]]; then
-        unset CLAUDECODE
-    fi
-    real_claude="$(find_real_claude)" || { echo "Error: claude not found in PATH" >&2; exit 127; }
-    exec "$real_claude" "$@"
+if [[ "$in_cmux" == "0" || "${CMUX_GEMINI_HOOKS_DISABLED:-0}" == "1" || "$socket_ready" == "0" ]]; then
+    debug_log "passthrough in_cmux=$in_cmux socket_ready=$socket_ready hooks_disabled=${CMUX_GEMINI_HOOKS_DISABLED:-0}"
+    exec "$real_gemini" "$@"
 fi
 
-real_claude="$(find_real_claude)" || { echo "Error: claude not found in PATH" >&2; exit 127; }
-
-case "${1:-}" in
-    mcp|config|api-key) exec "$real_claude" "$@" ;;
-esac
-
-unset CLAUDECODE
+if should_passthrough_subcommand "${1:-}"; then
+    debug_log "passthrough reason=subcommand subcommand=${1:-}"
+    exec "$real_gemini" "$@"
+fi
 
 hook_command="$(build_agent_hook_command)"
-hooks_json='{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"'"$(json_escape "$hook_command")"'","timeout":10}]}]}}'
-debug_log "inject hook_command=$hook_command"
+settings_path="$(create_hook_settings_file "$hook_command")"
+trap 'rm -f "$settings_path"' EXIT
+debug_log "inject hook_command=$hook_command settings_path=$settings_path"
 
-exec "$real_claude" --settings "$hooks_json" "$@"
+GEMINI_CLI_SYSTEM_SETTINGS_PATH="$settings_path" "$real_gemini" "$@"
+status=$?
+exit "$status"
