@@ -31,33 +31,11 @@ actor TmuxSessionManager {
     }
 
     nonisolated func tmuxPath() -> String? {
-        if let path = Self.candidatePaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return path
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = ["tmux"]
-        process.standardOutput = Pipe()
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0,
-                  let pipe = process.standardOutput as? Pipe else {
-                return nil
-            }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let path = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let path, !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) else {
-                return nil
-            }
-            return path
-        } catch {
-            return nil
-        }
+        ExecutableLocator.resolve(
+            "tmux",
+            candidatePaths: Self.candidatePaths,
+            environment: ProcessEnvironment.buildWithNodeSupport()
+        )
     }
 
     func updateConfig() async {

@@ -2,6 +2,29 @@ import Foundation
 
 /// Utility for detecting dev and setup commands from package.json and lock files
 struct PackageJsonParser {
+    private enum PackageManager: String {
+        case npm
+        case yarn
+        case pnpm
+        case bun
+
+        var lockFileName: String {
+            switch self {
+            case .npm:
+                "package-lock.json"
+            case .yarn:
+                "yarn.lock"
+            case .pnpm:
+                "pnpm-lock.yaml"
+            case .bun:
+                "bun.lockb"
+            }
+        }
+
+        var installCommand: String {
+            "\(rawValue) install"
+        }
+    }
 
     struct DetectedCommands {
         let setupCommand: String?
@@ -55,25 +78,18 @@ struct PackageJsonParser {
     private static func detectSetupCommand(in directory: String, fileManager: FileManager) -> String? {
         let directoryURL = URL(fileURLWithPath: directory)
 
-        // Priority order for lock files
-        let lockFileCommands: [(file: String, command: String)] = [
-            ("package-lock.json", "npm install"),
-            ("yarn.lock", "yarn install"),
-            ("pnpm-lock.yaml", "pnpm install"),
-            ("bun.lockb", "bun install")
-        ]
-
-        for (lockFile, command) in lockFileCommands {
-            let lockPath = directoryURL.appendingPathComponent(lockFile).path
-            if fileManager.fileExists(atPath: lockPath) {
-                return command
-            }
+        if let packageManager = packageManagerForExistingLockfile(
+            in: directoryURL,
+            fileManager: fileManager,
+            priority: [.npm, .yarn, .pnpm, .bun]
+        ) {
+            return packageManager.installCommand
         }
 
         // Fallback: if package.json exists but no lock file, use npm
         let packageJsonPath = directoryURL.appendingPathComponent("package.json").path
         if fileManager.fileExists(atPath: packageJsonPath) {
-            return "npm install"
+            return PackageManager.npm.installCommand
         }
 
         return nil
@@ -96,15 +112,17 @@ struct PackageJsonParser {
             return nil
         }
 
+        let packageManager = detectPackageManager(in: directory, fileManager: fileManager)
+
         // Priority order for dev scripts
         if scripts.dev != nil {
-            return detectPackageManager(in: directory, fileManager: fileManager) + " run dev"
+            return packageManager + " run dev"
         }
         if scripts.start != nil {
-            return detectPackageManager(in: directory, fileManager: fileManager) + " run start"
+            return packageManager + " run start"
         }
         if scripts.serve != nil {
-            return detectPackageManager(in: directory, fileManager: fileManager) + " run serve"
+            return packageManager + " run serve"
         }
 
         return nil
@@ -113,16 +131,22 @@ struct PackageJsonParser {
     private static func detectPackageManager(in directory: String, fileManager: FileManager) -> String {
         let directoryURL = URL(fileURLWithPath: directory)
 
-        if fileManager.fileExists(atPath: directoryURL.appendingPathComponent("yarn.lock").path) {
-            return "yarn"
+        return packageManagerForExistingLockfile(
+            in: directoryURL,
+            fileManager: fileManager,
+            priority: [.yarn, .pnpm, .bun, .npm]
+        )?.rawValue ?? PackageManager.npm.rawValue
+    }
+
+    private static func packageManagerForExistingLockfile(
+        in directoryURL: URL,
+        fileManager: FileManager,
+        priority: [PackageManager]
+    ) -> PackageManager? {
+        priority.first { packageManager in
+            let lockFilePath = directoryURL.appendingPathComponent(packageManager.lockFileName).path
+            return fileManager.fileExists(atPath: lockFilePath)
         }
-        if fileManager.fileExists(atPath: directoryURL.appendingPathComponent("pnpm-lock.yaml").path) {
-            return "pnpm"
-        }
-        if fileManager.fileExists(atPath: directoryURL.appendingPathComponent("bun.lockb").path) {
-            return "bun"
-        }
-        return "npm"
     }
 
     // MARK: - Models

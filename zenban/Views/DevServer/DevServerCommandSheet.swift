@@ -92,27 +92,13 @@ struct DevServerCommandSheet: View {
     }
 
     private var setupSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Setup Command")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                TextField("npm install", text: $setupCommand)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(skipSetup)
-
-                if detectedCommands?.setupCommand != nil {
-                    Button(action: { setupCommand = detectedCommands?.setupCommand ?? "" }) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Reset to detected command")
-                    .disabled(skipSetup)
-                }
-            }
-
+        CommandFieldSection(
+            title: "Setup Command",
+            placeholder: "npm install",
+            text: $setupCommand,
+            detectedCommand: detectedCommands?.setupCommand,
+            isDisabled: skipSetup
+        ) {
             Toggle(isOn: $skipSetup) {
                 HStack(spacing: 4) {
                     Text("Skip setup")
@@ -128,25 +114,12 @@ struct DevServerCommandSheet: View {
     }
 
     private var devSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Dev Command")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                TextField("npm run dev", text: $devCommand)
-                    .textFieldStyle(.roundedBorder)
-
-                if detectedCommands?.devCommand != nil {
-                    Button(action: { devCommand = detectedCommands?.devCommand ?? "" }) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Reset to detected command")
-                }
-            }
-
+        CommandFieldSection(
+            title: "Dev Command",
+            placeholder: "npm run dev",
+            text: $devCommand,
+            detectedCommand: detectedCommands?.devCommand
+        ) {
             if detectedCommands?.devCommand == nil {
                 Label("No dev script found in package.json", systemImage: "exclamationmark.triangle")
                     .font(.caption)
@@ -219,6 +192,57 @@ struct DevServerCommandSheet: View {
 
                 isDetecting = false
             }
+        }
+    }
+}
+
+private struct CommandFieldSection<AuxiliaryContent: View>: View {
+    let title: String
+    let placeholder: String
+    @Binding var text: String
+    let detectedCommand: String?
+    let isDisabled: Bool
+    private let auxiliaryContent: () -> AuxiliaryContent
+
+    init(
+        title: String,
+        placeholder: String,
+        text: Binding<String>,
+        detectedCommand: String?,
+        isDisabled: Bool = false,
+        @ViewBuilder auxiliaryContent: @escaping () -> AuxiliaryContent
+    ) {
+        self.title = title
+        self.placeholder = placeholder
+        self._text = text
+        self.detectedCommand = detectedCommand
+        self.isDisabled = isDisabled
+        self.auxiliaryContent = auxiliaryContent
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TextField(placeholder, text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(isDisabled)
+
+                if let detectedCommand {
+                    Button(action: { text = detectedCommand }) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reset to detected command")
+                    .disabled(isDisabled)
+                }
+            }
+
+            auxiliaryContent()
         }
     }
 }

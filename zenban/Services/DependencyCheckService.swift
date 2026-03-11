@@ -42,40 +42,6 @@ actor DependencyCheckService {
         "/usr/bin/claude"
     ]
 
-    /// Finds executable by checking known paths first, then searching PATH
-    private static func findExecutable(_ name: String, knownPaths: [String]) -> String? {
-        if let path = knownPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return path
-        }
-        return findInPath(name)
-    }
-
-    /// Finds executable in PATH using `which` command with extended PATH (includes nvm/volta/fnm)
-    private static func findInPath(_ executable: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [executable]
-        process.environment = ProcessEnvironment.buildWithNodeSupport()
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            if process.terminationStatus == 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !path.isEmpty {
-                    return path
-                }
-            }
-        } catch {}
-        return nil
-    }
-
     enum Dependency: String, CaseIterable {
         case homebrew = "Homebrew"
         case tmux = "tmux"
@@ -138,7 +104,11 @@ actor DependencyCheckService {
     }
 
     nonisolated func tmuxPath() -> String? {
-        Self.findExecutable("tmux", knownPaths: Self.tmuxPaths)
+        ExecutableLocator.resolve(
+            "tmux",
+            candidatePaths: Self.tmuxPaths,
+            environment: ProcessEnvironment.buildWithNodeSupport()
+        )
     }
 
     nonisolated func ghPath() -> String? {
@@ -146,11 +116,19 @@ actor DependencyCheckService {
     }
 
     nonisolated func npmPath() -> String? {
-        Self.findExecutable("npm", knownPaths: Self.npmPaths)
+        ExecutableLocator.resolve(
+            "npm",
+            candidatePaths: Self.npmPaths,
+            environment: ProcessEnvironment.buildWithNodeSupport()
+        )
     }
 
     nonisolated func claudePath() -> String? {
-        Self.findExecutable("claude", knownPaths: Self.claudePaths)
+        ExecutableLocator.resolve(
+            "claude",
+            candidatePaths: Self.claudePaths,
+            environment: ProcessEnvironment.buildWithNodeSupport()
+        )
     }
 
     // MARK: - Installation

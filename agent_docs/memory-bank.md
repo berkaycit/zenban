@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Unify executable lookup and dev command UI
+- **Description**: Added a shared `ExecutableLocator` so tmux, npm, and Claude executable discovery all use the same candidate-path and PATH fallback behavior instead of duplicating `which` logic in multiple services. Refactored `PackageJsonParser` to model package managers explicitly and reuse a single lockfile-priority helper for both setup-command and dev-command detection. Also extracted the repeated setup/dev command entry layout in `DevServerCommandSheet` into a local reusable section without changing the existing sheet behavior.
+
 - **Summary**: Debounce auto-launch during rapid card switching
 - **Description**: Borrowed the useful part of `agent-view`'s selection-driven scheduling without bringing back its polling model. `TerminalManager` now queues pending agent launches per card, waits 150ms before auto-launching a board-detail card, cancels intermediate launches during rapid navigation, and still launches immediately for detached windows or explicit agent switches. The actual tmux command path moved behind an async `TmuxSessionManager` launch API so card switching no longer blocks the main actor on `send-keys` and environment refresh work. Synced the architecture and feature docs to describe the settled auto-launch behavior.
 
