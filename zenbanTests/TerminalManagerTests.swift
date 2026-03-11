@@ -11,8 +11,158 @@ private actor LaunchRecorder {
     }
 }
 
+private func makeGitRepository() throws -> String {
+    let baseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("zenban-terminal-tests", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["git", "init", "-q", baseURL.path]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+
+    guard process.terminationStatus == 0 else {
+        struct GitInitFailed: Error {}
+        throw GitInitFailed()
+    }
+
+    return baseURL.path
+}
+
 @MainActor
 struct TerminalManagerTests {
+    @Test
+    func gitBoardLaunchesFromRepositoryBeforeWorktreeReady() async throws {
+        let terminalManager = TerminalManager()
+        let store = BoardStore()
+        let recorder = LaunchRecorder()
+        let cardID = UUID()
+        let boardID = UUID()
+        let repositoryPath = try makeGitRepository()
+        let card = Card(id: cardID, title: "Git Card", orderIndex: 0, agent: .claude)
+        let board = Board(
+            id: boardID,
+            name: "Repo Board",
+            cards: [card],
+            repositoryPath: repositoryPath,
+            agent: .claude
+        )
+
+        store.boards = [board]
+        store.selectedBoardID = boardID
+        store.selectedCardID = cardID
+        terminalManager.boardStore = store
+
+        terminalManager.autoLaunchDebounce = .milliseconds(20)
+        terminalManager.launchExecutor = { plan, sessionID in
+            await recorder.record(plan: plan, sessionID: sessionID)
+            return true
+        }
+
+        _ = terminalManager.workspaceRecord(for: cardID, boardID: boardID, cardTitle: "Git Card")
+        terminalManager.activateWorkspace(for: cardID)
+
+        try? await Task.sleep(for: .milliseconds(80))
+
+        let plans = await recorder.plans
+        #expect(plans.count == 1)
+        #expect(plans.first?.reason == .initialLaunch)
+        #expect(plans.first?.workingDirectory == repositoryPath)
+        #expect(plans.first?.interruptExisting == false)
+    }
+
+    @Test
+    func worktreeReadyRelaunchesRepositoryLaunchInWorktree() async throws {
+        let terminalManager = TerminalManager()
+        let store = BoardStore()
+        let recorder = LaunchRecorder()
+        let cardID = UUID()
+        let boardID = UUID()
+        let repositoryPath = try makeGitRepository()
+        let worktreePath = "/tmp/zenban-worktree-\(UUID().uuidString)"
+        let card = Card(id: cardID, title: "Git Card", orderIndex: 0, agent: .claude)
+        let board = Board(
+            id: boardID,
+            name: "Repo Board",
+            cards: [card],
+            repositoryPath: repositoryPath,
+            agent: .claude
+        )
+
+        store.boards = [board]
+        store.selectedBoardID = boardID
+        store.selectedCardID = cardID
+        terminalManager.boardStore = store
+
+        terminalManager.autoLaunchDebounce = .milliseconds(20)
+        terminalManager.launchExecutor = { plan, sessionID in
+            await recorder.record(plan: plan, sessionID: sessionID)
+            return true
+        }
+
+        _ = terminalManager.workspaceRecord(for: cardID, boardID: boardID, cardTitle: "Git Card")
+        terminalManager.activateWorkspace(for: cardID)
+        try? await Task.sleep(for: .milliseconds(80))
+
+        terminalManager.worktreeReady(cardID: cardID, worktreePath: worktreePath, agent: .claude)
+        try? await Task.sleep(for: .milliseconds(80))
+
+        let plans = await recorder.plans
+        #expect(plans.count == 2)
+        #expect(plans.first?.reason == .initialLaunch)
+        #expect(plans.first?.workingDirectory == repositoryPath)
+        #expect(plans.last?.reason == .worktreeReady)
+        #expect(plans.last?.workingDirectory == worktreePath)
+        #expect(plans.last?.interruptExisting == true)
+    }
+
+    @Test
+    func identicalWorktreeReadySignalDoesNotRelaunchTwice() async throws {
+        let terminalManager = TerminalManager()
+        let store = BoardStore()
+        let recorder = LaunchRecorder()
+        let cardID = UUID()
+        let boardID = UUID()
+        let repositoryPath = try makeGitRepository()
+        let worktreePath = "/tmp/zenban-worktree-\(UUID().uuidString)"
+        let card = Card(id: cardID, title: "Git Card", orderIndex: 0, agent: .claude)
+        let board = Board(
+            id: boardID,
+            name: "Repo Board",
+            cards: [card],
+            repositoryPath: repositoryPath,
+            agent: .claude
+        )
+
+        store.boards = [board]
+        store.selectedBoardID = boardID
+        store.selectedCardID = cardID
+        terminalManager.boardStore = store
+
+        terminalManager.autoLaunchDebounce = .milliseconds(20)
+        terminalManager.launchExecutor = { plan, sessionID in
+            await recorder.record(plan: plan, sessionID: sessionID)
+            return true
+        }
+
+        _ = terminalManager.workspaceRecord(for: cardID, boardID: boardID, cardTitle: "Git Card")
+        terminalManager.activateWorkspace(for: cardID)
+        try? await Task.sleep(for: .milliseconds(80))
+
+        terminalManager.worktreeReady(cardID: cardID, worktreePath: worktreePath, agent: .claude)
+        try? await Task.sleep(for: .milliseconds(80))
+        terminalManager.worktreeReady(cardID: cardID, worktreePath: worktreePath, agent: .claude)
+        try? await Task.sleep(for: .milliseconds(80))
+
+        let plans = await recorder.plans
+        #expect(plans.count == 2)
+        #expect(plans.last?.workingDirectory == worktreePath)
+    }
+
     @Test
     func workspaceRecordUsesCardIdentityForWorkspace() {
         let terminalManager = TerminalManager()

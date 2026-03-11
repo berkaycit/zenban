@@ -430,13 +430,19 @@ final class TerminalManager {
     }
 
     func worktreeReady(cardID: UUID, worktreePath: String, agent: Agent) {
-        guard !agentLaunchedForCard.contains(cardID) else {
-            pendingWorktreeReady.removeValue(forKey: cardID)
-            return
-        }
         if var record = records[cardID] {
             record.workingDirectory = worktreePath
             records[cardID] = record
+        }
+
+        guard needsAgentLaunch(
+            cardID: cardID,
+            agent: agent,
+            workingDirectory: worktreePath,
+            reason: .worktreeReady
+        ) else {
+            pendingWorktreeReady.removeValue(forKey: cardID)
+            return
         }
 
         guard let panel = targetTerminalPanel(for: cardID) else {
@@ -656,19 +662,37 @@ final class TerminalManager {
 
     private func refreshAutoLaunchIfNeeded(for record: WorkspaceRecord, board: Board?, card: Card?) {
         let agent = card?.agent ?? board?.agent
-        let isGitRepo = board?.repositoryPath.map { GitService.isGitRepository(path: $0) } ?? false
-        if let agent, !isGitRepo {
-            launchAgentIfNeeded(agent, in: record)
-            return
-        }
+        guard let agent else { return }
         if let pending = pendingWorktreeReady[record.cardID] {
             worktreeReady(cardID: record.cardID, worktreePath: pending.worktreePath, agent: pending.agent)
             return
         }
-        if isGitRepo,
-           let worktreePath = card?.worktreePath,
-           let agent {
+        if let worktreePath = card?.worktreePath {
             worktreeReady(cardID: record.cardID, worktreePath: worktreePath, agent: agent)
+            return
+        }
+        launchAgentIfNeeded(agent, in: record)
+    }
+
+    private func needsAgentLaunch(
+        cardID: UUID,
+        agent: Agent,
+        workingDirectory: String?,
+        reason: AgentLaunchReason
+    ) -> Bool {
+        switch reason {
+        case .initialLaunch:
+            return !agentLaunchedForCard.contains(cardID)
+
+        case .worktreeReady:
+            guard agentLaunchedForCard.contains(cardID),
+                  let session = agentSessionRecordByCardID[cardID] else {
+                return true
+            }
+            return session.agent != agent || session.workingDirectory != workingDirectory
+
+        case .agentSwitch:
+            return true
         }
     }
 
@@ -679,11 +703,19 @@ final class TerminalManager {
         workingDirectory: String?,
         reason: AgentLaunchReason
     ) {
-        guard !agentLaunchedForCard.contains(cardID) else { return }
+        guard needsAgentLaunch(
+            cardID: cardID,
+            agent: agent,
+            workingDirectory: workingDirectory,
+            reason: reason
+        ) else {
+            pendingAgentLaunchByCardID.removeValue(forKey: cardID)
+            return
+        }
 
         if let existing = pendingAgentLaunchByCardID[cardID],
            existing.agent != agent || existing.panelID != panel.id || existing.workingDirectory != workingDirectory || existing.reason != reason {
-                cancelPendingAgentLaunch(for: cardID, reason: "replaced")
+            cancelPendingAgentLaunch(for: cardID, reason: "replaced")
         }
 
         if var pending = pendingAgentLaunchByCardID[cardID] {
@@ -779,7 +811,12 @@ final class TerminalManager {
             )
             return
         }
-        guard !agentLaunchedForCard.contains(cardID) else {
+        guard needsAgentLaunch(
+            cardID: cardID,
+            agent: pending.agent,
+            workingDirectory: pending.workingDirectory,
+            reason: pending.reason
+        ) else {
             pendingAgentLaunchByCardID.removeValue(forKey: cardID)
             return
         }
@@ -813,7 +850,7 @@ final class TerminalManager {
     ) {
         guard let record = records[cardID] else { return }
 
-        agentSessionRecordByCardID[cardID] = AgentSessionRecord(
+        let sessionRecord = AgentSessionRecord(
             cardID: cardID,
             boardID: record.boardID,
             panelID: panel.id,
@@ -835,7 +872,8 @@ final class TerminalManager {
             boardID: record.boardID,
             panelID: panel.id,
             workingDirectory: workingDirectory,
-            reason: reason
+            reason: reason,
+            interruptExisting: reason == .agentSwitch || (reason == .worktreeReady && agentLaunchedForCard.contains(cardID))
         )
         agentLifecycleDebugLog(
             "terminal.plan card=\(cardID.uuidString) panel=\(panel.id.uuidString) agent=\(agent.runtimeID) " +
@@ -862,6 +900,7 @@ final class TerminalManager {
             guard didLaunch else {
                 return
             }
+            self.agentSessionRecordByCardID[cardID] = sessionRecord
             self.agentLaunchedForCard.insert(cardID)
             self.agentSessionMonitor?.registerLaunch(for: cardID)
         }

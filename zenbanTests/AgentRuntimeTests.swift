@@ -26,6 +26,7 @@ struct AgentRuntimeTests {
         #expect(plan.shellCommand.contains("CMUX_SURFACE_ID='\(panelID.uuidString)'"))
         #expect(plan.shellCommand.contains("ZENBAN_AGENT='claude'"))
         #expect(plan.shellCommand.contains("ZENBAN_AGENT_LAUNCH_REASON='worktreeReady'"))
+        #expect(plan.interruptExisting == false)
     }
 
     @Test

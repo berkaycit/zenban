@@ -46,6 +46,7 @@ struct AgentLaunchPlan: Equatable, Sendable {
     let workingDirectory: String?
     let environment: [String: String]
     let reason: AgentLaunchReason
+    let interruptExisting: Bool
 
     var shellCommand: String {
         let envAssignments = environment.keys.sorted().compactMap { key -> String? in
@@ -80,7 +81,8 @@ enum AgentLauncher {
         boardID: UUID,
         panelID: UUID,
         workingDirectory: String?,
-        reason: AgentLaunchReason
+        reason: AgentLaunchReason,
+        interruptExisting: Bool = false
     ) -> AgentLaunchPlan {
         var environment: [String: String] = [
             "CMUX_PANEL_ID": panelID.uuidString,
@@ -108,7 +110,8 @@ enum AgentLauncher {
             command: baseCommand(for: agent),
             workingDirectory: workingDirectory,
             environment: environment,
-            reason: reason
+            reason: reason,
+            interruptExisting: interruptExisting
         )
     }
 
@@ -117,7 +120,7 @@ enum AgentLauncher {
             sessionID: sessionID,
             environment: plan.environment,
             shellCommand: plan.shellCommand,
-            interruptExisting: plan.reason == .agentSwitch
+            interruptExisting: plan.interruptExisting
         )
     }
 

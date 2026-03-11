@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Speed up initial git agent startup
+- **Description**: Restored the intended two-stage startup path for git-backed cards so agent launch no longer blocks on worktree creation. `TerminalManager` now starts the selected agent from the board repository path immediately, then performs a single worktree-ready handoff only when the launched session still needs to move into the card worktree. `AgentLaunchPlan` now carries an explicit interrupt flag so worktree handoffs and agent switches reuse the same tmux launch path without duplicating restart logic.
+
 - **Summary**: Unify executable lookup and dev command UI
 - **Description**: Added a shared `ExecutableLocator` so tmux, npm, and Claude executable discovery all use the same candidate-path and PATH fallback behavior instead of duplicating `which` logic in multiple services. Refactored `PackageJsonParser` to model package managers explicitly and reuse a single lockfile-priority helper for both setup-command and dev-command detection. Also extracted the repeated setup/dev command entry layout in `DevServerCommandSheet` into a local reusable section without changing the existing sheet behavior.
 
