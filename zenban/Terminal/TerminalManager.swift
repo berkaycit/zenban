@@ -177,6 +177,9 @@ final class TerminalManager {
 #if DEBUG
         dlog("handoff.workspaceRecord.create \(debugWorkspaceSummary(record)) title=\(cardTitle) workdir=\(workingDirectory ?? "nil")")
 #endif
+        Task {
+            _ = await TmuxSessionManager.shared.prewarmServer()
+        }
 
         refreshAutoLaunchIfNeeded(for: record, board: board, card: card)
 
@@ -188,6 +191,7 @@ final class TerminalManager {
 
     func activateWorkspace(for cardID: UUID) {
         guard let record = records[cardID] else { return }
+        let hadNoActiveWorkspace = activeCardID == nil
 
         // Skip redundant activation to prevent first-responder churn
         // when rapid card switches cause multiple activate calls for the same card.
@@ -208,7 +212,10 @@ final class TerminalManager {
             record.tabManager.selectWorkspace(record.workspace)
         }
         AppDelegate.shared?.activateCard(cardID)
-        schedulePendingAgentLaunchIfNeeded(for: cardID)
+        let shouldLaunchImmediately =
+            hadNoActiveWorkspace &&
+            pendingAgentLaunchByCardID.count <= 1
+        schedulePendingAgentLaunchIfNeeded(for: cardID, immediate: shouldLaunchImmediately)
 #if DEBUG
         dlog("handoff.activate.end \(debugWorkspaceSummary(record))")
 #endif

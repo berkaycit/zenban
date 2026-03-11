@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Shorten agent launch hot path
+- **Description**: Reduced initial agent startup latency by removing the first explicit card-open debounce, prewarming the tmux server as soon as a workspace record exists, and dropping the bundled Claude/Codex/Gemini wrappers' synchronous socket ping before exec. `TerminalManager` still keeps the rapid-switch debounce behavior for intermediate card changes, so only the first deliberate open becomes immediate. This follows the useful parts of `agent-view`'s faster startup path without changing Zenban's existing worktree-aware launch model.
+
 - **Summary**: Speed up initial git agent startup
 - **Description**: Restored the intended two-stage startup path for git-backed cards so agent launch no longer blocks on worktree creation. `TerminalManager` now starts the selected agent from the board repository path immediately, then performs a single worktree-ready handoff only when the launched session still needs to move into the card worktree. `AgentLaunchPlan` now carries an explicit interrupt flag so worktree handoffs and agent switches reuse the same tmux launch path without duplicating restart logic.
 

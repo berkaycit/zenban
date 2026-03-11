@@ -244,13 +244,13 @@ struct TerminalManagerTests {
     }
 
     @Test
-    func selectedCardLaunchesAfterDebounce() async {
+    func firstSelectedCardLaunchesImmediately() async {
         let terminalManager = TerminalManager()
         let recorder = LaunchRecorder()
         let cardID = UUID()
         let boardID = UUID()
 
-        terminalManager.autoLaunchDebounce = .milliseconds(20)
+        terminalManager.autoLaunchDebounce = .seconds(1)
         terminalManager.launchExecutor = { plan, sessionID in
             await recorder.record(plan: plan, sessionID: sessionID)
             return true

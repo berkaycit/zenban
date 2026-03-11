@@ -44,6 +44,21 @@ actor TmuxSessionManager {
         sourceConfigIfPossible()
     }
 
+    func prewarmServer() async -> Bool {
+        guard tmuxPath() != nil else { return false }
+        if !FileManager.default.fileExists(atPath: Self.configPath) {
+            await updateConfig()
+        }
+
+        guard let result = runSync(
+            arguments: tmuxArguments("start-server"),
+            failureMessage: "Failed to prewarm tmux server"
+        ) else {
+            return false
+        }
+        return result.terminationStatus == 0
+    }
+
     nonisolated func sessionName(for sessionID: String) -> String {
         Self.sessionPrefix + sessionID
     }
