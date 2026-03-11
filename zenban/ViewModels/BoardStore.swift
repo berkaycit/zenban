@@ -46,6 +46,14 @@ enum OverlayState: Equatable {
     }
 }
 
+struct DeleteConfirmationRequest: Identifiable, Equatable {
+    let boardID: UUID
+    let cardID: UUID
+    let cardTitle: String
+
+    var id: UUID { cardID }
+}
+
 @MainActor
 @Observable
 final class BoardStore {
@@ -56,7 +64,7 @@ final class BoardStore {
     var selectedCardID: UUID?
     var draggedCardID: UUID?
     var focusRegion: FocusRegion = .sidebar
-    var showDeleteConfirmation = false
+    var deleteConfirmationRequest: DeleteConfirmationRequest?
     var showKeyboardShortcuts = false
     var showDependencySetup = false
 
@@ -334,6 +342,9 @@ final class BoardStore {
 
         // Stop overlay if showing for any card in this board
         if let id = overlayState.cardID, cardIDs.contains(id) { overlayState = .none }
+        if let request = deleteConfirmationRequest, cardIDs.contains(request.cardID) {
+            deleteConfirmationRequest = nil
+        }
 
         for card in board.cards {
             onCardDeleted?(card.id)
@@ -438,18 +449,22 @@ final class BoardStore {
     }
 
     func requestDeleteSelectedCard() {
-        guard selectedBoardID != nil, selectedCardID != nil else { return }
-        showDeleteConfirmation = true
+        guard let board = selectedBoard, let card = selectedCard else { return }
+        deleteConfirmationRequest = DeleteConfirmationRequest(
+            boardID: board.id,
+            cardID: card.id,
+            cardTitle: card.title
+        )
     }
 
     func confirmDeleteSelectedCard() {
-        guard let boardID = selectedBoardID, let cardID = selectedCardID else { return }
-        showDeleteConfirmation = false
-        deleteCard(cardID, from: boardID)
+        guard let request = deleteConfirmationRequest else { return }
+        deleteConfirmationRequest = nil
+        deleteCard(request.cardID, from: request.boardID)
     }
 
     func cancelDeleteSelectedCard() {
-        showDeleteConfirmation = false
+        deleteConfirmationRequest = nil
     }
 
     func deleteCard(_ cardID: UUID, from boardID: UUID) {
@@ -466,6 +481,7 @@ final class BoardStore {
         }
 
         if overlayState.cardID == cardID { overlayState = .none }
+        if deleteConfirmationRequest?.cardID == cardID { deleteConfirmationRequest = nil }
 
         boards[i].cards.removeAll { $0.id == cardID }
         if draggedCardID == cardID { draggedCardID = nil }

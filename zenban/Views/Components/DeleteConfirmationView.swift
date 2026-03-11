@@ -1,16 +1,10 @@
+import AppKit
 import SwiftUI
 
 struct DeleteConfirmationView: View {
     let cardTitle: String
     let onDelete: () -> Void
     let onCancel: () -> Void
-
-    @State private var selectedOption: Option = .delete
-    @FocusState private var isFocused: Bool
-
-    private enum Option {
-        case delete, cancel
-    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -31,50 +25,20 @@ struct DeleteConfirmationView: View {
             .multilineTextAlignment(.center)
 
             HStack(spacing: 12) {
-                Button(action: onDelete) {
-                    Text("Delete")
-                        .frame(width: 80)
-                }
-                .buttonStyle(ConfirmationButtonStyle(
-                    isSelected: selectedOption == .delete,
-                    isDestructive: true
-                ))
-                .accessibilityLabel("Delete card")
+                Spacer()
 
-                Button(action: onCancel) {
-                    Text("Cancel")
-                        .frame(width: 80)
-                }
-                .buttonStyle(ConfirmationButtonStyle(
-                    isSelected: selectedOption == .cancel,
-                    isDestructive: false
-                ))
-                .accessibilityLabel("Cancel deletion")
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Cancel deletion")
+
+                Button("Delete", role: .destructive, action: onDelete)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityLabel("Delete card")
             }
         }
         .padding(24)
-        .frame(width: 320)
-        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .shadow(radius: 20)
-        .focusable()
-        .focused($isFocused)
-        .onAppear { isFocused = true }
-        .onKeyPress(.leftArrow) {
-            selectedOption = .delete
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            selectedOption = .cancel
-            return .handled
-        }
-        .onKeyPress(.return) {
-            selectedOption == .delete ? onDelete() : onCancel()
-            return .handled
-        }
-        .onKeyPress(.escape) {
-            onCancel()
-            return .handled
-        }
+        .frame(width: 360)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 

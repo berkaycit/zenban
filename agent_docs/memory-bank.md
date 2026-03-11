@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Move delete confirmation above portal-hosted terminals
+- **Description**: Replaced the card delete popup's SwiftUI overlay presentation with an item-driven sheet so the confirmation always renders above Ghostty's AppKit portal layer. `BoardStore` now stores the delete request context (board, card, title) at open time, which keeps confirmation bound to the originally requested card even if selection changes before the user confirms.
+
 - **Summary**: Shorten agent launch hot path
 - **Description**: Reduced initial agent startup latency by removing the first explicit card-open debounce, prewarming the tmux server as soon as a workspace record exists, and dropping the bundled Claude/Codex/Gemini wrappers' synchronous socket ping before exec. `TerminalManager` still keeps the rapid-switch debounce behavior for intermediate card changes, so only the first deliberate open becomes immediate. This follows the useful parts of `agent-view`'s faster startup path without changing Zenban's existing worktree-aware launch model.
 

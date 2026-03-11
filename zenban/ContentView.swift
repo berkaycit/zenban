@@ -99,20 +99,12 @@ struct ContentView: View {
         .sheet(isPresented: $store.showKeyboardShortcuts) {
             KeyboardShortcutsView()
         }
-        .overlay {
-            if store.showDeleteConfirmation, let card = store.selectedCard {
-                ZStack {
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                        .onTapGesture { store.cancelDeleteSelectedCard() }
-
-                    DeleteConfirmationView(
-                        cardTitle: card.title,
-                        onDelete: store.confirmDeleteSelectedCard,
-                        onCancel: store.cancelDeleteSelectedCard
-                    )
-                }
-            }
+        .sheet(item: $store.deleteConfirmationRequest) { request in
+            DeleteConfirmationView(
+                cardTitle: request.cardTitle,
+                onDelete: store.confirmDeleteSelectedCard,
+                onCancel: store.cancelDeleteSelectedCard
+            )
         }
         .overlay {
             if store.showDependencySetup {
