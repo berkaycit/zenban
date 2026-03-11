@@ -27,6 +27,27 @@ final class TerminalManager {
         var workingDirectory: String?
     }
 
+    struct PendingAgentLaunchSnapshot: Equatable {
+        let cardID: UUID
+        let panelID: UUID
+        let agent: Agent
+        let workingDirectory: String?
+        let reason: AgentLaunchReason
+        let hasScheduledTask: Bool
+    }
+
+    private struct PendingAgentLaunch {
+        let cardID: UUID
+        var panelID: UUID
+        var agent: Agent
+        var workingDirectory: String?
+        var reason: AgentLaunchReason
+        var scheduledTask: Task<Void, Never>?
+        var scheduleGeneration: UInt64 = 0
+    }
+
+    typealias AgentLaunchExecutor = @Sendable (AgentLaunchPlan, String) async -> Bool
+
     enum TerminalManagerError: Error {
         case workspaceUnavailable
     }
@@ -34,6 +55,7 @@ final class TerminalManager {
     private var records: [UUID: WorkspaceRecord] = [:]
     private var agentLaunchedForCard: Set<UUID> = []
     private var agentSessionRecordByCardID: [UUID: AgentSessionRecord] = [:]
+    private var pendingAgentLaunchByCardID: [UUID: PendingAgentLaunch] = [:]
     private var pendingWorktreeReady: [UUID: (worktreePath: String, agent: Agent)] = [:]
     private var pendingCardUnfocusTarget: (cardID: UUID, panelID: UUID)?
     private var activeCardID: UUID?
@@ -44,6 +66,10 @@ final class TerminalManager {
 
     weak var boardStore: BoardStore?
     weak var agentSessionMonitor: AgentSessionMonitor?
+    var autoLaunchDebounce: Duration = .milliseconds(150)
+    var launchExecutor: AgentLaunchExecutor = { plan, sessionID in
+        await AgentLauncher.launch(plan, sessionID: sessionID)
+    }
 
 #if DEBUG
     private func debugWorkspaceSummary(_ record: WorkspaceRecord) -> String {
@@ -80,20 +106,37 @@ final class TerminalManager {
         records[cardID]
     }
 
+    func pendingAgentLaunchSnapshot(for cardID: UUID) -> PendingAgentLaunchSnapshot? {
+        guard let pending = pendingAgentLaunchByCardID[cardID] else { return nil }
+        return PendingAgentLaunchSnapshot(
+            cardID: pending.cardID,
+            panelID: pending.panelID,
+            agent: pending.agent,
+            workingDirectory: pending.workingDirectory,
+            reason: pending.reason,
+            hasScheduledTask: pending.scheduledTask != nil
+        )
+    }
+
+    func hasLaunchedAgent(for cardID: UUID) -> Bool {
+        agentLaunchedForCard.contains(cardID)
+    }
+
     func workspaceRecord(for cardID: UUID, boardID: UUID, cardTitle: String) -> WorkspaceRecord {
         if var record = records[cardID] {
+            let board = boardStore?.board(for: boardID)
+            let card = board?.cards.first { $0.id == cardID }
             if record.cardTitle != cardTitle {
                 record.cardTitle = cardTitle
                 record.workspace.setCustomTitle(cardTitle)
                 AppDelegate.shared?.updateWorkspaceTitle(for: cardID, title: cardTitle)
             }
-            let board = boardStore?.board(for: boardID)
-            let card = board?.cards.first { $0.id == cardID }
             let updatedWorkingDirectory = card?.worktreePath ?? board?.repositoryPath
             if record.workingDirectory != updatedWorkingDirectory {
                 record.workingDirectory = updatedWorkingDirectory
             }
             records[cardID] = record
+            refreshAutoLaunchIfNeeded(for: record, board: board, card: card)
 #if DEBUG
             dlog("handoff.workspaceRecord.reuse \(debugWorkspaceSummary(record)) title=\(cardTitle)")
 #endif
@@ -102,7 +145,6 @@ final class TerminalManager {
 
         let board = boardStore?.board(for: boardID)
         let card = board?.cards.first { $0.id == cardID }
-        let agent = card?.agent ?? board?.agent
         let workingDirectory = card?.worktreePath ?? board?.repositoryPath
         AppDelegate.shared?.registerMainBoardTabManager(mainBoardTabManager)
         let workspace = mainBoardTabManager.addWorkspace(
@@ -136,16 +178,7 @@ final class TerminalManager {
         dlog("handoff.workspaceRecord.create \(debugWorkspaceSummary(record)) title=\(cardTitle) workdir=\(workingDirectory ?? "nil")")
 #endif
 
-        let isGitRepo = board?.repositoryPath.map { GitService.isGitRepository(path: $0) } ?? false
-        if let agent, !isGitRepo {
-            launchAgentIfNeeded(agent, in: record)
-        } else if let pending = pendingWorktreeReady[cardID] {
-            worktreeReady(cardID: cardID, worktreePath: pending.worktreePath, agent: pending.agent)
-        } else if isGitRepo,
-                  let worktreePath = card?.worktreePath,
-                  let agent {
-            worktreeReady(cardID: cardID, worktreePath: worktreePath, agent: agent)
-        }
+        refreshAutoLaunchIfNeeded(for: record, board: board, card: card)
 
         if let updated = records[cardID] {
             record = updated
@@ -159,6 +192,7 @@ final class TerminalManager {
         // Skip redundant activation to prevent first-responder churn
         // when rapid card switches cause multiple activate calls for the same card.
         guard activeCardID != cardID else {
+            schedulePendingAgentLaunchIfNeeded(for: cardID)
 #if DEBUG
             dlog("handoff.activate.skip \(debugWorkspaceSummary(record)) reason=alreadyActive")
 #endif
@@ -174,6 +208,7 @@ final class TerminalManager {
             record.tabManager.selectWorkspace(record.workspace)
         }
         AppDelegate.shared?.activateCard(cardID)
+        schedulePendingAgentLaunchIfNeeded(for: cardID)
 #if DEBUG
         dlog("handoff.activate.end \(debugWorkspaceSummary(record))")
 #endif
@@ -183,6 +218,7 @@ final class TerminalManager {
         if activeCardID == cardID {
             activeCardID = nil
         }
+        cancelPendingAgentLaunch(for: cardID, reason: "deactivate")
 #if DEBUG
         if let record = records[cardID] {
             dlog("handoff.deactivate \(debugWorkspaceSummary(record))")
@@ -194,6 +230,9 @@ final class TerminalManager {
     }
 
     func clearActiveWorkspace() {
+        if let activeCardID {
+            cancelPendingAgentLaunch(for: activeCardID, reason: "clearActive")
+        }
         activeCardID = nil
         AppDelegate.shared?.clearActiveCard()
     }
@@ -212,6 +251,7 @@ final class TerminalManager {
         // new card's portal binding is still pending (async). The portal layer
         // sits above SwiftUI, so SwiftUI z-ordering alone cannot prevent the flash.
         hidePortalViews(for: oldCardID)
+        cancelPendingAgentLaunch(for: oldCardID, reason: "handoff")
 
         activateWorkspace(for: newCardID)
 
@@ -292,11 +332,13 @@ final class TerminalManager {
         resetWorkspace(for: cardID)
         agentLaunchedForCard.remove(cardID)
         agentSessionRecordByCardID.removeValue(forKey: cardID)
+        pendingAgentLaunchByCardID.removeValue(forKey: cardID)
         pendingWorktreeReady.removeValue(forKey: cardID)
     }
 
     func resetWorkspace(for cardID: UUID) {
         hidePortalViews(for: cardID)
+        cancelPendingAgentLaunch(for: cardID, reason: "reset", clearRequest: true)
         if pendingCardUnfocusTarget?.cardID == cardID {
             pendingCardUnfocusTarget = nil
         }
@@ -332,6 +374,7 @@ final class TerminalManager {
             AppDelegate.shared?.register(tabManager: destinationManager, for: cardID, boardID: record.boardID)
             if detachedWindowID != nil {
                 record.workspace.resumeAllTerminalSurfaces()
+                schedulePendingAgentLaunchIfNeeded(for: cardID, immediate: true)
             }
 #if DEBUG
             dlog("handoff.moveWorkspace.reuse \(debugWorkspaceSummary(record)) destDetached=\(detachedWindowID?.uuidString.prefix(5) ?? "nil")")
@@ -350,6 +393,7 @@ final class TerminalManager {
         AppDelegate.shared?.register(tabManager: destinationManager, for: cardID, boardID: record.boardID)
         if detachedWindowID != nil {
             workspace.resumeAllTerminalSurfaces()
+            schedulePendingAgentLaunchIfNeeded(for: cardID, immediate: true)
         }
 #if DEBUG
         dlog("handoff.moveWorkspace.move \(debugWorkspaceSummary(record)) destDetached=\(detachedWindowID?.uuidString.prefix(5) ?? "nil")")
@@ -375,6 +419,7 @@ final class TerminalManager {
 
     func switchAgent(for cardID: UUID, to agent: Agent) {
         guard let panel = targetTerminalPanel(for: cardID) else { return }
+        cancelPendingAgentLaunch(for: cardID, reason: "switchAgent", clearRequest: true)
         launchAgent(
             agent: agent,
             for: cardID,
@@ -400,8 +445,7 @@ final class TerminalManager {
         }
 
         pendingWorktreeReady.removeValue(forKey: cardID)
-        agentLaunchedForCard.insert(cardID)
-        launchAgent(
+        queuePendingAgentLaunch(
             agent: agent,
             for: cardID,
             on: panel,
@@ -417,6 +461,7 @@ final class TerminalManager {
         }
         agentLaunchedForCard.removeAll()
         agentSessionRecordByCardID.removeAll()
+        pendingAgentLaunchByCardID.removeAll()
         pendingWorktreeReady.removeAll()
     }
 
@@ -600,13 +645,162 @@ final class TerminalManager {
     private func launchAgentIfNeeded(_ agent: Agent, in record: WorkspaceRecord) {
         guard !agentLaunchedForCard.contains(record.cardID) else { return }
         guard let panel = targetTerminalPanel(for: record.cardID) else { return }
-        agentLaunchedForCard.insert(record.cardID)
-        launchAgent(
+        queuePendingAgentLaunch(
             agent: agent,
             for: record.cardID,
             on: panel,
             workingDirectory: record.workingDirectory,
             reason: .initialLaunch
+        )
+    }
+
+    private func refreshAutoLaunchIfNeeded(for record: WorkspaceRecord, board: Board?, card: Card?) {
+        let agent = card?.agent ?? board?.agent
+        let isGitRepo = board?.repositoryPath.map { GitService.isGitRepository(path: $0) } ?? false
+        if let agent, !isGitRepo {
+            launchAgentIfNeeded(agent, in: record)
+            return
+        }
+        if let pending = pendingWorktreeReady[record.cardID] {
+            worktreeReady(cardID: record.cardID, worktreePath: pending.worktreePath, agent: pending.agent)
+            return
+        }
+        if isGitRepo,
+           let worktreePath = card?.worktreePath,
+           let agent {
+            worktreeReady(cardID: record.cardID, worktreePath: worktreePath, agent: agent)
+        }
+    }
+
+    private func queuePendingAgentLaunch(
+        agent: Agent,
+        for cardID: UUID,
+        on panel: TerminalPanel,
+        workingDirectory: String?,
+        reason: AgentLaunchReason
+    ) {
+        guard !agentLaunchedForCard.contains(cardID) else { return }
+
+        if let existing = pendingAgentLaunchByCardID[cardID],
+           existing.agent != agent || existing.panelID != panel.id || existing.workingDirectory != workingDirectory || existing.reason != reason {
+                cancelPendingAgentLaunch(for: cardID, reason: "replaced")
+        }
+
+        if var pending = pendingAgentLaunchByCardID[cardID] {
+            pending.panelID = panel.id
+            pending.agent = agent
+            pending.workingDirectory = workingDirectory
+            pending.reason = reason
+            pendingAgentLaunchByCardID[cardID] = pending
+        } else {
+            pendingAgentLaunchByCardID[cardID] = PendingAgentLaunch(
+                cardID: cardID,
+                panelID: panel.id,
+                agent: agent,
+                workingDirectory: workingDirectory,
+                reason: reason
+            )
+        }
+
+        schedulePendingAgentLaunchIfNeeded(for: cardID)
+    }
+
+    private func schedulePendingAgentLaunchIfNeeded(for cardID: UUID, immediate: Bool = false) {
+        guard var pending = pendingAgentLaunchByCardID[cardID] else { return }
+        guard pending.scheduledTask == nil else { return }
+        guard let record = records[cardID] else { return }
+
+        let isDetached = record.detachedWindowID != nil
+        guard isDetached || activeCardID == cardID else {
+            agentLifecycleDebugLog(
+                "terminal.launch.skip reason=inactive card=\(cardID.uuidString) " +
+                "agent=\(pending.agent.runtimeID) pendingReason=\(pending.reason.rawValue)"
+            )
+            return
+        }
+
+        let shouldLaunchImmediately = immediate || isDetached
+        let launchDelay = autoLaunchDebounce
+        let launchDelayMs =
+            shouldLaunchImmediately
+            ? 0
+            : Int((Double(launchDelay.components.seconds) * 1_000) +
+                (Double(launchDelay.components.attoseconds) / 1_000_000_000_000_000))
+        pending.scheduleGeneration &+= 1
+        let generation = pending.scheduleGeneration
+        agentLifecycleDebugLog(
+            "terminal.launch.schedule card=\(cardID.uuidString) panel=\(pending.panelID.uuidString) " +
+            "agent=\(pending.agent.runtimeID) reason=\(pending.reason.rawValue) " +
+            "delayMs=\(launchDelayMs)"
+        )
+        pending.scheduledTask = Task { [weak self] in
+            if !shouldLaunchImmediately {
+                try? await Task.sleep(for: launchDelay)
+            }
+            guard !Task.isCancelled else { return }
+            await self?.performPendingAgentLaunch(for: cardID, generation: generation)
+        }
+        pendingAgentLaunchByCardID[cardID] = pending
+    }
+
+    private func cancelPendingAgentLaunch(for cardID: UUID, reason: String, clearRequest: Bool = false) {
+        guard var pending = pendingAgentLaunchByCardID[cardID] else { return }
+        pending.scheduledTask?.cancel()
+        pending.scheduledTask = nil
+        pending.scheduleGeneration &+= 1
+        agentLifecycleDebugLog(
+            "terminal.launch.cancel card=\(cardID.uuidString) panel=\(pending.panelID.uuidString) " +
+            "agent=\(pending.agent.runtimeID) reason=\(reason)"
+        )
+        if clearRequest {
+            pendingAgentLaunchByCardID.removeValue(forKey: cardID)
+        } else {
+            pendingAgentLaunchByCardID[cardID] = pending
+        }
+    }
+
+    private func performPendingAgentLaunch(for cardID: UUID, generation: UInt64) async {
+        guard let pending = pendingAgentLaunchByCardID[cardID],
+              pending.scheduleGeneration == generation,
+              let record = records[cardID] else {
+            return
+        }
+
+        let isDetached = record.detachedWindowID != nil
+        guard isDetached || activeCardID == cardID else {
+            if var stalePending = pendingAgentLaunchByCardID[cardID],
+               stalePending.scheduleGeneration == generation {
+                stalePending.scheduledTask = nil
+                pendingAgentLaunchByCardID[cardID] = stalePending
+            }
+            agentLifecycleDebugLog(
+                "terminal.launch.skip reason=inactive card=\(cardID.uuidString) " +
+                "agent=\(pending.agent.runtimeID) pendingReason=\(pending.reason.rawValue)"
+            )
+            return
+        }
+        guard !agentLaunchedForCard.contains(cardID) else {
+            pendingAgentLaunchByCardID.removeValue(forKey: cardID)
+            return
+        }
+
+        let panel = record.workspace.terminalPanel(for: pending.panelID) ?? targetTerminalPanel(for: cardID)
+        guard let panel else {
+            if var stalePending = pendingAgentLaunchByCardID[cardID],
+               stalePending.scheduleGeneration == generation {
+                stalePending.scheduledTask = nil
+                pendingAgentLaunchByCardID[cardID] = stalePending
+            }
+            return
+        }
+
+        pendingAgentLaunchByCardID.removeValue(forKey: cardID)
+        launchAgent(
+            agent: pending.agent,
+            for: cardID,
+            on: panel,
+            workingDirectory: pending.workingDirectory,
+            reason: pending.reason
         )
     }
 
@@ -649,18 +843,26 @@ final class TerminalManager {
             "surfaceEnv=\(plan.environment["CMUX_SURFACE_ID"] ?? "nil")"
         )
 
-        Task { @MainActor in
-            let didLaunch = await AgentLauncher.launch(plan, on: panel)
+        let launchExecutor = self.launchExecutor
+        let tmuxSessionID = panel.tmuxSessionID
+        agentLifecycleDebugLog(
+            "terminal.launch.begin card=\(cardID.uuidString) panel=\(panel.id.uuidString) agent=\(agent.runtimeID) " +
+            "reason=\(reason.rawValue)"
+        )
+
+        Task {
+            let start = ContinuousClock.now
+            let didLaunch = await launchExecutor(plan, tmuxSessionID)
+            let latency = start.duration(to: ContinuousClock.now)
+            let latencyMs = Int((Double(latency.components.seconds) * 1_000) + (Double(latency.components.attoseconds) / 1_000_000_000_000_000))
             agentLifecycleDebugLog(
-                "terminal.launch result=\(didLaunch ? "success" : "failure") card=\(cardID.uuidString) " +
-                "panel=\(panel.id.uuidString) agent=\(agent.runtimeID) reason=\(reason.rawValue)"
+                "terminal.launch.end result=\(didLaunch ? "success" : "failure") card=\(cardID.uuidString) " +
+                "panel=\(panel.id.uuidString) agent=\(agent.runtimeID) reason=\(reason.rawValue) latencyMs=\(latencyMs)"
             )
             guard didLaunch else {
-                if reason != .agentSwitch {
-                    self.agentLaunchedForCard.remove(cardID)
-                }
                 return
             }
+            self.agentLaunchedForCard.insert(cardID)
             self.agentSessionMonitor?.registerLaunch(for: cardID)
         }
     }

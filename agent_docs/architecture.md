@@ -40,7 +40,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 | `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. O(1) board index lookup via lazy cache. |
 | `BoardStorage` | JSON persistence to Application Support |
 | `Board/Card/Column` | Data models. Board has repositoryPath/agent/agentCounters. Card can override agent. Column has display name/color. Agent has autoNamePrefix for card naming. |
-| `TerminalManager` | Terminal adapter between Zenban cards and the cmux host stack. The board owns one cmux-style `TabManager`, lazily creates one `Workspace` per card using the card UUID, and keeps workspaces alive until card teardown. Agent launch goes through `AgentLauncher`, `onUserSubmit` marks task start for all agents, and the local socket controller now forwards matching Claude/Codex/Gemini completion hooks only for the owning panel. Launch env also carries a per-session socket auth token so wrapper callbacks can still authenticate when cmux-style ancestry checks fail inside tmux/agent subprocess trees. |
+| `TerminalManager` | Terminal adapter between Zenban cards and the cmux host stack. The board owns one cmux-style `TabManager`, lazily creates one `Workspace` per card using the card UUID, and keeps workspaces alive until card teardown. Agent launch now uses a pending-launch scheduler: board-detail auto-launch waits until the card stays selected for 150ms, intermediate launches are cancelled during rapid handoff, detached windows and explicit agent switches still launch immediately, and the actual tmux launch path runs off the main actor through `AgentLauncher` + `TmuxSessionManager`. `onUserSubmit` marks task start for all agents, and the local socket controller forwards matching Claude/Codex/Gemini completion hooks only for the owning panel. Launch env also carries a per-session socket auth token so wrapper callbacks can still authenticate when cmux-style ancestry checks fail inside tmux/agent subprocess trees. |
 | `AgentSessionMonitor` | Explicit lifecycle reducer for card tasks. It no longer polls tmux or parses pane output; instead it tracks one `active task` bit per card, starts that task on terminal submit, moves `In Review` cards back to `To Do` on accepted submit, completes only on explicit wrapper callbacks, and only notifies when completion actually moves the card into `In Review`. |
 | `AppDelegate` | Window-level terminal host contract for Zenban's reduced cmux shell. Tracks the main board window plus single-card detached terminal windows, routes active `TabManager`/window focus into `TerminalController`, starts the local cmux-compatible socket controller, and preserves card identity while workspaces move between the board and detached windows. The socket still defaults to `cmuxOnly`, but trusted agent callbacks can fall back to same-user + per-session token auth when process ancestry cannot be proven. |
 | `NotificationService` | Zenban's only remaining notification path. Tracks authorization state, defers the first automatic prompt until the app is active, coalesces one completion notification per card, clears stale delivered/pending entries when the user focuses that card again, only posts on real transitions into `In Review`, and replaces the removed cmux-derived unread/notification store. |
@@ -55,7 +55,7 @@ ContentView uses NavigationSplitView with three columns: sidebar (board list), c
 
 ## Board Creation
 
-Three options: existing directory, create new repo (git init), or empty. Agent (Claude/Codex/Gemini) auto-runs in the embedded Ghostty terminal on first open.
+Three options: existing directory, create new repo (git init), or empty. Agent (Claude/Codex/Gemini) auto-runs in the embedded Ghostty terminal on first stable open; board-detail auto-launch is intentionally delayed by a short 150ms settle window so rapid card navigation does not start intermediate shells.
 
 ## Card Creation
 
@@ -63,7 +63,7 @@ Cards auto-named by agent prefix (cc-1, codex-1, gemini-1). Per-board counters p
 
 ## Card Worktrees
 
-For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Workspace startup uses the repo path until the worktree is ready, then `TerminalManager` relaunches the selected agent through the shared `AgentLauncher` path with the worktree directory and refreshed tmux session env. Cleanup prunes stale entries with best-effort branch deletion.
+For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Workspace startup uses the repo path until the worktree is ready, then `TerminalManager` queues a worktree-backed launch for the selected card through the shared `AgentLauncher` path with refreshed tmux session env. If the user is only skimming across cards, those queued launches are cancelled before they start; detached workspaces still launch immediately. Cleanup prunes stale entries with best-effort branch deletion.
 
 ## Detached Terminal Windows
 

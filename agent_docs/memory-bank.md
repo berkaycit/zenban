@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Debounce auto-launch during rapid card switching
+- **Description**: Borrowed the useful part of `agent-view`'s selection-driven scheduling without bringing back its polling model. `TerminalManager` now queues pending agent launches per card, waits 150ms before auto-launching a board-detail card, cancels intermediate launches during rapid navigation, and still launches immediately for detached windows or explicit agent switches. The actual tmux command path moved behind an async `TmuxSessionManager` launch API so card switching no longer blocks the main actor on `send-keys` and environment refresh work. Synced the architecture and feature docs to describe the settled auto-launch behavior.
+
 - **Summary**: Fix explicit agent completion delivery under `cmuxOnly` socket mode
 - **Description**: Completion hooks were firing from the Claude/Codex/Gemini wrappers but the local socket rejected them because tmux/agent subprocess ancestry did not always satisfy the inherited `cmuxOnly` check. The socket path now accepts same-user wrapper callbacks when they first authenticate with a per-session token injected into the agent launch environment, and the bundled `cmux` helper now treats socket `ERROR` responses as failures instead of logging false success.
 

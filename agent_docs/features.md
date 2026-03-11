@@ -20,11 +20,12 @@
 - Embedded terminal now uses cmux's Ghostty host stack, including `Workspace`, `TabManager`, Bonsplit splits, browser panels, and find/search state inside the card detail area
 - The board owns one shared cmux `TabManager`; each card is treated as a cmux workspace with card IDs exported as `CMUX_WORKSPACE_ID`/`CMUX_TAB_ID`, and terminal panels export `CMUX_SURFACE_ID`
 - Every terminal split now runs inside its own tmux session; hidden cards tear down Ghostty surfaces to save memory, then reattach to the same tmux-backed shell when the card becomes visible again
-- Agent startup is centralized: Claude launches with `--dangerously-skip-permissions`, Codex and Gemini with `--yolo`, and tmux session env is refreshed on first launch, worktree handoff, and agent switch
+- Agent startup is centralized: Claude launches with `--dangerously-skip-permissions`, Codex and Gemini with `--yolo`, tmux session env is refreshed on first launch, worktree handoff, and agent switch, and the actual tmux launch work now runs off the main actor
+- Board-detail auto-launch is now `settled`: Zenban waits 150ms before launching a newly selected card, cancels intermediate launches during rapid card switching, and keeps detached windows plus explicit `switchAgent` launches immediate
 - Claude, Codex, and Gemini now all use the same explicit lifecycle contract: Zenban treats terminal submit as `started`, bundled wrappers emit explicit `completed` callbacks over the local cmux-compatible socket, and tmux pane polling/raw status heuristics are no longer used for task movement
 - Wrapper callbacks authenticate over the local socket with a per-session token when `cmuxOnly` ancestry checks fail inside tmux/agent subprocess trees, so completion still works without opening the socket to unrelated local processes
 - The workspace UI no longer offers manual browser creation; browser panels are now surfaced only by Dev Server preview or internal automation/link-routing paths
-- Card switches use a selected+retiring handoff so old Ghostty/browser portals are hidden before the previous card unmounts
+- Card switches use a selected+retiring handoff so old Ghostty/browser portals are hidden before the previous card unmounts, and the borrowed `agent-view` pattern of keeping current content visible while cancelling intermediate expensive work now applies to agent startup too
 - Workspaces can move into detached terminal-only windows and back without changing card identity or worktree routing; detached windows currently host one card workspace and detached cards show a placeholder in the detail pane that focuses the external window
 - Runtime/resources are copied from `clone/cmux` with a build phase that recreates cmux's `ghostty`, `terminfo`, `shell-integration`, and `bin` bundle layout
 - Ghostty reads the user's standard config files and receives the same app/surface color-scheme updates cmux uses, so theme resolution now matches cmux behavior

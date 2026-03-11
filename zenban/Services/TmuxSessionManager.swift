@@ -169,6 +169,29 @@ actor TmuxSessionManager {
         }
     }
 
+    func launchAgentCommand(
+        sessionID: String,
+        environment: [String: String],
+        shellCommand: String,
+        interruptExisting: Bool
+    ) async -> Bool {
+        unsetEnvironment(sessionID: sessionID, names: ["CLAUDECODE"])
+        setEnvironment(sessionID: sessionID, variables: environment)
+
+        if interruptExisting {
+            guard sendText(sessionID: sessionID, text: "\u{03}") else {
+                return false
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard sendText(sessionID: sessionID, text: "\u{03}") else {
+                return false
+            }
+            try? await Task.sleep(for: .seconds(2))
+        }
+
+        return sendText(sessionID: sessionID, text: shellCommand + "\n")
+    }
+
     func capturePane(
         sessionID: String,
         startLine: Int = -100,

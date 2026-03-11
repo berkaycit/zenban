@@ -34,13 +34,13 @@ func agentLifecycleDebugLog(_ message: @autoclosure () -> String) {
 func agentLifecycleDebugLog(_ message: @autoclosure () -> String) {}
 #endif
 
-enum AgentLaunchReason: String {
+enum AgentLaunchReason: String, Sendable {
     case initialLaunch
     case worktreeReady
     case agentSwitch
 }
 
-struct AgentLaunchPlan: Equatable {
+struct AgentLaunchPlan: Equatable, Sendable {
     let agent: Agent
     let command: String
     let workingDirectory: String?
@@ -112,31 +112,12 @@ enum AgentLauncher {
         )
     }
 
-    @MainActor
-    static func launch(_ plan: AgentLaunchPlan, on panel: TerminalPanel) async -> Bool {
-        await TmuxSessionManager.shared.unsetEnvironment(
-            sessionID: panel.tmuxSessionID,
-            names: ["CLAUDECODE"]
-        )
-        await TmuxSessionManager.shared.setEnvironment(
-            sessionID: panel.tmuxSessionID,
-            variables: plan.environment
-        )
-
-        if plan.reason == .agentSwitch {
-            guard TmuxSessionManager.shared.sendText(sessionID: panel.tmuxSessionID, text: "\u{03}") else {
-                return false
-            }
-            try? await Task.sleep(for: .milliseconds(300))
-            guard TmuxSessionManager.shared.sendText(sessionID: panel.tmuxSessionID, text: "\u{03}") else {
-                return false
-            }
-            try? await Task.sleep(for: .seconds(2))
-        }
-
-        return TmuxSessionManager.shared.sendText(
-            sessionID: panel.tmuxSessionID,
-            text: plan.shellCommand + "\n"
+    static func launch(_ plan: AgentLaunchPlan, sessionID: String) async -> Bool {
+        await TmuxSessionManager.shared.launchAgentCommand(
+            sessionID: sessionID,
+            environment: plan.environment,
+            shellCommand: plan.shellCommand,
+            interruptExisting: plan.reason == .agentSwitch
         )
     }
 
