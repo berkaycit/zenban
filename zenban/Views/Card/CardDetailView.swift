@@ -1,11 +1,12 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 struct CardDetailView: View {
     let card: Card
     let boardID: UUID
+
     @Environment(BoardStore.self) private var store
-    @Environment(TerminalManager.self) private var terminalManager
+    @Environment(CmuxHostStore.self) private var cmuxHost
     @State private var editedTitle = ""
     @State private var isEditing = false
     @FocusState private var isFocused: Bool
@@ -13,22 +14,34 @@ struct CardDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             cardInfoSection
-                .frame(maxHeight: terminalManager.isTerminalAvailable ? 160 : .infinity)
+                .frame(maxHeight: 180)
 
-            if terminalManager.isTerminalAvailable {
-                Divider()
-                terminalSection
-            }
+            Divider()
+
+            terminalSection
+                .frame(minHeight: 220)
+                .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .background(Color.cardBackground.ignoresSafeArea(.container, edges: .top))
         .onAppear {
             editedTitle = card.title
+            cmuxHost.syncSelection(card: card, boardID: boardID)
         }
         .onChange(of: card.id) {
             editedTitle = card.title
             isEditing = false
+            cmuxHost.syncSelection(card: card, boardID: boardID)
+        }
+        .onChange(of: card.worktreePath) {
+            cmuxHost.syncSelection(card: card, boardID: boardID)
+        }
+        .onChange(of: card.agent) {
+            cmuxHost.updateAgentLaunch(for: card, boardID: boardID)
+        }
+        .onChange(of: card.title) {
+            cmuxHost.updateTitle(for: card.id, title: card.title)
         }
     }
 
@@ -220,39 +233,48 @@ struct CardDetailView: View {
 
     private func switchAgent(to agent: Agent) {
         store.updateCardAgent(card.id, agent: agent, in: boardID)
-        terminalManager.switchAgent(for: card.id, to: agent)
     }
 
+    @ViewBuilder
     private var terminalSection: some View {
-        VStack(spacing: 0) {
-            if terminalManager.isDetached(cardID: card.id) {
-                detachedTerminalPlaceholder
-                    .frame(minHeight: 200)
-                    .frame(maxHeight: .infinity)
-            } else {
-                CardWorkspaceDeckView(cardID: card.id, boardID: boardID, cardTitle: card.title)
-                    .frame(minHeight: 200)
-                    .frame(maxHeight: .infinity)
-            }
+        if let workspace = cmuxHost.workspace(for: card.id) {
+            WorkspaceContentView(
+                workspace: workspace,
+                isWorkspaceVisible: true,
+                isWorkspaceInputActive: true,
+                workspacePortalPriority: 0,
+                onThemeRefreshRequest: nil
+            )
+            .environmentObject(cmuxHost.notificationStore)
+        } else {
+            workspacePlaceholder
         }
     }
 
-    private var detachedTerminalPlaceholder: some View {
+    private var workspacePlaceholder: some View {
         VStack(spacing: 12) {
-            Image(systemName: "rectangle.on.rectangle")
+            Image(systemName: "terminal")
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
-            Text("This card is open in a detached terminal window.")
+
+            Text(cmuxHost.isWaitingForWorktree(for: card, boardID: boardID) ? "Preparing workspace..." : "Preparing terminal...")
                 .font(.headline)
-            Button("Focus Detached Window") {
-                if let windowId = terminalManager.detachedWindowID(for: card.id) {
-                    _ = AppDelegate.shared?.focusMainWindow(windowId: windowId)
-                }
-            }
-            .buttonStyle(.borderedProminent)
+
+            Text(placeholderSubtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.codeBackground)
+    }
+
+    private var placeholderSubtitle: String {
+        if cmuxHost.isWaitingForWorktree(for: card, boardID: boardID) {
+            return "The card worktree is still being created. The copied cmux workspace will appear here as soon as it is ready."
+        }
+        return "The copied cmux workspace is starting up for this card."
     }
 
     private func startEditing() {

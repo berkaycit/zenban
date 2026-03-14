@@ -12,7 +12,6 @@ struct DevServerCommandSheet: View {
     @State private var setupCommand = ""
     @State private var devCommand = ""
     @State private var skipSetup = false
-    @State private var autoOpenConsole = false
     @State private var isDetecting = true
 
     var body: some View {
@@ -36,7 +35,6 @@ struct DevServerCommandSheet: View {
             setupCommand = existingConfig.setupCommand ?? ""
             devCommand = existingConfig.devCommand
             skipSetup = existingConfig.skipSetup
-            autoOpenConsole = existingConfig.autoOpenConsole
 
             // Still detect to show node_modules status
             Task {
@@ -84,8 +82,6 @@ struct DevServerCommandSheet: View {
                 setupSection
                 Divider()
                 devSection
-                Divider()
-                previewSection
             }
         }
         .padding(16)
@@ -128,21 +124,6 @@ struct DevServerCommandSheet: View {
         }
     }
 
-    private var previewSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Preview")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Toggle("Open console automatically", isOn: $autoOpenConsole)
-                .toggleStyle(.checkbox)
-
-            Text("Opens the cmux browser console after the page finishes loading.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     // MARK: - Footer
 
     private var footerSection: some View {
@@ -161,8 +142,7 @@ struct DevServerCommandSheet: View {
                 let config = DevServerConfig(
                     setupCommand: setupCommand.isEmpty ? nil : setupCommand,
                     devCommand: devCommand,
-                    skipSetup: skipSetup,
-                    autoOpenConsole: autoOpenConsole
+                    skipSetup: skipSetup
                 )
                 store.updateDevServerConfig(boardID, config: config)
 

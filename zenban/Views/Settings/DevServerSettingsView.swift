@@ -7,7 +7,6 @@ struct DevServerSettingsView: View {
     @State private var setupCommand = ""
     @State private var devCommand = ""
     @State private var skipSetup = false
-    @State private var autoOpenConsole = false
 
     private var board: Board? {
         guard let boardID else { return nil }
@@ -48,10 +47,6 @@ struct DevServerSettingsView: View {
                         TextField("Dev Command", text: $devCommand, prompt: Text("npm run dev"))
                     }
 
-                    Section("Preview") {
-                        Toggle("Open console automatically", isOn: $autoOpenConsole)
-                    }
-
                     Section {
                         HStack {
                             Spacer()
@@ -89,7 +84,6 @@ struct DevServerSettingsView: View {
         .onChange(of: setupCommand) { _, _ in saveConfigDebounced() }
         .onChange(of: devCommand) { _, _ in saveConfigDebounced() }
         .onChange(of: skipSetup) { _, _ in saveConfigDebounced() }
-        .onChange(of: autoOpenConsole) { _, _ in saveConfigDebounced() }
     }
 
     private func loadConfig() {
@@ -97,26 +91,23 @@ struct DevServerSettingsView: View {
             setupCommand = ""
             devCommand = ""
             skipSetup = false
-            autoOpenConsole = false
             return
         }
         setupCommand = config.setupCommand ?? ""
         devCommand = config.devCommand
         skipSetup = config.skipSetup
-        autoOpenConsole = config.autoOpenConsole
     }
 
     private func saveConfigDebounced() {
         guard let boardID, board?.repositoryPath != nil else { return }
 
         // Only save if we have meaningful content
-        guard !devCommand.isEmpty || !setupCommand.isEmpty || skipSetup || autoOpenConsole else { return }
+        guard !devCommand.isEmpty || !setupCommand.isEmpty || skipSetup else { return }
 
         let config = DevServerConfig(
             setupCommand: setupCommand.isEmpty ? nil : setupCommand,
             devCommand: devCommand.isEmpty ? "npm run dev" : devCommand,
-            skipSetup: skipSetup,
-            autoOpenConsole: autoOpenConsole
+            skipSetup: skipSetup
         )
         store.updateDevServerConfig(boardID, config: config)
     }

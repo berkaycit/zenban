@@ -2,81 +2,47 @@
 
 ## Directory Structure
 
-```
-zenban/
-├── Models/          # Data models (Board, Card, Column, GitModels, AIModels, DiffTypes)
-├── Storage/         # JSON persistence layer
-├── ViewModels/      # @Observable state management
-├── Views/
-│   ├── Sidebar/     # Board list navigation
-│   ├── Board/       # Kanban board layout
-│   ├── Card/        # Card display and editing
-│   ├── Git/         # Git changes view, diff display, PR creation
-│   ├── DevServer/   # Board-area dev server preview using cmux browser panels
-│   ├── Settings/    # Unified settings (General, Terminal, Dev Server)
-│   └── Components/  # Reusable UI components
-├── Terminal/        # Embedded Ghostty terminal layer
-├── Services/        # App-wide services (notifications, git, AI providers)
-├── Utilities/       # Shared helpers (ProcessExecutor, RelativeDateFormatter)
-├── Commands/        # Menu keyboard shortcuts
-└── Extensions/      # Color theme, Notification.Name extensions
-```
-
-## Layout
-
-ContentView uses NavigationSplitView with three columns: sidebar (board list), content (kanban/overlays), detail (card). Column widths enforced via navigationSplitViewColumnWidth. BoardView centers columns horizontally with top alignment.
+- `zenban/Models`: Board, card, column, git, and AI data models
+- `zenban/Storage`: JSON persistence
+- `zenban/ViewModels`: `@Observable` app state
+- `zenban/Views`: sidebar, board, card, git, dev server, settings, shared components
+- `zenban/Services`: git, AI, dev server, dependency, and process helpers
+- `zenban/Utilities`, `Commands`, `Extensions`: shared helpers and app commands
 
 ## Data Flow
 
-1. `BoardStore` (@Observable) holds all state
-2. `BoardStorage` handles JSON file I/O with debounced saves
-3. Views read from `BoardStore` via `@Environment`
-4. User actions call `BoardStore` methods which update state and trigger save
+1. `BoardStore` owns app state, selection, overlays, worktree actions, and settings flows.
+2. `BoardStorage` persists `boards.json` with debounced saves.
+3. Views read and mutate state through `@Environment(BoardStore.self)`.
+4. Services perform side effects such as git operations, process execution, and tool installation.
 
 ## Key Components
 
-| Component | Purpose |
-|-----------|---------|
-| `BoardStore` | Central state manager. OverlayState FSM unifies dev server, git changes, and file browser (mutually exclusive). Creates/deletes worktrees. O(1) board index lookup via lazy cache. |
-| `BoardStorage` | JSON persistence to Application Support |
-| `Board/Card/Column` | Data models. Board has repositoryPath/agent/agentCounters. Card can override agent. Column has display name/color. Agent has autoNamePrefix for card naming. |
-| `TerminalManager` | Terminal adapter between Zenban cards and the cmux host stack. The board owns one cmux-style `TabManager`, lazily creates one `Workspace` per card using the card UUID, and keeps workspaces alive until card teardown. Agent launch now uses a pending-launch scheduler: board-detail auto-launch waits until the card stays selected for 150ms, intermediate launches are cancelled during rapid handoff, detached windows and explicit agent switches still launch immediately, and the actual tmux launch path runs off the main actor through `AgentLauncher` + `TmuxSessionManager`. `onUserSubmit` marks task start for all agents, and the local socket controller forwards matching Claude/Codex/Gemini completion hooks only for the owning panel. Launch env also carries a per-session socket auth token so wrapper callbacks can still authenticate when cmux-style ancestry checks fail inside tmux/agent subprocess trees. |
-| `AgentSessionMonitor` | Explicit lifecycle reducer for card tasks. It no longer polls tmux or parses pane output; instead it tracks one `active task` bit per card, starts that task on terminal submit, moves `In Review` cards back to `To Do` on accepted submit, completes only on explicit wrapper callbacks, and only notifies when completion actually moves the card into `In Review`. |
-| `AppDelegate` | Window-level terminal host contract for Zenban's reduced cmux shell. Tracks the main board window plus single-card detached terminal windows, routes active `TabManager`/window focus into `TerminalController`, starts the local cmux-compatible socket controller, and preserves card identity while workspaces move between the board and detached windows. The socket still defaults to `cmuxOnly`, but trusted agent callbacks can fall back to same-user + per-session token auth when process ancestry cannot be proven. |
-| `NotificationService` | Zenban's only remaining notification path. Tracks authorization state, defers the first automatic prompt until the app is active, coalesces one completion notification per card, clears stale delivered/pending entries when the user focuses that card again, only posts on real transitions into `In Review`, and replaces the removed cmux-derived unread/notification store. |
-| `GitService` | Git via libgit2: repo init, worktree CRUD, status/diff, commit/push, merge. PR via gh CLI. AI commit messages. |
-| `ClaudeService` | Claude Code CLI integration implementing AIProvider protocol. |
-| `DevServerManager` | Dev server setup/process lifecycle, port detection, and server-output buffering. Ready-state preview is owned by `DevServerView`, not the manager. |
-| `DependencyCheckService` | Actor for checking/installing dependencies (Homebrew and tmux required; gh and Claude CLI optional). Shows `DependencySetupView` on startup when required terminal runtime deps are missing and can install tmux through Homebrew. |
-| `GitChangesView` | Board-area view (Cmd+Shift+X). Two tabs: Changes (file list + diff) and History (commit log + diff). `GitDiffViewModel` handles cancellable on-demand diff loading with caching and lightweight diff-source fallback logic. |
-| `GitHistoryView` | Commit history list with pagination. Uses GitLogService for async loading. |
-| `GitLogService` | Actor for commit history and diff retrieval via libgit2 and ProcessExecutor. |
-| `DiffView` | NSTableView diff renderer with upfront parsing. Scroll tracking, file navigation, copy support. |
+- `BoardStore`: Central state manager for boards, cards, overlays, worktrees, and dev server configuration.
+- `BoardStorage`: JSON persistence under Application Support.
+- `GitService`: libgit2-backed repository, worktree, diff, commit, push, merge, and PR helpers.
+- `DevServerManager`: Runs setup and dev commands, buffers output, detects ready URLs, and owns process lifecycle.
+- `DependencyCheckService`: Checks and installs optional developer tools.
+- `GitChangesView`: Board-area diff and history workspace for the selected card.
+- `GitLogService`: Async commit history and diff loading.
+- `DiffView`: Native diff renderer with file navigation and copy support.
 
 ## Board Creation
 
-Three options: existing directory, create new repo (git init), or empty. Agent (Claude/Codex/Gemini) auto-runs in the embedded Ghostty terminal on first stable open; board-detail auto-launch is intentionally delayed by a short 150ms settle window so rapid card navigation does not start intermediate shells.
-
-## Card Creation
-
-Cards auto-named by agent prefix (cc-1, codex-1, gemini-1). Per-board counters persist across restarts.
+Boards can point at an existing directory, create a new git repository, or stay empty. Board-level agent selection still exists as saved metadata.
 
 ## Card Worktrees
 
-For boards with git repo, each card gets worktree (branch: `card/<uuid>`, location: `../repo-worktrees/`). Workspace startup uses the repo path until the worktree is ready, then `TerminalManager` queues a worktree-backed launch for the selected card through the shared `AgentLauncher` path with refreshed tmux session env. If the user is only skimming across cards, those queued launches are cancelled before they start; detached workspaces still launch immediately. Cleanup prunes stale entries with best-effort branch deletion.
+For git-backed boards, each card gets its own worktree at `../repo-worktrees/` on branch `card/<uuid>`. Cleanup removes worktrees and prunes card branches on card or board deletion when possible.
 
-## Detached Terminal Windows
+## Card Detail
 
-Cards still equal workspaces, but a workspace can move out of the board detail pane into a dedicated terminal-only window. Detached windows currently host one card workspace at a time. The board keeps the card selected while `AppDelegate` and `TerminalManager` rebind the workspace's `TabManager`, and the card detail pane shows a focus placeholder instead of mounting a duplicate Ghostty host.
+The detail pane shows card metadata, column controls, agent selection, and worktree status. The lower terminal section is intentionally a placeholder until the replacement integration is copied in.
 
-## Dev Server Preview
+## Dev Server
 
-Board stores `DevServerConfig`, including the optional `autoOpenConsole` flag that defaults to `false`. First run prompts for commands (auto-detected from package.json). `DevServerView` keeps setup/start output visible during startup, then swaps the board-area surface to a cmux `BrowserPanelView` tied to the card ID once the server reaches `ready(url)`. The preview reuses that live browser panel for in-session reloads, only auto-opens the cmux JavaScript console when the board config requests it, and returns the board area to the error/log view on unexpected server exits. `ContentView` temporarily collapses the sidebar while the dev server overlay is active and restores the prior split visibility when the session ends. `ProcessEnvironment` sets `BROWSER=none` so the dev command never launches an external browser.
+Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup`. `DevServerView` keeps logs visible during startup and shows a placeholder with the detected URL once the server is ready. `ProcessEnvironment` still sets `BROWSER=none` so dev commands do not open an external browser automatically.
 
 ## Keyboard Shortcuts
 
-Cmd+Shift: N (new board), A (new card), D (delete card), S (dev server), R (reload dev server), X (git changes), F (file browser). Cmd+W closes file tab. Cmd+/ opens shortcuts help.
-Shift+Arrow: Up/Down navigates cards/boards, Left/Right moves columns. Enter focuses terminal.
-FocusRegion tracks keyboard focus. NSEvent monitor in zenbanApp for app-wide capture.
-
-See also: `agent_docs/notification-workflow.md` for the current explicit submit/completion notification flow.
+`Cmd+Shift+N` creates a board, `Cmd+Shift+A` creates a card, `Cmd+Shift+D` deletes the selected card, `Cmd+Shift+S` toggles the dev server, `Cmd+Shift+R` reloads it, `Cmd+Shift+X` toggles Git Changes, and `Shift+Arrow` shortcuts move selection across boards, cards, and columns.

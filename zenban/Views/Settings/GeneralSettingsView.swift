@@ -29,31 +29,31 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Text("Homebrew and tmux are required for Zenban terminals. GitHub CLI and Claude Code CLI remain optional.")
+                Text("Optional tools can still be installed here for pull request creation and AI-assisted commit messages.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                ForEach(DependencyCheckService.Dependency.allCases, id: \.self) { dep in
+                ForEach(DependencyCheckService.Dependency.allCases, id: \.self) { dependency in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Image(systemName: isInstalled(dep) ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle(isInstalled(dep) ? .green : (dep.isRequired ? .red : .orange))
+                            Image(systemName: isInstalled(dependency) ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(isInstalled(dependency) ? .green : .orange)
 
-                            Text(dep.rawValue)
+                            Text(dependency.rawValue)
                                 .fontWeight(.medium)
 
-                            Text(dep.isRequired ? "Required" : "Optional")
+                            Text("Optional")
                                 .font(.caption)
-                                .foregroundStyle(dep.isRequired ? .blue : .secondary)
+                                .foregroundStyle(.secondary)
 
                             Spacer()
 
-                            Text(isInstalled(dep) ? "Installed" : "Missing")
+                            Text(isInstalled(dependency) ? "Installed" : "Missing")
                                 .font(.caption)
-                                .foregroundStyle(isInstalled(dep) ? .green : (dep.isRequired ? .red : .orange))
+                                .foregroundStyle(isInstalled(dependency) ? .green : .orange)
                         }
 
-                        Text(dep.description)
+                        Text(dependency.description)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -65,7 +65,7 @@ struct GeneralSettingsView: View {
                     }
 
                     if hasMissingDependencies {
-                        Button(hasMissingRequiredDependencies ? "Install Missing" : "Install Optional Tools") {
+                        Button("Install Missing Tools") {
                             store.presentDependencySetup()
                         }
                     }
@@ -73,10 +73,8 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Dependencies")
             } footer: {
-                if hasMissingRequiredDependencies {
-                    Text("Zenban will keep prompting for missing required dependencies unless you explicitly skip the startup check.")
-                } else if hasMissingDependencies {
-                    Text("Optional tools can be installed later without affecting terminal behavior.")
+                if hasMissingDependencies {
+                    Text("Optional tools can be installed later without affecting the rest of the app.")
                 }
             }
         }
@@ -94,10 +92,6 @@ struct GeneralSettingsView: View {
 
     private func isInstalled(_ dependency: DependencyCheckService.Dependency) -> Bool {
         store.dependencyStatus?[dependency] ?? false
-    }
-
-    private var hasMissingRequiredDependencies: Bool {
-        !(store.dependencyStatus?.allRequired ?? false)
     }
 
     private var hasMissingDependencies: Bool {

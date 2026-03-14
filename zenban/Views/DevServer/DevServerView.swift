@@ -1,22 +1,18 @@
 import SwiftUI
-import WebKit
 
 /// Fullscreen overlay view for dev server preview.
 struct DevServerView: View {
     let card: Card
+    let boardID: UUID?
     let setupCommand: String?
     let devCommand: String
-    let autoOpenConsole: Bool
     let onDismiss: () -> Void
     var onReconfigure: (() -> Void)?
 
     @Environment(DevServerManager.self) private var devServerManager
-    @State private var browserPanel: BrowserPanel?
-    @State private var browserIsFocused = true
-    @State private var consoleOpenTask: Task<Void, Never>?
+    @Environment(CmuxHostStore.self) private var cmuxHost
     @State private var startupTask: Task<Void, Never>?
     @State private var startupRequestID: UUID?
-    @State private var autoOpenedConsolePanelID: UUID?
 
     var body: some View {
         let state = devServerManager.state(for: card.id)
@@ -32,15 +28,17 @@ struct DevServerView: View {
         .compositingGroup()
         .onAppear {
             startServer()
+            handleServerStateChange(state)
         }
         .onDisappear {
             teardownPreview()
-        }
-        .onChange(of: state) { _, newState in
-            handleStateChange(newState)
+            cmuxHost.restoreTerminalFocus(for: card.id)
         }
         .onReceive(NotificationCenter.default.publisher(for: .reloadDevServer)) { _ in
             handleReload()
+        }
+        .onChange(of: state) { _, newState in
+            handleServerStateChange(newState)
         }
     }
 
@@ -101,7 +99,7 @@ struct DevServerView: View {
             outputView(title: "Waiting for server...", showSpinner: true)
 
         case .ready(let url):
-            browserSection(url: url)
+            browserPreview(url: url)
 
         case .error(let message):
             errorView(message: message)
@@ -166,31 +164,36 @@ struct DevServerView: View {
     private func outputLineView(_ line: OutputLine) -> some View {
         Text(line.text)
             .font(.system(.caption, design: .monospaced))
-            .foregroundStyle(line.isError ? Color.red : Color.primary)
+            .foregroundStyle(line.isError ? Color.red : Color.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
     }
 
     @ViewBuilder
-    private func browserSection(url: URL) -> some View {
-        if let browserPanel {
+    private func browserPreview(url: URL) -> some View {
+        if let context = cmuxHost.browserSurface(for: card.id) {
             BrowserPanelView(
-                panel: browserPanel,
-                isFocused: browserIsFocused,
+                panel: context.panel,
+                paneId: context.paneId,
+                isFocused: true,
                 isVisibleInUI: true,
                 portalPriority: 1,
                 onRequestPanelFocus: {
-                    browserIsFocused = true
+                    cmuxHost.focusBrowserSurface(for: card.id)
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear {
-                prepareBrowserPanel(for: url)
-                scheduleConsoleOpenIfNeeded(for: browserPanel)
-            }
         } else {
-            loadingView(message: "Preparing preview...")
-                .onAppear {
-                    prepareBrowserPanel(for: url)
+            loadingView(message: "Preparing browser...")
+                .overlay(alignment: .bottom) {
+                    Text(url.absoluteString)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color.codeBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .padding(.bottom, 20)
                 }
         }
     }
@@ -247,7 +250,6 @@ struct DevServerView: View {
 
     private func startServer() {
         cancelStartupTask()
-        resetBrowserPreview()
         guard let worktreePath = card.worktreePath else { return }
 
         let requestID = devServerManager.beginRequest(for: card.id)
@@ -296,100 +298,18 @@ struct DevServerView: View {
         startupTask = task
     }
 
-    private func handleStateChange(_ state: DevServerManager.ServerState) {
-        switch state {
-        case .ready(let url):
-            prepareBrowserPanel(for: url)
-        case .idle:
-            cancelConsoleOpenTask()
-        case .runningSetup, .startingServer, .detectingPort, .error:
-            browserIsFocused = true
-            cancelConsoleOpenTask()
-        }
-    }
-
     private func handleReload() {
-        guard case .ready = devServerManager.state(for: card.id),
-              let browserPanel else { return }
-        browserIsFocused = true
-        browserPanel.reload()
+        guard case .ready = devServerManager.state(for: card.id) else { return }
+        startServer()
     }
 
-    private func prepareBrowserPanel(for url: URL) {
-        browserIsFocused = true
-
-        if let browserPanel {
-            if browserPanel.currentURL != url {
-                browserPanel.navigate(to: url)
-            }
-            scheduleConsoleOpenIfNeeded(for: browserPanel)
-            return
-        }
-
-        let panel = BrowserPanel(workspaceId: card.id, initialURL: url)
-        browserPanel = panel
-        autoOpenedConsolePanelID = nil
-    }
-
-    private func scheduleConsoleOpenIfNeeded(for panel: BrowserPanel) {
-        guard autoOpenConsole else { return }
-        guard autoOpenedConsolePanelID != panel.id else { return }
-
-        autoOpenedConsolePanelID = panel.id
-        cancelConsoleOpenTask()
-        consoleOpenTask = Task { @MainActor in
-            for _ in 0..<80 {
-                guard browserPanel?.id == panel.id else { return }
-
-                guard isPreviewReadyForConsole(panel) else {
-                    try? await Task.sleep(nanoseconds: 75_000_000)
-                    continue
-                }
-
-                panel.requestDeveloperToolsConsoleAfterAttach()
-                panel.focus()
-
-                for delay in [75_000_000 as UInt64, 200_000_000] {
-                    try? await Task.sleep(nanoseconds: delay)
-                    guard browserPanel?.id == panel.id else { return }
-                    panel.focus()
-                }
-
-                return
-            }
-
-            autoOpenedConsolePanelID = nil
-        }
-    }
-
-    private func isPreviewReadyForConsole(_ panel: BrowserPanel) -> Bool {
-        guard panel.webView.window != nil else { return false }
-        guard !panel.webView.isHiddenOrHasHiddenAncestor else { return false }
-        guard !panel.isLoading, !panel.webView.isLoading else { return false }
-
-        let loadedURL = panel.webView.url ?? panel.currentURL
-        guard let loadedURL else { return false }
-        return loadedURL.absoluteString != "about:blank"
-    }
-
-    private func cancelConsoleOpenTask() {
-        consoleOpenTask?.cancel()
-        consoleOpenTask = nil
-    }
-
-    private func resetBrowserPreview() {
-        cancelConsoleOpenTask()
-        browserPanel?.close()
-        browserPanel = nil
-        autoOpenedConsolePanelID = nil
-        browserIsFocused = true
+    private func handleServerStateChange(_ state: DevServerManager.ServerState) {
+        guard case .ready(let url) = state, let boardID else { return }
+        cmuxHost.ensureBrowserSurface(for: card, boardID: boardID, url: url)
     }
 
     private func teardownPreview() {
         cancelStartupTask()
-        cancelConsoleOpenTask()
-        browserPanel?.close()
-        browserPanel = nil
         devServerManager.stopServer(for: card.id)
     }
 

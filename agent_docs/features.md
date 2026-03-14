@@ -2,78 +2,48 @@
 
 ## Kanban Board
 
-- 3 fixed columns: To Do, In Review, Done
+- Three fixed columns: `To Do`, `In Review`, and `Done`
 - Multiple boards with sidebar navigation
 - Drag-and-drop cards between columns
-- Pin boards to top of sidebar
-- Board-level agent selection (Claude Code, Codex, Gemini)
+- Board pinning in the sidebar
+- Board-level default agent selection
 
 ## Card Management
 
-- Create cards with Cmd+Shift+A
-- Delete cards via Cmd+Shift+D (with confirmation)
-- Per-card agent override
-- Agent completion monitor uses a simple explicit lifecycle: Enter/newline submit starts the task, wrapper callbacks finish it, unfinished work stays in `To Do`, and notifications only fire when completion actually moves the card into `In Review`
+- Create cards with `Cmd+Shift+A`
+- Delete cards with `Cmd+Shift+D`
+- Override the board agent per card
+- Persist agent choice as card metadata without launching any runtime
+- Show worktree readiness in the detail pane for git-backed boards
 
-## Terminal Integration
+## Card Detail Placeholder
 
-- Embedded terminal now uses cmux's Ghostty host stack, including `Workspace`, `TabManager`, Bonsplit splits, browser panels, and find/search state inside the card detail area
-- The board owns one shared cmux `TabManager`; each card is treated as a cmux workspace with card IDs exported as `CMUX_WORKSPACE_ID`/`CMUX_TAB_ID`, and terminal panels export `CMUX_SURFACE_ID`
-- Every terminal split now runs inside its own tmux session; hidden cards tear down Ghostty surfaces to save memory, then reattach to the same tmux-backed shell when the card becomes visible again
-- Agent startup is centralized: Claude launches with `--dangerously-skip-permissions`, Codex and Gemini with `--yolo`, tmux session env is refreshed on first launch, worktree handoff, and agent switch, and the actual tmux launch work now runs off the main actor
-- Board-detail auto-launch is now `settled`: Zenban waits 150ms before launching a newly selected card, cancels intermediate launches during rapid card switching, and keeps detached windows plus explicit `switchAgent` launches immediate
-- Claude, Codex, and Gemini now all use the same explicit lifecycle contract: Zenban treats terminal submit as `started`, bundled wrappers emit explicit `completed` callbacks over the local cmux-compatible socket, and tmux pane polling/raw status heuristics are no longer used for task movement
-- Wrapper callbacks authenticate over the local socket with a per-session token when `cmuxOnly` ancestry checks fail inside tmux/agent subprocess trees, so completion still works without opening the socket to unrelated local processes
-- The workspace UI no longer offers manual browser creation; browser panels are now surfaced only by Dev Server preview or internal automation/link-routing paths
-- Card switches use a selected+retiring handoff so old Ghostty/browser portals are hidden before the previous card unmounts, and the borrowed `agent-view` pattern of keeping current content visible while cancelling intermediate expensive work now applies to agent startup too
-- Workspaces can move into detached terminal-only windows and back without changing card identity or worktree routing; detached windows currently host one card workspace and detached cards show a placeholder in the detail pane that focuses the external window
-- Runtime/resources are copied from `clone/cmux` with a build phase that recreates cmux's `ghostty`, `terminfo`, `shell-integration`, and `bin` bundle layout
-- Ghostty reads the user's standard config files and receives the same app/surface color-scheme updates cmux uses, so theme resolution now matches cmux behavior
-- Zenban writes `~/.zenban/tmux.conf` from the active Ghostty selection colors and treats Homebrew plus tmux as required terminal dependencies
-- Bundled `cmux`, `claude`, and `open` helpers are in `Resources/bin`, and the app starts a cmux-compatible local socket controller so shell integration can report pwd/tty/git/pr state back into the owning workspace whether it is embedded or detached
-- The inherited cmux notification store, unread tab badges, and Ghostty notification ring are removed; only Zenban's `NotificationService` sends macOS completion notifications, and clicking one reselects the owning board/card
+- The lower detail pane is a temporary terminal placeholder
+- Agent pills still update stored card state
+- Git Changes, File Browser, and Dev Server actions still open from the card header
 
 ## Git Worktrees
 
-- Each card gets its own git worktree (branch: card/uuid)
-- Workspace uses the card worktree directory when ready; otherwise it opens at the repo path first and the agent later switches into the worktree with `cd && launch`
-- View Changes button opens diff view
-- Worktrees cleaned up on card/board deletion with best-effort branch removal
+- Each card gets its own git worktree on branch `card/<uuid>`
+- Worktrees are created lazily and cleaned up on delete
+- Git Changes opens a board-area diff and history workspace
 
-## Dev Server Preview
+## Dev Server
 
-- Per-board dev server config (setup/dev commands)
-- Auto-detects package manager from lock files
-- Board-area preview reuses cmux's browser stack (`BrowserPanelView`) once the server is ready
-- Startup/setup output stays visible until the URL is detected
-- Optional board-level "Open console automatically" setting keeps the cmux JavaScript console off by default and opens it only after the preview finishes loading when enabled
-- Board list auto-collapses while the preview is active and restores its previous visibility when the preview closes
-- Port auto-detection from output
-- Toggle with Cmd+Shift+S
-- Reload the current preview with Cmd+Shift+R
+- Per-board setup and dev commands
+- Package-manager-aware command detection
+- Live setup and process logs during startup
+- Ready-state placeholder showing the detected local URL
+- `Cmd+Shift+S` toggles the session
+- `Cmd+Shift+R` restarts the current session
 
-## Git Changes View
+## Optional Tools
 
-- Toggle with Cmd+Shift+X
-- Split-view diff renderer
-- Commit, Merge, Create PR actions
-- AI-generated commit messages via Claude CLI
-- On-demand diff loading per file
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| Cmd+Shift+N | New Board |
-| Cmd+Shift+A | New Card |
-| Cmd+Shift+D | Delete selected card |
-| Cmd+Shift+S | Toggle Dev Server |
-| Cmd+Shift+R | Reload Dev Server |
-| Cmd+Shift+X | Toggle Git Changes |
-| Shift+Arrow Up/Down | Navigate cards/boards |
-| Shift+Arrow Left/Right | Navigate columns |
+- Settings can check and install Homebrew
+- Settings can check and install GitHub CLI
+- Settings can check and install Claude Code CLI
 
 ## Data Storage
 
-- JSON file at `~/Library/Application Support/com.berkaycit.zenban/boards.json`
-- Auto-saves with 500ms debounce
+- Boards are stored at `~/Library/Application Support/com.berkaycit.zenban/boards.json`
+- Saves are debounced automatically

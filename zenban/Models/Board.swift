@@ -49,25 +49,21 @@ struct DevServerConfig: Codable, Hashable {
     var setupCommand: String?
     var devCommand: String
     var skipSetup: Bool
-    var autoOpenConsole: Bool
 
     private enum CodingKeys: String, CodingKey {
         case setupCommand
         case devCommand
         case skipSetup
-        case autoOpenConsole
     }
 
     init(
         setupCommand: String?,
         devCommand: String,
-        skipSetup: Bool = false,
-        autoOpenConsole: Bool = false
+        skipSetup: Bool = false
     ) {
         self.setupCommand = setupCommand
         self.devCommand = devCommand
         self.skipSetup = skipSetup
-        self.autoOpenConsole = autoOpenConsole
     }
 
     init(from decoder: Decoder) throws {
@@ -75,7 +71,6 @@ struct DevServerConfig: Codable, Hashable {
         setupCommand = try container.decodeIfPresent(String.self, forKey: .setupCommand)
         devCommand = try container.decode(String.self, forKey: .devCommand)
         skipSetup = try container.decodeIfPresent(Bool.self, forKey: .skipSetup) ?? false
-        autoOpenConsole = try container.decodeIfPresent(Bool.self, forKey: .autoOpenConsole) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -83,7 +78,6 @@ struct DevServerConfig: Codable, Hashable {
         try container.encodeIfPresent(setupCommand, forKey: .setupCommand)
         try container.encode(devCommand, forKey: .devCommand)
         try container.encode(skipSetup, forKey: .skipSetup)
-        try container.encode(autoOpenConsole, forKey: .autoOpenConsole)
     }
 }
 

@@ -2,7 +2,7 @@
 //  DependencySetupView.swift
 //  zenban
 //
-//  Modal view for checking and installing dependencies
+//  Modal view for checking and installing optional tools
 //
 
 import SwiftUI
@@ -15,7 +15,6 @@ struct DependencySetupView: View {
         @Bindable var store = store
 
         VStack(spacing: 24) {
-            // Header
             VStack(spacing: 8) {
                 Image(systemName: "shippingbox")
                     .font(.system(size: 40))
@@ -31,19 +30,16 @@ struct DependencySetupView: View {
                     .multilineTextAlignment(.center)
             }
 
-            // Status list
             VStack(spacing: 12) {
-                ForEach(DependencyCheckService.Dependency.allCases, id: \.self) { dep in
+                ForEach(DependencyCheckService.Dependency.allCases, id: \.self) { dependency in
                     DependencyRow(
-                        dependency: dep,
-                        isInstalled: isInstalled(dep),
-                        isRequired: dep.isRequired
+                        dependency: dependency,
+                        isInstalled: isInstalled(dependency)
                     )
                 }
             }
             .padding(.vertical, 8)
 
-            // Installation output
             if store.isInstallingDependency || !store.installationOutput.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -65,7 +61,6 @@ struct DependencySetupView: View {
                 }
             }
 
-            // Progress indicator
             if store.isInstallingDependency {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -76,7 +71,6 @@ struct DependencySetupView: View {
                 }
             }
 
-            // Action buttons
             HStack(spacing: 12) {
                 if hasMissingDependencies && !store.isInstallingDependency {
                     Button(action: installMissing) {
@@ -85,25 +79,24 @@ struct DependencySetupView: View {
                     }
                     .buttonStyle(DependencyButtonStyle(isPrimary: true))
 
-                    Button(action: dismiss) {
-                        Text(secondaryActionTitle)
+                    Button(action: store.dismissDependencySetup) {
+                        Text("Close")
                             .frame(width: 100)
                     }
                     .buttonStyle(DependencyButtonStyle(isPrimary: false))
                 } else if !store.isInstallingDependency {
                     Button(action: store.dismissDependencySetup) {
-                        Text("Continue")
+                        Text("Close")
                             .frame(width: 100)
                     }
                     .buttonStyle(DependencyButtonStyle(isPrimary: true))
                 }
             }
 
-            // Warning for skip
             if hasMissingDependencies && !store.isInstallingDependency {
-                Text(footerDescription)
+                Text("You can return here later without affecting the rest of the app.")
                     .font(.caption)
-                    .foregroundStyle(hasMissingRequiredDependencies ? .orange : .secondary)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
         }
@@ -116,7 +109,7 @@ struct DependencySetupView: View {
         .onAppear { isFocused = true }
         .onKeyPress(.escape) {
             if !store.isInstallingDependency {
-                dismiss()
+                store.dismissDependencySetup()
             }
             return .handled
         }
@@ -136,39 +129,11 @@ struct DependencySetupView: View {
         status?.hasMissingDependencies ?? true
     }
 
-    private var hasMissingRequiredDependencies: Bool {
-        !(status?.allRequired ?? false)
-    }
-
-    private var hasMissingOptionalDependencies: Bool {
-        status?.hasMissingOptionalDependencies ?? false
-    }
-
     private var headerDescription: String {
-        if hasMissingRequiredDependencies {
-            return "Zenban needs Homebrew and tmux for terminal cards. GitHub CLI and Claude Code CLI stay optional."
+        if hasMissingDependencies {
+            return "Install optional tools used for pull requests and AI-assisted commit messages."
         }
-        if hasMissingOptionalDependencies {
-            return "Required dependencies are installed. Optional tools can still be added for PR creation and AI commit messages."
-        }
-        return "All runtime dependencies are installed."
-    }
-
-    private var footerDescription: String {
-        if hasMissingRequiredDependencies {
-            return "Zenban's terminal cards will not work correctly until Homebrew and tmux are installed."
-        }
-        return "GitHub CLI and Claude Code CLI can be installed later from Settings."
-    }
-
-    private var secondaryActionTitle: String {
-        if store.dependencySetupIsBlocking && hasMissingRequiredDependencies {
-            return "Skip for Now"
-        }
-        if hasMissingOptionalDependencies && !hasMissingRequiredDependencies {
-            return "Continue"
-        }
-        return "Close"
+        return "All optional tools are installed."
     }
 
     private var status: DependencyCheckService.Status? {
@@ -179,16 +144,7 @@ struct DependencySetupView: View {
         store.dependencyStatus?[dependency] ?? false
     }
 
-    private func dismiss() {
-        if store.dependencySetupIsBlocking && hasMissingRequiredDependencies {
-            store.skipDependencySetup()
-        } else {
-            store.dismissDependencySetup()
-        }
-    }
-
     private func installMissing() {
-        let wasBlocking = store.dependencySetupIsBlocking
         store.isInstallingDependency = true
         store.installationOutput = ""
 
@@ -211,8 +167,7 @@ struct DependencySetupView: View {
                 store.isInstallingDependency = false
             }
 
-            if updatedStatus.allSatisfied ||
-               (wasBlocking && updatedStatus.allRequired) {
+            if updatedStatus.allSatisfied {
                 try? await Task.sleep(for: .seconds(1.5))
                 await MainActor.run {
                     store.dismissDependencySetup()
@@ -222,26 +177,23 @@ struct DependencySetupView: View {
     }
 }
 
-// MARK: - Subviews
-
 private struct DependencyRow: View {
     let dependency: DependencyCheckService.Dependency
     let isInstalled: Bool
-    let isRequired: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: isInstalled ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(isInstalled ? .green : (isRequired ? .red : .orange))
+                .foregroundStyle(isInstalled ? .green : .orange)
                 .font(.title3)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(dependency.rawValue)
                         .fontWeight(.medium)
-                    Text(isRequired ? "Required" : "Optional")
+                    Text("Optional")
                         .font(.caption)
-                        .foregroundStyle(isRequired ? .blue : .secondary)
+                        .foregroundStyle(.secondary)
                 }
                 Text(dependency.description)
                     .font(.caption)
@@ -252,11 +204,11 @@ private struct DependencyRow: View {
 
             Text(isInstalled ? "Installed" : "Missing")
                 .font(.caption)
-                .foregroundStyle(isInstalled ? .green : (isRequired ? .red : .orange))
+                .foregroundStyle(isInstalled ? .green : .orange)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(
-                    (isInstalled ? Color.green : (isRequired ? Color.red : Color.orange)).opacity(0.15),
+                    (isInstalled ? Color.green : Color.orange).opacity(0.15),
                     in: RoundedRectangle(cornerRadius: 4)
                 )
         }
@@ -266,8 +218,6 @@ private struct DependencyRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
-
-// MARK: - Button Style
 
 private struct DependencyButtonStyle: ButtonStyle {
     let isPrimary: Bool

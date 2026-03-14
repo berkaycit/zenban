@@ -20,6 +20,8 @@ xcuserdata/
 # Ghostty / cmux-imported build artifacts
 Vendor/GhosttyKit.xcframework/
 Vendor/GhosttyKit.xcframework.bak-*/
+cmux-import/GhosttyKit.xcframework/
+cmux-import/GhosttyKit.xcframework.bak-*/
 Vendor/libghostty/.built-ref
 Vendor/libghostty/lib/libghostty.a
 /libghostty.a

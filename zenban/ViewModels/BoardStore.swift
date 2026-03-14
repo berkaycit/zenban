@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import Observation
 
 enum FocusRegion {
     case sidebar
@@ -72,13 +73,12 @@ final class BoardStore {
     var dependencyStatus: DependencyCheckService.Status?
     var isInstallingDependency = false
     var installationOutput = ""
-    var dependencySetupIsBlocking = false
 
     // Unified overlay state (FSM)
     var overlayState: OverlayState = .none
 
     var onCardDeleted: ((UUID) -> Void)?
-    weak var terminalManager: TerminalManager?
+    @ObservationIgnored weak var cmuxHost: CmuxHostStore?
 
     private var saveTask: Task<Void, Never>?
 
@@ -275,31 +275,23 @@ final class BoardStore {
 
     // MARK: - Dependency Management
 
-    private static let skipDependencyCheckKey = "skipDependencyCheck"
-
     func checkDependencies() {
         Task { [weak self] in
             let status = await Task.detached(priority: .utility) {
                 DependencyCheckService.shared.checkAll()
             }.value
             guard let self else { return }
-            self.applyDependencyStatus(status)
+            self.dependencyStatus = status
         }
     }
 
     func presentDependencySetup(blocking: Bool = false) {
-        dependencySetupIsBlocking = blocking
+        _ = blocking
         showDependencySetup = true
     }
 
     func dismissDependencySetup() {
-        dependencySetupIsBlocking = false
         showDependencySetup = false
-    }
-
-    func skipDependencySetup() {
-        UserDefaults.standard.set(true, forKey: Self.skipDependencyCheckKey)
-        dismissDependencySetup()
     }
 
     // MARK: - Board Operations
@@ -347,6 +339,7 @@ final class BoardStore {
         }
 
         for card in board.cards {
+            cmuxHost?.removeWorkspace(for: card.id)
             onCardDeleted?(card.id)
 
             // Delete worktree if exists
@@ -433,12 +426,14 @@ final class BoardStore {
     func updateCard(_ cardID: UUID, title: String, in boardID: UUID) {
         guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
         boards[bi].cards[ci].title = title
+        cmuxHost?.updateTitle(for: cardID, title: title)
         scheduleSave()
     }
 
     func updateCardAgent(_ cardID: UUID, agent: Agent?, in boardID: UUID) {
         guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
         boards[bi].cards[ci].agent = agent
+        cmuxHost?.updateAgentLaunch(for: boards[bi].cards[ci], boardID: boardID)
         scheduleSave()
     }
 
@@ -483,6 +478,7 @@ final class BoardStore {
         if overlayState.cardID == cardID { overlayState = .none }
         if deleteConfirmationRequest?.cardID == cardID { deleteConfirmationRequest = nil }
 
+        cmuxHost?.removeWorkspace(for: cardID)
         boards[i].cards.removeAll { $0.id == cardID }
         if draggedCardID == cardID { draggedCardID = nil }
         onCardDeleted?(cardID)
@@ -646,18 +642,6 @@ final class BoardStore {
         _sortedBoardsCache = nil
     }
 
-    private func applyDependencyStatus(_ status: DependencyCheckService.Status) {
-        dependencyStatus = status
-
-        if !status.allRequired,
-           !UserDefaults.standard.bool(forKey: Self.skipDependencyCheckKey) {
-            dependencySetupIsBlocking = true
-            showDependencySetup = true
-        } else if status.allRequired {
-            dependencySetupIsBlocking = false
-        }
-    }
-
     private func clearOverlay(if predicate: (OverlayState) -> Bool) {
         if predicate(overlayState) {
             overlayState = .none
@@ -705,11 +689,10 @@ final class BoardStore {
             let worktreePath = try await GitService.createWorktree(cardID: cardID, repositoryPath: repositoryPath)
             guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
             boards[bi].cards[ci].worktreePath = worktreePath
+            if selectedBoardID == boardID, selectedCardID == cardID {
+                cmuxHost?.syncSelection(card: boards[bi].cards[ci], boardID: boardID)
+            }
             scheduleSave()
-
-            // Notify terminal to launch agent in worktree
-            let agent = boards[bi].cards[ci].agent ?? boards[bi].agent
-            terminalManager?.worktreeReady(cardID: cardID, worktreePath: worktreePath, agent: agent)
         } catch {
             print("Failed to create worktree for card \(cardID): \(error)")
         }

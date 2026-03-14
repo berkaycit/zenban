@@ -7,7 +7,6 @@ struct KeyboardShortcutsView: View {
         ("Navigation", [
             ("Cmd+Shift+Up/Down", "Navigate cards/boards"),
             ("Cmd+Shift+Left/Right", "Move between columns"),
-            ("Cmd+Shift+Enter", "Focus terminal"),
         ]),
         ("Boards & Cards", [
             ("Cmd+Shift+N", "New board"),

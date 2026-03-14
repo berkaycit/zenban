@@ -5,8 +5,91 @@
 //  Created by Berkay Çit on 25.12.2025.
 //
 
-import SwiftUI
 import AppKit
+import SwiftUI
+
+private enum CmuxEmbeddedBootstrap {
+    static func prepareEnvironment() {
+        setenv("CMUX_DISABLE_SESSION_RESTORE", "1", 1)
+        configureGhosttyEnvironment()
+        migrateSocketControlDefaults()
+    }
+
+    private static func migrateSocketControlDefaults() {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.string(forKey: SocketControlSettings.appStorageKey) {
+            let migrated = SocketControlSettings.migrateMode(stored)
+            if migrated.rawValue != stored {
+                defaults.set(migrated.rawValue, forKey: SocketControlSettings.appStorageKey)
+            }
+        } else if let legacy = defaults.object(forKey: SocketControlSettings.legacyEnabledKey) as? Bool {
+            defaults.set(
+                legacy ? SocketControlMode.cmuxOnly.rawValue : SocketControlMode.off.rawValue,
+                forKey: SocketControlSettings.appStorageKey
+            )
+        }
+    }
+
+    private static func configureGhosttyEnvironment() {
+        let fileManager = FileManager.default
+        let ghosttyAppResources = "/Applications/Ghostty.app/Contents/Resources/ghostty"
+        let bundledGhosttyURL = Bundle.main.resourceURL?.appendingPathComponent("ghostty")
+        var resolvedResourcesDir: String?
+
+        if getenv("GHOSTTY_RESOURCES_DIR") == nil {
+            if let bundledGhosttyURL,
+               fileManager.fileExists(atPath: bundledGhosttyURL.path),
+               fileManager.fileExists(atPath: bundledGhosttyURL.appendingPathComponent("themes").path) {
+                resolvedResourcesDir = bundledGhosttyURL.path
+            } else if fileManager.fileExists(atPath: ghosttyAppResources) {
+                resolvedResourcesDir = ghosttyAppResources
+            } else if let bundledGhosttyURL, fileManager.fileExists(atPath: bundledGhosttyURL.path) {
+                resolvedResourcesDir = bundledGhosttyURL.path
+            }
+
+            if let resolvedResourcesDir {
+                setenv("GHOSTTY_RESOURCES_DIR", resolvedResourcesDir, 1)
+            }
+        }
+
+        if getenv("TERM") == nil {
+            setenv("TERM", "xterm-ghostty", 1)
+        }
+
+        if getenv("TERM_PROGRAM") == nil {
+            setenv("TERM_PROGRAM", "ghostty", 1)
+        }
+
+        if let resourcesDir = getenv("GHOSTTY_RESOURCES_DIR").flatMap({ String(cString: $0) }) {
+            let resourcesURL = URL(fileURLWithPath: resourcesDir)
+            let resourcesParent = resourcesURL.deletingLastPathComponent()
+            appendEnvPathIfMissing(
+                "XDG_DATA_DIRS",
+                path: resourcesParent.path,
+                defaultValue: "/usr/local/share:/usr/share"
+            )
+            appendEnvPathIfMissing(
+                "MANPATH",
+                path: resourcesParent.appendingPathComponent("man").path
+            )
+        }
+    }
+
+    private static func appendEnvPathIfMissing(_ key: String, path: String, defaultValue: String? = nil) {
+        if path.isEmpty { return }
+
+        var currentValue = getenv(key).flatMap { String(cString: $0) } ?? ""
+        if currentValue.isEmpty, let defaultValue {
+            currentValue = defaultValue
+        }
+        if currentValue.split(separator: ":").contains(Substring(path)) {
+            return
+        }
+
+        let nextValue = currentValue.isEmpty ? path : "\(path):\(currentValue)"
+        setenv(key, nextValue, 1)
+    }
+}
 
 private enum ArrowKey {
     case up, down, left, right
@@ -24,51 +107,25 @@ private enum ArrowKey {
 
 @main
 struct zenbanApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = BoardStore()
-    @State private var terminalManager = TerminalManager()
-    @State private var agentSessionMonitor = AgentSessionMonitor()
     @State private var devServerManager = DevServerManager()
+    @State private var cmuxHost = CmuxHostStore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var cmuxAppDelegate
 
     init() {
+        CmuxEmbeddedBootstrap.prepareEnvironment()
+
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
-        ) { [terminalManager, devServerManager] _ in
+        ) { [devServerManager] _ in
             MainActor.assumeIsolated {
-                terminalManager.terminateAllSessions()
                 devServerManager.stopAllServers()
-                TmuxSessionManager.shared.killAllZenbanSessionsSync()
             }
         }
 
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeOcclusionStateNotification,
-            object: nil,
-            queue: .main
-        ) { [terminalManager] _ in
-            MainActor.assumeIsolated {
-                if NSApplication.shared.occlusionState.contains(.visible) {
-                    terminalManager.resumeAllTerminals()
-                } else {
-                    terminalManager.suspendAllTerminals()
-                }
-            }
-        }
-
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            MainActor.assumeIsolated {
-                NotificationService.shared.handleApplicationDidBecomeActive()
-            }
-        }
-
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store, terminalManager] event in
-            // Skip if inside a sheet, dialog, or text field
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [store] event in
             if NSApp.keyWindow?.sheetParent != nil {
                 return event
             }
@@ -79,7 +136,6 @@ struct zenbanApp: App {
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             if modifiers == [.command],
                event.charactersIgnoringModifiers?.lowercased() == "w" {
-                // When file browser is open, close the tab; otherwise just consume the event
                 if store.showFileBrowser {
                     NotificationCenter.default.post(name: .closeFileBrowserTab, object: nil)
                 }
@@ -91,20 +147,9 @@ struct zenbanApp: App {
                 return event
             }
 
-            // Cmd+Shift+Enter to focus terminal (only if terminal doesn't have focus)
-            let enterModifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            if event.keyCode == 36,
-               enterModifiers == [.command, .shift],
-               let cardID = store.selectedCardID,
-               !terminalManager.isTerminalFocused(for: cardID) {
-                terminalManager.focusTerminal(for: cardID)
-                return nil
-            }
-
             let navModifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
             guard navModifiers == [.command, .shift] else { return event }
 
-            // Cmd+Shift+Arrow for navigation
             guard let key = ArrowKey(keyCode: event.keyCode) else {
                 return event
             }
@@ -138,30 +183,18 @@ struct zenbanApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ZenbanRootView()
                 .environment(store)
-                .environment(terminalManager)
                 .environment(devServerManager)
-                .background(
-                    WindowAccessor { window in
-                        appDelegate.registerMainAppWindow(window)
-                    }
-                )
+                .environment(cmuxHost)
                 .navigationTitle("")
                 .onAppear {
-                    setupCardDeletionHandler()
-                    setupAgentMonitoring()
-                    setupNotifications()
-                    Task {
-                        await TmuxSessionManager.shared.updateConfig()
-                        await TmuxSessionManager.shared.killAllZenbanSessions()
+                    _ = cmuxAppDelegate
+                    store.onCardDeleted = { [devServerManager] cardID in
+                        devServerManager.stopServer(for: cardID)
                     }
-                    store.checkDependencies()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .ghosttyConfigDidReload)) { _ in
-                    Task {
-                        await TmuxSessionManager.shared.updateConfig()
-                    }
+                    store.cmuxHost = cmuxHost
+                    cmuxHost.attach(boardStore: store)
                 }
         }
         .commands {
@@ -169,37 +202,8 @@ struct zenbanApp: App {
         }
 
         Settings {
-            SettingsView()
+            ZenbanSettingsView()
                 .environment(store)
-        }
-    }
-
-    private func setupCardDeletionHandler() {
-        terminalManager.boardStore = store
-        store.terminalManager = terminalManager
-        appDelegate.terminalManager = terminalManager
-        appDelegate.registerMainBoardTabManager(terminalManager.boardWindowTabManager)
-        store.onCardDeleted = { [agentSessionMonitor, terminalManager, devServerManager] cardID in
-            NotificationService.shared.clearNotifications(for: cardID)
-            agentSessionMonitor.removeCard(cardID)
-            terminalManager.killSessionForCard(cardID)
-            devServerManager.stopServer(for: cardID)
-        }
-    }
-
-    private func setupAgentMonitoring() {
-        terminalManager.agentSessionMonitor = agentSessionMonitor
-        agentSessionMonitor.connect(boardStore: store, terminalManager: terminalManager)
-    }
-
-    private func setupNotifications() {
-        NotificationService.shared.requestAuthorization()
-        NotificationService.shared.activeSelectionProvider = { [store] in
-            (store.selectedBoardID, store.selectedCardID)
-        }
-        NotificationService.shared.onNotificationClicked = { [store, terminalManager] boardID, cardID in
-            store.selectCard(cardID, in: boardID)
-            terminalManager.activateWorkspace(for: cardID)
         }
     }
 }

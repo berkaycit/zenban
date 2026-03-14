@@ -7,12 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		114868812A9E4B9192F557FD /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1B5F5001E481458AA833EF64 /* GhosttyKit.xcframework */; };
 		12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */ = {isa = PBXBuildFile; productRef = 0F130FE69B3B46DE88340E02 /* CodeEditLanguages */; };
-		23873D682F5C5D2200E09513 /* Bonsplit in Frameworks */ = {isa = PBXBuildFile; productRef = 8F10A100B000C000D000E203 /* Bonsplit */; };
 		8F10A100B000C000D000E001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 8F10A100B000C000D000E201 /* Sentry */; };
 		8F10A100B000C000D000E002 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 8F10A100B000C000D000E202 /* MarkdownUI */; };
 		93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */ = {isa = PBXBuildFile; productRef = A67F2A020FCB4AB1B074837D /* CodeEditSymbols */; };
+		A1C0D101B202C303D404E505 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A1C0D301B202C303D404E505 /* Sparkle */; };
+		A1C0D102B202C303D404E505 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = A1C0D302B202C303D404E505 /* PostHog */; };
+		A1C0D103B202C303D404E505 /* Bonsplit in Frameworks */ = {isa = PBXBuildFile; productRef = A1C0D303B202C303D404E505 /* Bonsplit */; };
 		D7245E606E834A01AF59B435 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = 9149CD05B1074D1490C41427 /* CodeEditSourceEditor */; };
 		ECC201D4093342D8A219C1EA /* CodeEditTextView in Frameworks */ = {isa = PBXBuildFile; productRef = 1B6E2133151B4B8A9DE213DC /* CodeEditTextView */; };
 /* End PBXBuildFile section */
@@ -35,7 +36,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		1B5F5001E481458AA833EF64 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
 		23B6DAA62EFDA93600D5AB34 /* zenban.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = zenban.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DAB32EFDA93700D5AB34 /* zenbanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DABD2EFDA93700D5AB34 /* zenbanUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -77,14 +77,15 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				23873D682F5C5D2200E09513 /* Bonsplit in Frameworks */,
 				D7245E606E834A01AF59B435 /* CodeEditSourceEditor in Frameworks */,
 				12F1C5E23C2B47B1B6A14B03 /* CodeEditLanguages in Frameworks */,
+				A1C0D103B202C303D404E505 /* Bonsplit in Frameworks */,
+				A1C0D102B202C303D404E505 /* PostHog in Frameworks */,
 				8F10A100B000C000D000E001 /* Sentry in Frameworks */,
+				A1C0D101B202C303D404E505 /* Sparkle in Frameworks */,
 				8F10A100B000C000D000E002 /* MarkdownUI in Frameworks */,
 				ECC201D4093342D8A219C1EA /* CodeEditTextView in Frameworks */,
 				93CEACC71254477CB987BA45 /* CodeEditSymbols in Frameworks */,
-				114868812A9E4B9192F557FD /* GhosttyKit.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -129,7 +130,6 @@
 		34A65B16E2F644D6AE876491 /* Vendor */ = {
 			isa = PBXGroup;
 			children = (
-				1B5F5001E481458AA833EF64 /* GhosttyKit.xcframework */,
 			);
 			path = Vendor;
 			sourceTree = "<group>";
@@ -144,7 +144,7 @@
 				23B6DAA22EFDA93600D5AB34 /* Sources */,
 				23B6DAA32EFDA93600D5AB34 /* Frameworks */,
 				23B6DAA42EFDA93600D5AB34 /* Resources */,
-				1B5F5002E481458AA833EF64 /* ShellScript */,
+				A1C0D104B202C303D404E505 /* Prepare Cmux Artifacts */,
 			);
 			buildRules = (
 			);
@@ -159,9 +159,11 @@
 				0F130FE69B3B46DE88340E02 /* CodeEditLanguages */,
 				1B6E2133151B4B8A9DE213DC /* CodeEditTextView */,
 				A67F2A020FCB4AB1B074837D /* CodeEditSymbols */,
+				A1C0D303B202C303D404E505 /* Bonsplit */,
+				A1C0D302B202C303D404E505 /* PostHog */,
 				8F10A100B000C000D000E201 /* Sentry */,
+				A1C0D301B202C303D404E505 /* Sparkle */,
 				8F10A100B000C000D000E202 /* MarkdownUI */,
-				8F10A100B000C000D000E203 /* Bonsplit */,
 			);
 			productName = zenban;
 			productReference = 23B6DAA62EFDA93600D5AB34 /* zenban.app */;
@@ -250,9 +252,11 @@
 				D0A1B2C3D4E5F60718293A4E /* XCLocalSwiftPackageReference "Packages/CodeEditLanguages" */,
 				D0A1B2C3D4E5F60718293A4C /* XCLocalSwiftPackageReference "Packages/CodeEditTextView" */,
 				D0A1B2C3D4E5F60718293A4D /* XCLocalSwiftPackageReference "Packages/CodeEditSymbols" */,
+				A1C0D201B202C303D404E505 /* XCLocalSwiftPackageReference "cmux-import/bonsplit" */,
+				A1C0D202B202C303D404E505 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				A1C0D203B202C303D404E505 /* XCRemoteSwiftPackageReference "posthog-ios" */,
 				8F10A100B000C000D000E101 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				8F10A100B000C000D000E102 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
-				8F10A100B000C000D000E103 /* XCLocalSwiftPackageReference "vendor/bonsplit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23B6DAA72EFDA93600D5AB34 /* Products */;
@@ -291,7 +295,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		1B5F5002E481458AA833EF64 /* ShellScript */ = {
+		A1C0D104B202C303D404E505 /* Prepare Cmux Artifacts */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -300,13 +304,14 @@
 			);
 			inputPaths = (
 			);
+			name = "Prepare Cmux Artifacts";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\nDEST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nPLUGINS_DEST=\"${TARGET_BUILD_DIR}/${PLUGINS_FOLDER_PATH}\"\nGHOSTTY_DEST=\"${DEST}/ghostty\"\nTERMINFO_DEST=\"${DEST}/terminfo\"\nCMUX_SHELL_DEST=\"${DEST}/shell-integration\"\nCMUX_BIN_DEST=\"${DEST}/bin\"\nSRC_SHARE=\"${SRCROOT}/ghostty/zig-out/share\"\nGHOSTTY_SRC=\"${SRC_SHARE}/ghostty\"\nTERMINFO_SRC=\"${SRC_SHARE}/terminfo\"\nFALLBACK_GHOSTTY=\"${SRCROOT}/Resources/ghostty\"\nFALLBACK_TERMINFO=\"${SRCROOT}/Resources/ghostty/terminfo\"\nTERMINFO_OVERLAY=\"${SRCROOT}/Resources/terminfo-overlay\"\nCMUX_SHELL_SRC=\"${SRCROOT}/Resources/shell-integration\"\nCMUX_BIN_SRC=\"${SRCROOT}/Resources/bin\"\nif [ -d \"$PLUGINS_DEST\" ]; then\n  find \"$PLUGINS_DEST\" -maxdepth 1 -name '*.xctest' -exec rm -rf {} +\nfi\nif [ -d \"$GHOSTTY_SRC\" ]; then\n  mkdir -p \"$GHOSTTY_DEST\"\n  rsync -a --delete \"$GHOSTTY_SRC/\" \"$GHOSTTY_DEST/\"\nelif [ -d \"$FALLBACK_GHOSTTY\" ]; then\n  mkdir -p \"$GHOSTTY_DEST\"\n  rsync -a --delete \"$FALLBACK_GHOSTTY/\" \"$GHOSTTY_DEST/\"\nfi\nif [ -d \"$TERMINFO_SRC\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  rsync -a --delete \"$TERMINFO_SRC/\" \"$TERMINFO_DEST/\"\nelif [ -d \"$FALLBACK_TERMINFO\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  rsync -a --delete \"$FALLBACK_TERMINFO/\" \"$TERMINFO_DEST/\"\nfi\nif [ -d \"$TERMINFO_OVERLAY\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  rsync -a \"$TERMINFO_OVERLAY/\" \"$TERMINFO_DEST/\"\nfi\nif [ -d \"$CMUX_SHELL_SRC\" ]; then\n  mkdir -p \"$CMUX_SHELL_DEST\"\n  rsync -a \"$CMUX_SHELL_SRC/.\" \"$CMUX_SHELL_DEST/\"\nfi\nif [ -d \"$CMUX_BIN_SRC\" ]; then\n  mkdir -p \"$CMUX_BIN_DEST\"\n  rsync -a \"$CMUX_BIN_SRC/.\" \"$CMUX_BIN_DEST/\"\nfi\n";
+			shellScript = "set -euo pipefail\nCMUX_IMPORT=\"${SRCROOT}/cmux-import\"\nDEST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nBIN_DEST=\"${DEST}/bin\"\nGHOSTTY_DEST=\"${DEST}/ghostty\"\nTERMINFO_DEST=\"${DEST}/terminfo\"\nCMUX_SHELL_DEST=\"${DEST}/shell-integration\"\nmkdir -p \"$BIN_DEST\"\n/usr/bin/xcrun swiftc -O -parse-as-library \"$CMUX_IMPORT/CLI/cmux.swift\" -o \"$BIN_DEST/cmux\"\n/bin/chmod 755 \"$BIN_DEST/cmux\"\n/usr/bin/install -m 755 \"$CMUX_IMPORT/bin/claude\" \"$BIN_DEST/claude\"\n/usr/bin/install -m 755 \"$CMUX_IMPORT/bin/open\" \"$BIN_DEST/open\"\nSRC_SHARE=\"${CMUX_IMPORT}/ghostty/zig-out/share\"\nGHOSTTY_SRC=\"${SRC_SHARE}/ghostty\"\nTERMINFO_SRC=\"${SRC_SHARE}/terminfo\"\nFALLBACK_GHOSTTY=\"${CMUX_IMPORT}/ghostty\"\nFALLBACK_TERMINFO=\"${CMUX_IMPORT}/ghostty/terminfo\"\nTERMINFO_OVERLAY=\"${CMUX_IMPORT}/terminfo-overlay\"\nCMUX_SHELL_SRC=\"${CMUX_IMPORT}/shell-integration\"\nCMUX_GHOSTTY_ZSH_SRC=\"${CMUX_IMPORT}/ghostty/src/shell-integration/zsh/ghostty-integration\"\nif [ -d \"$GHOSTTY_SRC\" ]; then\n  mkdir -p \"$GHOSTTY_DEST\"\n  /usr/bin/rsync -a --delete \"$GHOSTTY_SRC/\" \"$GHOSTTY_DEST/\"\nelif [ -d \"$FALLBACK_GHOSTTY\" ]; then\n  mkdir -p \"$GHOSTTY_DEST\"\n  /usr/bin/rsync -a --delete \"$FALLBACK_GHOSTTY/\" \"$GHOSTTY_DEST/\"\nfi\nif [ -d \"$TERMINFO_SRC\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  /usr/bin/rsync -a --delete \"$TERMINFO_SRC/\" \"$TERMINFO_DEST/\"\nelif [ -d \"$FALLBACK_TERMINFO\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  /usr/bin/rsync -a --delete \"$FALLBACK_TERMINFO/\" \"$TERMINFO_DEST/\"\nfi\nif [ -d \"$TERMINFO_OVERLAY\" ]; then\n  mkdir -p \"$TERMINFO_DEST\"\n  /usr/bin/rsync -a \"$TERMINFO_OVERLAY/\" \"$TERMINFO_DEST/\"\nfi\nif [ -d \"$CMUX_SHELL_SRC\" ]; then\n  mkdir -p \"$CMUX_SHELL_DEST\"\n  /usr/bin/rsync -a \"$CMUX_SHELL_SRC/.\" \"$CMUX_SHELL_DEST/\"\nfi\nif [ -f \"$CMUX_GHOSTTY_ZSH_SRC\" ]; then\n  mkdir -p \"$CMUX_SHELL_DEST\"\n  /usr/bin/rsync -a \"$CMUX_GHOSTTY_ZSH_SRC\" \"$CMUX_SHELL_DEST/ghostty-integration.zsh\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -490,7 +495,10 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/libgit2/lib";
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libgit2/lib",
+					"$(SRCROOT)/cmux-import/GhosttyKit.xcframework/macos-arm64_x86_64",
+				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"-lc++",
@@ -519,7 +527,10 @@
 					"-framework",
 					IOKit,
 					"-framework",
+					IOSurface,
+					"-framework",
 					UniformTypeIdentifiers,
+					"-lghostty",
 				);
 				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=$(SRCROOT)/Vendor/libgit2/include/module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenban;
@@ -531,7 +542,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
-				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/zenban/ghostty-bridging-header.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "zenban/CmuxImport/cmux-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -559,7 +570,10 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/libgit2/lib";
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/Vendor/libgit2/lib",
+					"$(SRCROOT)/cmux-import/GhosttyKit.xcframework/macos-arm64_x86_64",
+				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"-lc++",
@@ -588,7 +602,10 @@
 					"-framework",
 					IOKit,
 					"-framework",
+					IOSurface,
+					"-framework",
 					UniformTypeIdentifiers,
+					"-lghostty",
 				);
 				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=$(SRCROOT)/Vendor/libgit2/include/module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenban;
@@ -600,7 +617,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
-				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/zenban/ghostty-bridging-header.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "zenban/CmuxImport/cmux-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -614,13 +631,17 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/libgit2/lib";
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=$(SRCROOT)/Vendor/libgit2/include/module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenbanTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/zenban.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/zenban";
@@ -635,13 +656,17 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/Vendor/libgit2/lib";
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=$(SRCROOT)/Vendor/libgit2/include/module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenbanTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/zenban.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/zenban";
@@ -728,9 +753,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		8F10A100B000C000D000E103 /* XCLocalSwiftPackageReference "vendor/bonsplit" */ = {
+		A1C0D201B202C303D404E505 /* XCLocalSwiftPackageReference "cmux-import/bonsplit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = vendor/bonsplit;
+			relativePath = "cmux-import/bonsplit";
 		};
 		D0A1B2C3D4E5F60718293A4B /* XCLocalSwiftPackageReference "Packages/CodeEditSourceEditor" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -767,6 +792,22 @@
 				minimumVersion = 2.4.1;
 			};
 		};
+		A1C0D202B202C303D404E505 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+		A1C0D203B202C303D404E505 /* XCRemoteSwiftPackageReference "posthog-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/PostHog/posthog-ios.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.41.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -790,15 +831,25 @@
 			package = 8F10A100B000C000D000E102 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
 		};
-		8F10A100B000C000D000E203 /* Bonsplit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 8F10A100B000C000D000E103 /* XCLocalSwiftPackageReference "vendor/bonsplit" */;
-			productName = Bonsplit;
-		};
 		9149CD05B1074D1490C41427 /* CodeEditSourceEditor */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D0A1B2C3D4E5F60718293A4B /* XCLocalSwiftPackageReference "Packages/CodeEditSourceEditor" */;
 			productName = CodeEditSourceEditor;
+		};
+		A1C0D301B202C303D404E505 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1C0D202B202C303D404E505 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+		A1C0D302B202C303D404E505 /* PostHog */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1C0D203B202C303D404E505 /* XCRemoteSwiftPackageReference "posthog-ios" */;
+			productName = PostHog;
+		};
+		A1C0D303B202C303D404E505 /* Bonsplit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1C0D201B202C303D404E505 /* XCLocalSwiftPackageReference "cmux-import/bonsplit" */;
+			productName = Bonsplit;
 		};
 		A67F2A020FCB4AB1B074837D /* CodeEditSymbols */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -2,17 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>zenban</string>
-			</array>
-			<key>CFBundleURLName</key>
-			<string>com.berkaycit.zenban.notification</string>
-		</dict>
-	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+	<key>NSAppleScriptEnabled</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Zenban uses camera access for websites opened inside the embedded cmux browser.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Zenban uses microphone access for websites opened inside the embedded cmux browser.</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
@@ -28,24 +28,28 @@
 			<dict/>
 		</dict>
 		<dict>
-			<key>UTTypeConformsTo</key>
-			<array>
-				<string>public.data</string>
-			</array>
-			<key>UTTypeDescription</key>
-			<string>Bonsplit Tab Transfer</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.splittabbar.tabtransfer</string>
-		</dict>
-		<dict>
+			<key>UTTypeDescription</key>
+			<string>cmux Tab Transfer</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>
 			</array>
-			<key>UTTypeDescription</key>
-			<string>cmux Sidebar Tab Reorder</string>
+			<key>UTTypeTagSpecification</key>
+			<dict/>
+		</dict>
+		<dict>
 			<key>UTTypeIdentifier</key>
 			<string>com.cmux.sidebar-tab-reorder</string>
+			<key>UTTypeDescription</key>
+			<string>cmux Sidebar Tab Reorder</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict/>
 		</dict>
 	</array>
 </dict>

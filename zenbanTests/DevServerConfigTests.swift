@@ -3,13 +3,15 @@ import Testing
 @testable import zenban
 
 struct DevServerConfigTests {
+    @MainActor
     @Test
-    func missingAutoOpenConsoleDecodesAsFalse() throws {
+    func legacyPreviewFlagIsIgnoredDuringDecode() throws {
         let data = """
         {
           "setupCommand": "npm install",
           "devCommand": "npm run dev",
-          "skipSetup": true
+          "skipSetup": true,
+          "autoOpenConsole": true
         }
         """.data(using: .utf8)!
 
@@ -18,6 +20,5 @@ struct DevServerConfigTests {
         #expect(config.setupCommand == "npm install")
         #expect(config.devCommand == "npm run dev")
         #expect(config.skipSetup)
-        #expect(config.autoOpenConsole == false)
     }
 }
