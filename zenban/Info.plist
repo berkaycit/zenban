@@ -9,10 +9,53 @@
 	</dict>
 	<key>NSAppleScriptEnabled</key>
 	<true/>
+	<key>OSAScriptingDefinition</key>
+	<string>cmux.sdef</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Zenban uses camera access for websites opened inside the embedded cmux browser.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Zenban uses microphone access for websites opened inside the embedded cmux browser.</string>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>New $(PRODUCT_NAME) Workspace Here</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>openTab</string>
+			<key>NSRequiredContext</key>
+			<dict>
+				<key>NSTextContent</key>
+				<string>FilePath</string>
+			</dict>
+			<key>NSSendTypes</key>
+			<array>
+				<string>NSFilenamesPboardType</string>
+				<string>public.plain-text</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>New $(PRODUCT_NAME) Window Here</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>openWindow</string>
+			<key>NSRequiredContext</key>
+			<dict>
+				<key>NSTextContent</key>
+				<string>FilePath</string>
+			</dict>
+			<key>NSSendTypes</key>
+			<array>
+				<string>NSFilenamesPboardType</string>
+				<string>public.plain-text</string>
+			</array>
+		</dict>
+	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
