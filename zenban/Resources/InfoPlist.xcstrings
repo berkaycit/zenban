@@ -1,50 +1,83 @@
 {
-  "sourceLanguage": "en",
-  "version": "1.0",
-  "strings": {
-    "NSCameraUsageDescription": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zenban uses camera access for websites opened inside the embedded cmux browser."
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "zenban"
           }
         }
       }
     },
-    "NSMicrophoneUsageDescription": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zenban uses microphone access for websites opened inside the embedded cmux browser."
+    "cmux Sidebar Tab Reorder" : {
+
+    },
+    "cmux Tab Transfer" : {
+
+    },
+    "New $(PRODUCT_NAME) Window Here" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New $(PRODUCT_NAME) Window Here"
           }
         }
       }
     },
-    "New $(PRODUCT_NAME) Workspace Here": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New $(PRODUCT_NAME) Workspace Here"
+    "New $(PRODUCT_NAME) Workspace Here" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New $(PRODUCT_NAME) Workspace Here"
           }
         }
       }
     },
-    "New $(PRODUCT_NAME) Window Here": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New $(PRODUCT_NAME) Window Here"
+    "NSCameraUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zenban uses camera access for websites opened inside the embedded cmux browser."
           }
         }
       }
+    },
+    "NSHumanReadableCopyright" : {
+      "comment" : "Copyright (human-readable)",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ""
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zenban uses microphone access for websites opened inside the embedded cmux browser."
+          }
+        }
+      }
+    },
+    "Zenban Card" : {
+
     }
-  }
+  },
+  "version" : "1.0"
 }
