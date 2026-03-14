@@ -7,6 +7,9 @@
 - `zenban/ViewModels`: `@Observable` app state
 - `zenban/Views`: sidebar, board, card, git, dev server, settings, shared components
 - `zenban/Services`: git, AI, dev server, dependency, and process helpers
+- `zenban/CmuxImport`: copied cmux Swift host layer, panels, browser, notifications, and AppleScript support
+- `zenban/CmuxHostStore.swift`: Zenban adapter that maps cards 1:1 onto cmux workspaces
+- `cmux-import/`: copied cmux CLI, Ghostty runtime, bonsplit package, and bundled assets
 - `zenban/Utilities`, `Commands`, `Extensions`: shared helpers and app commands
 
 ## Data Flow
@@ -20,6 +23,7 @@
 
 - `BoardStore`: Central state manager for boards, cards, overlays, worktrees, and dev server configuration.
 - `BoardStorage`: JSON persistence under Application Support.
+- `CmuxHostStore`: Card-scoped workspace registry, agent auto-launch bridge, browser surface management, and notification-to-card routing.
 - `GitService`: libgit2-backed repository, worktree, diff, commit, push, merge, and PR helpers.
 - `DevServerManager`: Runs setup and dev commands, buffers output, detects ready URLs, and owns process lifecycle.
 - `DependencyCheckService`: Checks and installs optional developer tools.
@@ -37,11 +41,15 @@ For git-backed boards, each card gets its own worktree at `../repo-worktrees/` o
 
 ## Card Detail
 
-The detail pane shows card metadata, column controls, agent selection, and worktree status. The lower terminal section is intentionally a placeholder until the replacement integration is copied in.
+The detail pane shows card metadata, column controls, agent selection, and worktree status above an embedded cmux `WorkspaceContentView`. Each selected card lazily gets its own workspace rooted at the card worktree or board repository path.
 
 ## Dev Server
 
-Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup`. `DevServerView` keeps logs visible during startup and shows a placeholder with the detected URL once the server is ready. `ProcessEnvironment` still sets `BROWSER=none` so dev commands do not open an external browser automatically.
+Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup`. `DevServerView` keeps logs visible during startup, then mounts a cmux `BrowserPanelView` for the selected card once the server is ready. `ProcessEnvironment` still sets `BROWSER=none` so dev commands do not open an external browser automatically.
+
+## Notifications And Scripting
+
+`zenbanApp` bootstraps copied cmux app delegate state, Ghostty resources, and socket defaults before SwiftUI renders. `TerminalNotificationStore` provides the desktop notification flow, `cmux.sdef` exposes AppleScript support, and Finder Services call back into the copied `openTab` and `openWindow` handlers.
 
 ## Keyboard Shortcuts
 

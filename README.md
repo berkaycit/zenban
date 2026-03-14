@@ -28,8 +28,9 @@ xcodebuild -project zenban.xcodeproj -scheme zenban test
 - Git-backed boards still create one worktree per card.
 - Git Changes and File Browser overlays are still available.
 - Dev server setup, process management, and logs are still available.
-- The card detail terminal area is currently a placeholder.
-- The embedded web preview is currently a placeholder that shows the detected URL.
+- The card detail pane embeds a cmux-derived Ghostty workspace for the selected card.
+- The ready dev server state opens an embedded cmux browser surface instead of an external browser.
+- Desktop notifications and Finder Services come from the copied cmux host stack.
 
 ## Optional Tools
 

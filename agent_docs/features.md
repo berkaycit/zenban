@@ -13,13 +13,13 @@
 - Create cards with `Cmd+Shift+A`
 - Delete cards with `Cmd+Shift+D`
 - Override the board agent per card
-- Persist agent choice as card metadata without launching any runtime
+- Persist agent choice as card metadata and auto-launch it inside the card workspace
 - Show worktree readiness in the detail pane for git-backed boards
 
-## Card Detail Placeholder
+## Card Workspaces
 
-- The lower detail pane is a temporary terminal placeholder
-- Agent pills still update stored card state
+- The lower detail pane embeds a cmux-derived Ghostty workspace per card
+- Agent pills update stored card state and relaunch the selected command when needed
 - Git Changes, File Browser, and Dev Server actions still open from the card header
 
 ## Git Worktrees
@@ -33,9 +33,15 @@
 - Per-board setup and dev commands
 - Package-manager-aware command detection
 - Live setup and process logs during startup
-- Ready-state placeholder showing the detected local URL
+- Ready-state embedded cmux browser preview for the selected card
 - `Cmd+Shift+S` toggles the session
 - `Cmd+Shift+R` restarts the current session
+
+## Notifications And Finder Services
+
+- cmux-derived desktop notifications can reopen the owning card workspace
+- Finder Services expose “New Zenban Workspace Here” and “New Zenban Window Here”
+- The app bundle includes a cmux-based AppleScript dictionary and English localization catalogs
 
 ## Optional Tools
 

@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add cmux localization and scripting resources
+- **Description**: Added English-only `Localizable.xcstrings` and `InfoPlist.xcstrings` copied from cmux plus `cmux.sdef` for the app bundle. `Info.plist` now exposes Finder Services and the cmux AppleScript dictionary while intentionally leaving out cmux update-feed metadata and `http/https` URL handling.
+
+- **Summary**: Embed copied cmux host stack
+- **Description**: Replaced the stripped-down placeholder state with a copied cmux host stack under `zenban/CmuxImport` and `cmux-import/`. `CmuxHostStore` now maps cards 1:1 to cmux workspaces, launches the selected agent in the embedded Ghostty surface, and opens cmux browser panels for dev server previews. Desktop notifications now route back into Zenban card selection through the copied cmux notification store and app delegate wiring.
+
 - **Summary**: Remove embedded runtime and preview host
 - **Description**: Deleted the current embedded terminal, browser host, notification flow, and agent launch runtime from the app, project settings, and bundled resources. Card detail and ready-state dev server views now show placeholders while keeping worktrees, git tooling, and dev server logs intact. Updated the architecture and feature docs to match this temporary stripped-down state before a future replacement is copied in.
 
