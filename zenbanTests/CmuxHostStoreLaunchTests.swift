@@ -97,6 +97,57 @@ struct CmuxHostStoreLaunchTests {
     }
 
     @Test
+    func fanOutPrewarmsCloneWorkspacesWithoutChangingSelection() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let prompt = "Investigate the failing login tests"
+        let sourceCard = Card(
+            title: "cc-42",
+            lastSubmittedPrompt: prompt,
+            column: .todo,
+            orderIndex: 0,
+            agent: .claude,
+            worktreePath: tempDirectory.path
+        )
+        let board = Board(
+            name: "Fan Out",
+            cards: [sourceCard],
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = sourceCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        var commands: [(UUID, String)] = []
+        hostStore.configureClaudeLaunchHooksForTesting(launchCommandHandler: { cardID, command in
+            commands.append((cardID, command))
+        })
+        defer {
+            hostStore.resetClaudeLaunchHooksForTesting()
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        boardStore.fanOutClaudePrompt(from: sourceCard.id, in: board.id, count: 2)
+
+        let updatedBoard = try #require(boardStore.board(for: board.id))
+        let cloneCards = updatedBoard.cards.filter { $0.id != sourceCard.id }
+        #expect(cloneCards.count == 2)
+        #expect(boardStore.selectedCardID == sourceCard.id)
+
+        try await waitUntil {
+            cloneCards.allSatisfy { hostStore.workspace(for: $0.id) != nil }
+        }
+        for cloneCard in cloneCards {
+            try markWorkspacePromptIdle(hostStore: hostStore, cardID: cloneCard.id)
+        }
+        try await waitUntil { commands.count == cloneCards.count }
+
+        let launchedCardIDs = commands.map(\.0).sorted { $0.uuidString < $1.uuidString }
+        let cloneCardIDs = cloneCards.map(\.id).sorted { $0.uuidString < $1.uuidString }
+        #expect(launchedCardIDs == cloneCardIDs)
+        #expect(commands.allSatisfy { $0.1 == expectedClaudeLaunchCommand(prompt: prompt) })
+    }
+
+    @Test
     func claudeLaunchRelaunchesWhenWorkspaceIsRecreated() async throws {
         let tempDirectory = try makeTemporaryDirectory()
         let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path)

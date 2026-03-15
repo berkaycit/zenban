@@ -83,7 +83,7 @@ struct zenbanTests {
         let updatedBoard = try #require(store.board(for: board.id))
         let cards = updatedBoard.cards(in: .todo)
 
-        #expect(cards.map(\.title) == ["Login bug (2)", "Login bug (3)", "Login bug (4)", "Login bug"])
+        #expect(cards.map(\.title) == ["Login bug (1)", "Login bug (2)", "Login bug (3)", "Login bug"])
         #expect(store.selectedCardID == sourceCard.id)
 
         let clonedCards = cards.filter { $0.id != sourceCard.id }

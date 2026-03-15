@@ -556,7 +556,7 @@ final class BoardStore {
         var clonedCards: [Card] = []
         clonedCards.reserveCapacity(count)
 
-        for copyNumber in stride(from: count + 1, through: 2, by: -1) {
+        for copyNumber in stride(from: count, through: 1, by: -1) {
             clonedCards.append(
                 Card(
                     title: fanOutCloneTitle(for: sourceCard.title, copyNumber: copyNumber),
@@ -583,6 +583,10 @@ final class BoardStore {
                         repositoryPath: repositoryPath
                     )
                 }
+            }
+        } else {
+            for clonedCard in clonedCards {
+                cmuxHost?.prewarmWorkspaceForBackgroundLaunch(for: clonedCard, boardID: boardID)
             }
         }
     }
@@ -921,8 +925,11 @@ final class BoardStore {
             let worktreePath = try await GitService.createWorktree(cardID: cardID, repositoryPath: repositoryPath)
             guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
             boards[bi].cards[ci].worktreePath = worktreePath
+            let updatedCard = boards[bi].cards[ci]
             if selectedBoardID == boardID, selectedCardID == cardID {
-                cmuxHost?.syncSelection(card: boards[bi].cards[ci], boardID: boardID)
+                cmuxHost?.syncSelection(card: updatedCard, boardID: boardID)
+            } else if updatedCard.pendingLaunchPrompt != nil {
+                cmuxHost?.prewarmWorkspaceForBackgroundLaunch(for: updatedCard, boardID: boardID)
             }
             scheduleSave()
         } catch {

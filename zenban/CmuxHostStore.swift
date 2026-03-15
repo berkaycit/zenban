@@ -118,6 +118,16 @@ final class CmuxHostStore {
         activateWorkspace(for: card, boardID: boardID)
     }
 
+    func prewarmWorkspaceForBackgroundLaunch(for card: Card, boardID: UUID) {
+        configureAppDelegateIfNeeded()
+        guard canCreateWorkspace(for: card, boardID: boardID) else { return }
+
+        let workspace = ensureWorkspace(for: card, boardID: boardID)
+        requestBackgroundWorkspaceLoad(for: workspace)
+        updateTitle(for: card.id, title: card.title)
+        updateAgentLaunch(for: card, boardID: boardID)
+    }
+
     func workspace(for cardID: UUID) -> Workspace? {
         guard let workspaceID = cardToWorkspaceID[cardID] else { return nil }
         return workspace(forID: workspaceID)
