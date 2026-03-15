@@ -3061,6 +3061,39 @@
     "Dependency Setup" : {
 
     },
+    "done.terminal.closed.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done cards keep their terminal closed until you choose to reopen it."
+          }
+        }
+      }
+    },
+    "done.terminal.closed.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminal is closed"
+          }
+        }
+      }
+    },
+    "done.terminal.open" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Terminal"
+          }
+        }
+      }
+    },
     "Description" : {
 
     },

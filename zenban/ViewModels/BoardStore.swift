@@ -467,12 +467,19 @@ final class BoardStore {
     func moveCard(_ cardID: UUID, to column: Column, in boardID: UUID) -> Bool {
         guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID),
               boards[bi].cards[ci].column != column else { return false }
+        let previousColumn = boards[bi].cards[ci].column
         let minOrderIndex = boards[bi].cards
             .filter { $0.column == column }
             .map(\.orderIndex)
             .min() ?? 1
         boards[bi].cards[ci].column = column
         boards[bi].cards[ci].orderIndex = minOrderIndex - 1
+        if column == .done, previousColumn != .done {
+            if overlayState.isDevServer, overlayState.cardID == cardID {
+                overlayState = .none
+            }
+            cmuxHost?.removeWorkspace(for: cardID)
+        }
         scheduleSave()
         return true
     }

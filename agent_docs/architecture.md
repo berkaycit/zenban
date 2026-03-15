@@ -41,7 +41,7 @@ For git-backed boards, each card gets its own worktree at `../repo-worktrees/` o
 
 ## Card Detail
 
-The detail pane shows card metadata, column controls, agent selection, and worktree status above an embedded cmux `WorkspaceContentView`. Each selected card lazily gets its own workspace rooted at the card worktree or board repository path.
+The detail pane shows card metadata, column controls, agent selection, and worktree status above an embedded cmux `WorkspaceContentView`. `To Do` and `In Review` cards still lazily create a workspace from the card worktree or board repository path, while `Done` cards keep that workspace closed until the user explicitly reopens it from the detail CTA.
 
 ## Dev Server
 

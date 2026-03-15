@@ -125,7 +125,7 @@ struct CmuxHostStoreLifecycleTests {
             _ = appDelegate
         }
 
-        hostStore.syncSelection(card: card, boardID: board.id)
+        hostStore.openTerminal(for: card, boardID: board.id)
         let workspace = try #require(hostStore.workspace(for: card.id))
 
         notificationStore.addNotification(
@@ -137,6 +137,63 @@ struct CmuxHostStoreLifecycleTests {
         )
 
         #expect(boardStore.card(id: card.id)?.column == .done)
+    }
+
+    @Test
+    func syncSelectionDoesNotCreateWorkspaceForDoneCard() {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture(column: .done)
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        #expect(hostStore.workspace(for: card.id) == nil)
+    }
+
+    @Test
+    func openTerminalCreatesWorkspaceForDoneCard() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture(column: .done)
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.openTerminal(for: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        #expect(workspace.focusedTerminalPanel != nil)
+    }
+
+    @Test
+    func manualDoneWorkspaceClosesWhenSelectionLeavesCardAndDoesNotReopenOnReturn() throws {
+        let appDelegate = AppDelegate()
+        let doneCard = Card(title: "done", column: .done, orderIndex: 0, agent: .claude, worktreePath: "/tmp/done")
+        let todoCard = Card(title: "todo", column: .todo, orderIndex: 0, agent: .claude, worktreePath: "/tmp/todo")
+        let board = Board(name: "Done Selection", cards: [doneCard, todoCard], repositoryPath: "/tmp/repo", agent: .claude)
+        let boardStore = makeBoardStore(board: board, selectedCardID: doneCard.id)
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.openTerminal(for: doneCard, boardID: board.id)
+        #expect(hostStore.workspace(for: doneCard.id) != nil)
+
+        hostStore.syncSelection(card: todoCard, boardID: board.id)
+
+        #expect(hostStore.workspace(for: doneCard.id) == nil)
+        #expect(hostStore.workspace(for: todoCard.id) != nil)
+
+        hostStore.syncSelection(card: doneCard, boardID: board.id)
+
+        #expect(hostStore.workspace(for: doneCard.id) == nil)
     }
 
     @Test
@@ -329,6 +386,25 @@ struct CmuxHostStoreLifecycleTests {
     }
 
     @Test
+    func movingCardToDoneClosesWorkspace() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        #expect(hostStore.workspace(for: card.id) != nil)
+
+        #expect(boardStore.moveCard(card.id, to: .done, in: board.id))
+
+        #expect(boardStore.card(id: card.id)?.column == .done)
+        #expect(hostStore.workspace(for: card.id) == nil)
+    }
+
+    @Test
     func childExitOnLastPanelClosesWorkspaceAgain() throws {
         let tabManager = TabManager()
         let workspace = tabManager.addWorkspace(select: false)
@@ -349,15 +425,21 @@ struct CmuxHostStoreLifecycleTests {
             repositoryPath: "/tmp/repo",
             agent: .claude
         )
+        let boardStore = makeBoardStore(board: board, selectedCardID: card.id)
+        return (boardStore, board, card)
+    }
+
+    private func makeBoardStore(board: Board, selectedCardID: UUID?) -> BoardStore {
         let boardStore = BoardStore()
         boardStore.boards = [board]
         boardStore.selectedBoardID = board.id
-        boardStore.selectedCardID = card.id
-        return (boardStore, board, card)
+        boardStore.selectedCardID = selectedCardID
+        return boardStore
     }
 
     private func makeHostStore(boardStore: BoardStore) -> (CmuxHostStore, NSWindow) {
         let hostStore = CmuxHostStore()
+        boardStore.cmuxHost = hostStore
         hostStore.attach(boardStore: boardStore)
 
         let window = NSWindow(

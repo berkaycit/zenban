@@ -116,11 +116,38 @@ struct CmuxHostStoreLaunchTests {
         #expect(!FileManager.default.fileExists(atPath: promptFileURL(in: tempDirectory).path))
     }
 
+    @Test
+    func doneCardDoesNotAutoLaunchUntilTerminalIsOpened() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path, column: .done)
+        let hostStore = makeHostStore(boardStore: boardStore)
+        var commands: [String] = []
+        hostStore.configureClaudeLaunchHooksForTesting(launchCommandHandler: { _, command in
+            commands.append(command)
+        })
+        defer {
+            hostStore.resetClaudeLaunchHooksForTesting()
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(hostStore.workspace(for: card.id) == nil)
+        #expect(commands.isEmpty)
+
+        hostStore.openTerminal(for: card, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: card.id)
+        try await waitUntil { commands.count == 1 }
+
+        #expect(commands == [expectedClaudeLaunchCommand()])
+    }
+
     private func makeBoardFixture(
         agent: Agent,
-        worktreePath: String
+        worktreePath: String,
+        column: Column = .todo
     ) -> (BoardStore, Board, Card) {
-        let card = Card(title: "cc-42", column: .todo, agent: agent, worktreePath: worktreePath)
+        let card = Card(title: "cc-42", column: column, agent: agent, worktreePath: worktreePath)
         let board = Board(
             name: "Workspace Ownership",
             cards: [card],
@@ -136,6 +163,7 @@ struct CmuxHostStoreLaunchTests {
 
     private func makeHostStore(boardStore: BoardStore) -> CmuxHostStore {
         let hostStore = CmuxHostStore()
+        boardStore.cmuxHost = hostStore
         hostStore.attach(boardStore: boardStore)
         return hostStore
     }

@@ -11,6 +11,11 @@ final class CmuxHostStore {
         let paneId: PaneID
     }
 
+    private struct SelectedCardContext: Equatable {
+        let cardID: UUID
+        let boardID: UUID
+    }
+
     let tabManager: TabManager
     let notificationStore: TerminalNotificationStore
     let sidebarState = SidebarState()
@@ -30,6 +35,7 @@ final class CmuxHostStore {
 #if DEBUG
     @ObservationIgnored private var launchCommandHandlerForTesting: ((UUID, String) -> Void)?
 #endif
+    @ObservationIgnored private var selectedCardContext: SelectedCardContext?
 
     init() {
         UserDefaults.standard.set(true, forKey: WelcomeSettings.shownKey)
@@ -58,15 +64,20 @@ final class CmuxHostStore {
 
     func syncSelection(card: Card?, boardID: UUID?) {
         configureAppDelegateIfNeeded()
+        updateSelectedCardContext(card: card, boardID: boardID)
 
         guard let card, let boardID else { return }
+        guard card.column != .done else { return }
         guard canCreateWorkspace(for: card, boardID: boardID) else { return }
 
-        let workspace = ensureWorkspace(for: card, boardID: boardID)
-        requestBackgroundWorkspaceLoad(for: workspace)
-        selectWorkspace(workspace)
-        updateTitle(for: card.id, title: card.title)
-        updateAgentLaunch(for: card, boardID: boardID)
+        activateWorkspace(for: card, boardID: boardID)
+    }
+
+    func openTerminal(for card: Card, boardID: UUID) {
+        configureAppDelegateIfNeeded()
+        updateSelectedCardContext(card: card, boardID: boardID)
+        guard canCreateWorkspace(for: card, boardID: boardID) else { return }
+        activateWorkspace(for: card, boardID: boardID)
     }
 
     func workspace(for cardID: UUID) -> Workspace? {
@@ -265,6 +276,29 @@ final class CmuxHostStore {
         }
 
         boardStore.selectCard(cardID, in: boardID)
+    }
+
+    private func updateSelectedCardContext(card: Card?, boardID: UUID?) {
+        let nextContext = card.flatMap { card in
+            boardID.map { SelectedCardContext(cardID: card.id, boardID: $0) }
+        }
+
+        if let previousContext = selectedCardContext,
+           previousContext != nextContext,
+           let previousCard = boardStore?.card(id: previousContext.cardID),
+           previousCard.column == .done {
+            removeWorkspace(for: previousContext.cardID)
+        }
+
+        selectedCardContext = nextContext
+    }
+
+    private func activateWorkspace(for card: Card, boardID: UUID) {
+        let workspace = ensureWorkspace(for: card, boardID: boardID)
+        requestBackgroundWorkspaceLoad(for: workspace)
+        selectWorkspace(workspace)
+        updateTitle(for: card.id, title: card.title)
+        updateAgentLaunch(for: card, boardID: boardID)
     }
 
     @discardableResult

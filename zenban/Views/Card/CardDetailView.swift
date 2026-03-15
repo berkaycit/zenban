@@ -43,6 +43,9 @@ struct CardDetailView: View {
         .onChange(of: card.worktreePath) {
             syncDisplayedWorkspace()
         }
+        .onChange(of: card.column) {
+            syncDisplayedWorkspace()
+        }
         .onChange(of: card.agent) {
             cmuxHost.updateAgentLaunch(for: card, boardID: boardID)
         }
@@ -266,6 +269,8 @@ struct CardDetailView: View {
                     .zIndex(1)
                 }
             }
+        } else if showsDoneTerminalPlaceholder {
+            doneTerminalPlaceholder
         } else {
             workspacePlaceholder
         }
@@ -290,7 +295,11 @@ struct CardDetailView: View {
 
     private func syncDisplayedWorkspace() {
         cmuxHost.syncSelection(card: card, boardID: boardID)
-        transitionToWorkspace(cmuxHost.workspace(for: card.id))
+        if card.column == .done {
+            transitionToWorkspace(nil)
+        } else {
+            transitionToWorkspace(cmuxHost.workspace(for: card.id))
+        }
     }
 
     private func transitionToWorkspace(_ targetWorkspace: Workspace?) {
@@ -431,11 +440,42 @@ struct CardDetailView: View {
         .background(Color.codeBackground)
     }
 
+    private var doneTerminalPlaceholder: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+
+            Text(String(localized: "done.terminal.closed.title", defaultValue: "Terminal is closed"))
+                .font(.headline)
+
+            Text(
+                String(
+                    localized: "done.terminal.closed.message",
+                    defaultValue: "Done cards keep their terminal closed until you choose to reopen it."
+                )
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 360)
+
+            Button(String(localized: "done.terminal.open", defaultValue: "Open Terminal"), action: openTerminal)
+                .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.codeBackground)
+    }
+
     private var placeholderSubtitle: String {
         if cmuxHost.isWaitingForWorktree(for: card, boardID: boardID) {
             return "The card worktree is still being created. The copied cmux workspace will appear here as soon as it is ready."
         }
         return "The copied cmux workspace is starting up for this card."
+    }
+
+    private var showsDoneTerminalPlaceholder: Bool {
+        card.column == .done && !cmuxHost.isWaitingForWorktree(for: card, boardID: boardID)
     }
 
     private func startEditing() {
@@ -458,6 +498,11 @@ struct CardDetailView: View {
 
     private func moveToColumn(_ column: Column) {
         store.moveCard(card.id, to: column, in: boardID)
+    }
+
+    private func openTerminal() {
+        cmuxHost.openTerminal(for: card, boardID: boardID)
+        transitionToWorkspace(cmuxHost.workspace(for: card.id))
     }
 
     private func deleteCard() {

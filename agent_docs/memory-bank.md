@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Keep Done card terminals manual
+- **Description**: `Done` cards now close their cmux workspace as soon as they move into the completed column and no longer auto-open a terminal when selected. The detail pane shows an `Open Terminal` CTA instead, and that manual session is torn down again when the user leaves the card. Added focused lifecycle and launch regression coverage around the new manual-open flow.
+
 - **Summary**: Enable bulk delete for Done cards
 - **Description**: Extended the column-header bulk delete action to the `Done` column so every workflow lane now uses the same confirmation and batch-deletion flow. Updated the focused store regression tests to cover `Done` request creation and kept empty-column guards in place. This keeps the UI and destructive actions consistent across the board.
 
