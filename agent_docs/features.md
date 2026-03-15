@@ -14,6 +14,7 @@
 - Delete cards with `Cmd+Shift+D`
 - Override the board agent per card
 - Persist agent choice as card metadata and auto-launch it inside the card workspace
+- Claude completion notifications move the owning card to `In Review`, and Claude resuming work moves it back to `To Do`
 - Show worktree readiness in the detail pane for git-backed boards
 
 ## Card Workspaces

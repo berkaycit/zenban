@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Automate Claude-driven card column moves
+- **Description**: `CmuxHostStore` now observes Claude lifecycle signals from the copied cmux notification and status streams. Completion notifications move the owning card into `In Review`, while Claude returning to active work moves it back to `To Do`. Added focused lifecycle regression tests around the completion and status classification rules.
+
 - **Summary**: Add cmux localization and scripting resources
 - **Description**: Added English-only `Localizable.xcstrings` and `InfoPlist.xcstrings` copied from cmux plus `cmux.sdef` for the app bundle. `Info.plist` now exposes Finder Services and the cmux AppleScript dictionary while intentionally leaving out cmux update-feed metadata and `http/https` URL handling.
 

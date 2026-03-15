@@ -1521,7 +1521,6 @@ class TabManager: ObservableObject {
             let nextIndex = min(index, max(0, tabs.count - 1))
             selectedTabId = tabs[nextIndex].id
         }
-
         return removed
     }
 

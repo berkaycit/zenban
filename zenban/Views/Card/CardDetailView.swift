@@ -9,6 +9,11 @@ struct CardDetailView: View {
     @Environment(CmuxHostStore.self) private var cmuxHost
     @State private var editedTitle = ""
     @State private var isEditing = false
+    @State private var activeWorkspace: Workspace?
+    @State private var retiringWorkspace: Workspace?
+    @State private var workspaceHandoffGeneration: UInt64 = 0
+    @State private var workspaceHandoffReadyTask: Task<Void, Never>?
+    @State private var workspaceHandoffFallbackTask: Task<Void, Never>?
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -27,15 +32,16 @@ struct CardDetailView: View {
         .background(Color.cardBackground.ignoresSafeArea(.container, edges: .top))
         .onAppear {
             editedTitle = card.title
-            cmuxHost.syncSelection(card: card, boardID: boardID)
+            syncDisplayedWorkspace()
         }
+        .onDisappear(perform: teardownDisplayedWorkspaces)
         .onChange(of: card.id) {
             editedTitle = card.title
             isEditing = false
-            cmuxHost.syncSelection(card: card, boardID: boardID)
+            syncDisplayedWorkspace()
         }
         .onChange(of: card.worktreePath) {
-            cmuxHost.syncSelection(card: card, boardID: boardID)
+            syncDisplayedWorkspace()
         }
         .onChange(of: card.agent) {
             cmuxHost.updateAgentLaunch(for: card, boardID: boardID)
@@ -237,17 +243,172 @@ struct CardDetailView: View {
 
     @ViewBuilder
     private var terminalSection: some View {
-        if let workspace = cmuxHost.workspace(for: card.id) {
-            WorkspaceContentView(
-                workspace: workspace,
-                isWorkspaceVisible: true,
-                isWorkspaceInputActive: true,
-                workspacePortalPriority: 0,
-                onThemeRefreshRequest: nil
-            )
-            .environmentObject(cmuxHost.notificationStore)
+        if activeWorkspace != nil || retiringWorkspace != nil {
+            ZStack {
+                if let retiringWorkspace, retiringWorkspace.id != activeWorkspace?.id {
+                    workspaceContent(
+                        retiringWorkspace,
+                        isVisible: true,
+                        isInputActive: false,
+                        portalPriority: 0
+                    )
+                    .allowsHitTesting(false)
+                    .zIndex(0)
+                }
+
+                if let activeWorkspace {
+                    workspaceContent(
+                        activeWorkspace,
+                        isVisible: true,
+                        isInputActive: true,
+                        portalPriority: 1
+                    )
+                    .zIndex(1)
+                }
+            }
         } else {
             workspacePlaceholder
+        }
+    }
+
+    private func workspaceContent(
+        _ workspace: Workspace,
+        isVisible: Bool,
+        isInputActive: Bool,
+        portalPriority: Int
+    ) -> some View {
+        WorkspaceContentView(
+            workspace: workspace,
+            isWorkspaceVisible: isVisible,
+            isWorkspaceInputActive: isInputActive,
+            workspacePortalPriority: portalPriority,
+            onThemeRefreshRequest: nil
+        )
+        .id(workspace.id)
+        .environmentObject(cmuxHost.notificationStore)
+    }
+
+    private func syncDisplayedWorkspace() {
+        cmuxHost.syncSelection(card: card, boardID: boardID)
+        transitionToWorkspace(cmuxHost.workspace(for: card.id))
+    }
+
+    private func transitionToWorkspace(_ targetWorkspace: Workspace?) {
+        let previousActiveWorkspace = activeWorkspace
+        let previousRetiringWorkspace = retiringWorkspace
+
+        guard let targetWorkspace else {
+            cancelWorkspaceHandoffTasks()
+            hidePortalViews(for: previousActiveWorkspace, previousRetiringWorkspace)
+            activeWorkspace = nil
+            retiringWorkspace = nil
+            return
+        }
+
+        if previousActiveWorkspace == nil {
+            cancelWorkspaceHandoffTasks()
+            if previousRetiringWorkspace?.id != targetWorkspace.id {
+                hidePortalViews(for: previousRetiringWorkspace)
+            }
+            activeWorkspace = targetWorkspace
+            retiringWorkspace = nil
+            return
+        }
+
+        guard previousActiveWorkspace?.id != targetWorkspace.id else {
+            activeWorkspace = targetWorkspace
+            return
+        }
+
+        cancelWorkspaceHandoffTasks()
+
+        if let previousRetiringWorkspace,
+           previousRetiringWorkspace.id != targetWorkspace.id,
+           previousRetiringWorkspace.id != previousActiveWorkspace?.id {
+            hidePortalViews(for: previousRetiringWorkspace)
+        }
+
+        activeWorkspace = targetWorkspace
+        retiringWorkspace = previousActiveWorkspace
+        scheduleWorkspaceHandoffCompletion(for: targetWorkspace)
+    }
+
+    private func scheduleWorkspaceHandoffCompletion(for workspace: Workspace) {
+        guard retiringWorkspace != nil else { return }
+
+        workspaceHandoffGeneration &+= 1
+        let generation = workspaceHandoffGeneration
+        let workspaceID = workspace.id
+
+        workspaceHandoffReadyTask = Task { @MainActor in
+            for delay in [0, 20_000_000, 40_000_000, 60_000_000] {
+                if delay > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(delay))
+                }
+                if Task.isCancelled { return }
+
+                guard workspaceHandoffGeneration == generation,
+                      retiringWorkspace != nil,
+                      activeWorkspace?.id == workspaceID,
+                      let activeWorkspace,
+                      canCompleteWorkspaceHandoffImmediately(for: activeWorkspace) else {
+                    continue
+                }
+
+                completeWorkspaceHandoff()
+                return
+            }
+        }
+
+        workspaceHandoffFallbackTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if Task.isCancelled { return }
+
+            guard workspaceHandoffGeneration == generation,
+                  retiringWorkspace != nil,
+                  activeWorkspace?.id == workspaceID else {
+                return
+            }
+
+            completeWorkspaceHandoff()
+        }
+    }
+
+    private func canCompleteWorkspaceHandoffImmediately(for workspace: Workspace) -> Bool {
+        if let focusedPanelId = workspace.focusedPanelId,
+           workspace.browserPanel(for: focusedPanelId) != nil {
+            return true
+        }
+        return workspace.hasLoadedTerminalSurface()
+    }
+
+    private func completeWorkspaceHandoff() {
+        cancelWorkspaceHandoffTasks()
+        hidePortalViews(for: retiringWorkspace)
+        retiringWorkspace = nil
+    }
+
+    private func teardownDisplayedWorkspaces() {
+        cancelWorkspaceHandoffTasks()
+        hidePortalViews(for: activeWorkspace, retiringWorkspace)
+        activeWorkspace = nil
+        retiringWorkspace = nil
+    }
+
+    private func cancelWorkspaceHandoffTasks() {
+        workspaceHandoffGeneration &+= 1
+        workspaceHandoffReadyTask?.cancel()
+        workspaceHandoffReadyTask = nil
+        workspaceHandoffFallbackTask?.cancel()
+        workspaceHandoffFallbackTask = nil
+    }
+
+    private func hidePortalViews(for workspaces: Workspace?...) {
+        var hiddenWorkspaceIds = Set<UUID>()
+        for workspace in workspaces.compactMap({ $0 }) {
+            guard hiddenWorkspaceIds.insert(workspace.id).inserted else { continue }
+            workspace.hideAllTerminalPortalViews()
+            workspace.hideAllBrowserPortalViews()
         }
     }
 

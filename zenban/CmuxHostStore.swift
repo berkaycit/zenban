@@ -1,5 +1,6 @@
 import AppKit
 import Bonsplit
+import Combine
 import Observation
 
 @MainActor
@@ -26,6 +27,8 @@ final class CmuxHostStore {
     @ObservationIgnored private weak var registeredWindow: NSWindow?
     @ObservationIgnored private var launchTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var didConfigureAppDelegate = false
+    @ObservationIgnored private var notificationsObserver: AnyCancellable?
+    @ObservationIgnored private var knownNotificationIDs = Set<UUID>()
 
     init() {
         UserDefaults.standard.set(true, forKey: WelcomeSettings.shownKey)
@@ -36,6 +39,7 @@ final class CmuxHostStore {
     func attach(boardStore: BoardStore) {
         self.boardStore = boardStore
         configureAppDelegateIfNeeded()
+        installNotificationsObserverIfNeeded()
     }
 
     func registerMainWindow(_ window: NSWindow) {
@@ -58,16 +62,15 @@ final class CmuxHostStore {
         guard canCreateWorkspace(for: card, boardID: boardID) else { return }
 
         let workspace = ensureWorkspace(for: card, boardID: boardID)
-        workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
-        tabManager.requestBackgroundWorkspaceLoad(for: workspace.id)
-        tabManager.selectedTabId = workspace.id
+        requestBackgroundWorkspaceLoad(for: workspace)
+        selectWorkspace(workspace)
         updateTitle(for: card.id, title: card.title)
         updateAgentLaunch(for: card, boardID: boardID)
     }
 
     func workspace(for cardID: UUID) -> Workspace? {
         guard let workspaceID = cardToWorkspaceID[cardID] else { return nil }
-        return tabManager.tabs.first(where: { $0.id == workspaceID })
+        return workspace(forID: workspaceID)
     }
 
     func isWaitingForWorktree(for card: Card, boardID: UUID) -> Bool {
@@ -110,9 +113,7 @@ final class CmuxHostStore {
             for _ in 0..<120 {
                 guard !Task.isCancelled, let self else { return }
                 guard let workspace = self.workspace(for: cardID), workspace.id == workspaceID else { return }
-
-                self.tabManager.requestBackgroundWorkspaceLoad(for: workspaceID)
-                workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
+                self.requestBackgroundWorkspaceLoad(for: workspace)
 
                 if let terminalPanel = self.launchTerminalPanel(in: workspace),
                    terminalPanel.surface.surface != nil {
@@ -131,8 +132,7 @@ final class CmuxHostStore {
         guard canCreateWorkspace(for: card, boardID: boardID) else { return }
 
         let workspace = ensureWorkspace(for: card, boardID: boardID)
-        workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
-        tabManager.requestBackgroundWorkspaceLoad(for: workspace.id)
+        requestBackgroundWorkspaceLoad(for: workspace)
 
         if let panelID = cardToBrowserPanelID[card.id],
            let panel = workspace.panels[panelID] as? BrowserPanel {
@@ -165,17 +165,18 @@ final class CmuxHostStore {
             return
         }
 
-        tabManager.selectedTabId = workspace.id
+        selectWorkspace(workspace)
         workspace.focusPanel(context.panel.id)
     }
 
     func restoreTerminalFocus(for cardID: UUID) {
-        guard let workspace = workspace(for: cardID),
-              let terminalPanel = launchTerminalPanel(in: workspace) else {
+        guard let workspace = workspace(for: cardID) else {
             return
         }
 
-        tabManager.selectedTabId = workspace.id
+        guard let terminalPanel = launchTerminalPanel(in: workspace) else { return }
+
+        selectWorkspace(workspace)
         workspace.focusPanel(terminalPanel.id)
     }
 
@@ -185,13 +186,27 @@ final class CmuxHostStore {
         launchSignatureByCardID.removeValue(forKey: cardID)
         cardToBrowserPanelID.removeValue(forKey: cardID)
 
-        guard let workspaceID = cardToWorkspaceID.removeValue(forKey: cardID) else { return }
+        let workspaceIDs = workspaceToCardID
+            .filter { $0.value == cardID }
+            .map(\.key)
 
-        workspaceToCardID.removeValue(forKey: workspaceID)
-        workspaceToBoardID.removeValue(forKey: workspaceID)
+        let activeWorkspaceID = cardToWorkspaceID.removeValue(forKey: cardID)
 
-        guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceID }) else { return }
-        tabManager.closeWorkspace(workspace)
+        for workspaceID in workspaceIDs {
+            workspaceToCardID.removeValue(forKey: workspaceID)
+            workspaceToBoardID.removeValue(forKey: workspaceID)
+        }
+
+        guard let activeWorkspaceID else {
+            return
+        }
+        guard let workspace = workspace(forID: activeWorkspaceID) else { return }
+        if let owningManager = workspace.owningTabManager
+            ?? AppDelegate.shared?.tabManagerFor(tabId: workspace.id) {
+            owningManager.closeWorkspace(workspace)
+        } else {
+            workspace.teardownAllPanels()
+        }
     }
 
     private func configureAppDelegateIfNeeded() {
@@ -208,6 +223,44 @@ final class CmuxHostStore {
             }
         }
         didConfigureAppDelegate = true
+    }
+
+    private func installNotificationsObserverIfNeeded() {
+        guard notificationsObserver == nil else { return }
+        knownNotificationIDs = Set(notificationStore.notifications.map(\.id))
+        notificationsObserver = notificationStore.$notifications
+            .sink { [weak self] notifications in
+                self?.handleNotificationsChanged(notifications)
+            }
+    }
+
+    private func handleNotificationsChanged(_ notifications: [TerminalNotification]) {
+        let currentIDs = Set(notifications.map(\.id))
+        let newNotifications = notifications.filter { !knownNotificationIDs.contains($0.id) }
+        knownNotificationIDs = currentIDs
+
+        for notification in newNotifications {
+            handleDeliveredNotification(notification)
+        }
+    }
+
+    private func handleDeliveredNotification(_ notification: TerminalNotification) {
+        guard !notification.isRead,
+              isClaudeCompletionNotification(notification),
+              let boardStore,
+              let cardID = workspaceToCardID[notification.tabId],
+              let boardID = workspaceToBoardID[notification.tabId],
+              let card = boardStore.card(id: cardID),
+              resolvedAgent(for: card, boardID: boardID) == .claude else {
+            return
+        }
+
+        _ = boardStore.moveCard(cardID, to: .inProgress, in: boardID)
+    }
+
+    private func isClaudeCompletionNotification(_ notification: TerminalNotification) -> Bool {
+        guard notification.title == Agent.claude.rawValue else { return false }
+        return notification.subtitle.hasPrefix("Completed")
     }
 
     private func handleNotificationOpen(workspaceID: UUID) {
@@ -300,5 +353,31 @@ final class CmuxHostStore {
             .compactMap { $0 as? TerminalPanel }
             .sorted { $0.id.uuidString < $1.id.uuidString }
             .first
+    }
+
+    private func requestBackgroundWorkspaceLoad(for workspace: Workspace) {
+        workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
+        owningTabManager(for: workspace).requestBackgroundWorkspaceLoad(for: workspace.id)
+    }
+
+    private func workspace(forID workspaceID: UUID) -> Workspace? {
+        if let workspace = tabManager.tabs.first(where: { $0.id == workspaceID }) {
+            return workspace
+        }
+        if let externalManager = AppDelegate.shared?.tabManagerFor(tabId: workspaceID),
+           let workspace = externalManager.tabs.first(where: { $0.id == workspaceID }) {
+            return workspace
+        }
+        return nil
+    }
+
+    private func owningTabManager(for workspace: Workspace) -> TabManager {
+        workspace.owningTabManager
+            ?? AppDelegate.shared?.tabManagerFor(tabId: workspace.id)
+            ?? tabManager
+    }
+
+    private func selectWorkspace(_ workspace: Workspace) {
+        owningTabManager(for: workspace).selectedTabId = workspace.id
     }
 }
