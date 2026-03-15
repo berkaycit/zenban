@@ -566,6 +566,9 @@
     "Are you sure you want to delete" : {
 
     },
+    "Are you sure you want to delete %lld cards from \"%@\"?" : {
+
+    },
     "Auto-generate" : {
 
     },
@@ -3032,6 +3035,15 @@
 
     },
     "Delete card" : {
+
+    },
+    "Delete cards in %@" : {
+
+    },
+    "Delete cards in %@?" : {
+
+    },
+    "Delete cards in column" : {
 
     },
     "Delete Card" : {

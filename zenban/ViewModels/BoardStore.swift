@@ -48,11 +48,63 @@ enum OverlayState: Equatable {
 }
 
 struct DeleteConfirmationRequest: Identifiable, Equatable {
-    let boardID: UUID
-    let cardID: UUID
-    let cardTitle: String
+    enum Target: Equatable {
+        case card(boardID: UUID, cardID: UUID, cardTitle: String)
+        case column(boardID: UUID, column: Column, cardIDs: [UUID])
+    }
 
-    var id: UUID { cardID }
+    let target: Target
+
+    static func card(boardID: UUID, card: Card) -> Self {
+        Self(target: .card(boardID: boardID, cardID: card.id, cardTitle: card.title))
+    }
+
+    static func column(boardID: UUID, column: Column, cards: [Card]) -> Self {
+        Self(target: .column(boardID: boardID, column: column, cardIDs: cards.map(\.id)))
+    }
+
+    var id: String {
+        switch target {
+        case .card(_, let cardID, _):
+            cardID.uuidString
+        case .column(let boardID, let column, _):
+            "\(boardID.uuidString)-\(column.rawValue)"
+        }
+    }
+
+    var content: DeleteConfirmationContent {
+        switch target {
+        case .card(_, _, let cardTitle):
+            return DeleteConfirmationContent(
+                title: String(localized: "Delete Card?", defaultValue: "Delete Card?"),
+                message: String(
+                    localized: "Are you sure you want to delete",
+                    defaultValue: "Are you sure you want to delete"
+                ),
+                detail: String.localizedStringWithFormat(
+                    String(localized: "\"%@\"?", defaultValue: "\"%@\"?"),
+                    cardTitle
+                ),
+                deleteAccessibilityLabel: String(localized: "Delete card", defaultValue: "Delete card")
+            )
+        case .column(_, let column, let cardIDs):
+            return DeleteConfirmationContent(
+                title: column.bulkDeleteConfirmationTitle,
+                message: column.bulkDeleteConfirmationMessage(cardCount: cardIDs.count),
+                detail: nil,
+                deleteAccessibilityLabel: column.bulkDeleteAccessibilityLabel
+            )
+        }
+    }
+
+    func affectsAnyCard(in cardIDs: Set<UUID>) -> Bool {
+        switch target {
+        case .card(_, let cardID, _):
+            cardIDs.contains(cardID)
+        case .column(_, _, let snapshotCardIDs):
+            !cardIDs.isDisjoint(with: Set(snapshotCardIDs))
+        }
+    }
 }
 
 @MainActor
@@ -80,6 +132,7 @@ final class BoardStore {
     var onCardDeleted: ((UUID) -> Void)?
     @ObservationIgnored weak var cmuxHost: CmuxHostStore?
 
+    @ObservationIgnored private let persistenceEnabled: Bool
     private var saveTask: Task<Void, Never>?
 
     // O(1) board index cache - invalidated when boards change
@@ -268,8 +321,9 @@ final class BoardStore {
         overlayState = .none
     }
 
-    init() {
-        boards = BoardStorage.load()
+    init(initialBoards: [Board]? = nil, persistenceEnabled: Bool = true) {
+        self.persistenceEnabled = persistenceEnabled
+        boards = initialBoards ?? BoardStorage.load()
         selectedBoardID = boards.first?.id
     }
 
@@ -334,7 +388,7 @@ final class BoardStore {
 
         // Stop overlay if showing for any card in this board
         if let id = overlayState.cardID, cardIDs.contains(id) { overlayState = .none }
-        if let request = deleteConfirmationRequest, cardIDs.contains(request.cardID) {
+        if let request = deleteConfirmationRequest, request.affectsAnyCard(in: cardIDs) {
             deleteConfirmationRequest = nil
         }
 
@@ -445,57 +499,51 @@ final class BoardStore {
 
     func requestDeleteSelectedCard() {
         guard let board = selectedBoard, let card = selectedCard else { return }
-        deleteConfirmationRequest = DeleteConfirmationRequest(
-            boardID: board.id,
-            cardID: card.id,
-            cardTitle: card.title
-        )
+        deleteConfirmationRequest = .card(boardID: board.id, card: card)
     }
 
-    func confirmDeleteSelectedCard() {
+    func requestDeleteColumn(_ column: Column, in boardID: UUID) {
+        guard column.supportsBulkDelete,
+              let board = board(for: boardID) else { return }
+
+        let cards = board.cards(in: column)
+        guard !cards.isEmpty else { return }
+
+        deleteConfirmationRequest = .column(boardID: boardID, column: column, cards: cards)
+    }
+
+    func confirmDeleteRequest() {
         guard let request = deleteConfirmationRequest else { return }
         deleteConfirmationRequest = nil
-        deleteCard(request.cardID, from: request.boardID)
+
+        switch request.target {
+        case .card(let boardID, let cardID, _):
+            deleteCard(cardID, from: boardID)
+        case .column(let boardID, let column, let snapshotCardIDs):
+            let selectedCardDeletionContext = deleteSelectionContext(
+                boardID: boardID,
+                deletedCardIDs: Set(snapshotCardIDs),
+                fallbackColumn: column
+            )
+            deleteCards(
+                Set(snapshotCardIDs),
+                from: boardID,
+                selectionContext: selectedCardDeletionContext
+            )
+        }
     }
 
-    func cancelDeleteSelectedCard() {
+    func cancelDeleteRequest() {
         deleteConfirmationRequest = nil
     }
 
     func deleteCard(_ cardID: UUID, from boardID: UUID) {
-        guard let i = boardIndex(for: boardID) else { return }
-
-        let card = boards[i].cards.first { $0.id == cardID }
-        let repoPath = boards[i].repositoryPath
-        let wasSelected = selectedCardID == cardID
-
-        // Capture column and index before deletion for selection logic
-        let deletedColumn = card?.column
-        let deletedIndex = deletedColumn.flatMap { col in
-            boards[i].cards(in: col).firstIndex { $0.id == cardID }
-        }
-
-        if overlayState.cardID == cardID { overlayState = .none }
-        if deleteConfirmationRequest?.cardID == cardID { deleteConfirmationRequest = nil }
-
-        cmuxHost?.removeWorkspace(for: cardID)
-        boards[i].cards.removeAll { $0.id == cardID }
-        if draggedCardID == cardID { draggedCardID = nil }
-        onCardDeleted?(cardID)
-
-        if wasSelected {
-            selectNextCardAfterDeletion(boardIndex: i, column: deletedColumn, deletedIndex: deletedIndex)
-        }
-
-        scheduleSave()
-
-        if let repoPath = repoPath,
-           card?.worktreePath != nil,
-           GitService.isGitRepository(path: repoPath) {
-            Task {
-                await deleteWorktreeForCard(cardID, repositoryPath: repoPath)
-            }
-        }
+        let selectionContext = deleteSelectionContext(
+            boardID: boardID,
+            deletedCardIDs: Set([cardID]),
+            fallbackColumn: nil
+        )
+        deleteCards(Set([cardID]), from: boardID, selectionContext: selectionContext)
     }
 
     // MARK: - Keyboard Navigation
@@ -635,6 +683,11 @@ final class BoardStore {
         }
     }
 
+    private struct DeleteSelectionContext {
+        let column: Column
+        let deletedIndex: Int
+    }
+
     // MARK: - O(1) Lookup Cache
 
     private func invalidateLookupCache() {
@@ -682,6 +735,84 @@ final class BoardStore {
         return (bi, ci)
     }
 
+    private func deleteSelectionContext(
+        boardID: UUID,
+        deletedCardIDs: Set<UUID>,
+        fallbackColumn: Column?
+    ) -> DeleteSelectionContext? {
+        guard let selectedCardID,
+              let board = board(for: boardID) else { return nil }
+
+        guard deletedCardIDs.contains(selectedCardID),
+              let selectedCard = board.cards.first(where: { $0.id == selectedCardID }) else {
+            return nil
+        }
+
+        let column = fallbackColumn ?? selectedCard.column
+        guard let deletedIndex = board.cards(in: column).firstIndex(where: { $0.id == selectedCardID }) else {
+            return nil
+        }
+
+        return DeleteSelectionContext(column: column, deletedIndex: deletedIndex)
+    }
+
+    private func deleteCards(
+        _ cardIDs: Set<UUID>,
+        from boardID: UUID,
+        selectionContext: DeleteSelectionContext? = nil
+    ) {
+        guard let boardIndex = boardIndex(for: boardID) else { return }
+
+        guard !cardIDs.isEmpty else { return }
+
+        let cardsToDelete = boards[boardIndex].cards.filter { cardIDs.contains($0.id) }
+        guard !cardsToDelete.isEmpty else { return }
+
+        let repoPath = boards[boardIndex].repositoryPath
+        let shouldAdjustSelection = selectedCardID.map { cardIDs.contains($0) } ?? false
+
+        if let overlayCardID = overlayState.cardID, cardIDs.contains(overlayCardID) {
+            overlayState = .none
+        }
+        if let request = deleteConfirmationRequest, request.affectsAnyCard(in: cardIDs) {
+            deleteConfirmationRequest = nil
+        }
+        if let draggedCardID, cardIDs.contains(draggedCardID) {
+            self.draggedCardID = nil
+        }
+
+        for card in cardsToDelete {
+            cmuxHost?.removeWorkspace(for: card.id)
+            onCardDeleted?(card.id)
+        }
+
+        boards[boardIndex].cards.removeAll { cardIDs.contains($0.id) }
+
+        if shouldAdjustSelection {
+            if let selectionContext {
+                selectNextCardAfterDeletion(
+                    boardIndex: boardIndex,
+                    column: selectionContext.column,
+                    deletedIndex: selectionContext.deletedIndex
+                )
+            } else {
+                selectedCardID = nil
+            }
+        }
+
+        scheduleSave()
+
+        if let repoPath,
+           GitService.isGitRepository(path: repoPath) {
+            for card in cardsToDelete where card.worktreePath != nil {
+                let cardID = card.id
+                Task {
+                    await deleteWorktreeForCard(cardID, repositoryPath: repoPath)
+                }
+            }
+        }
+    }
+
     // MARK: - Worktree Operations
 
     private func createWorktreeForCard(_ cardID: UUID, in boardID: UUID, repositoryPath: String) async {
@@ -706,6 +837,7 @@ final class BoardStore {
     // MARK: - Persistence
 
     private func scheduleSave() {
+        guard persistenceEnabled else { return }
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))

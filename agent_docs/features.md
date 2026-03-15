@@ -12,6 +12,7 @@
 
 - Create cards with `Cmd+Shift+A`
 - Delete cards with `Cmd+Shift+E`
+- Delete every card in the `To Do`, `In Review`, or `Done` column from the column header
 - Override the board agent per card
 - Persist agent choice as card metadata and auto-launch it inside the card workspace
 - Claude completion notifications move the owning card to `In Review`, and Claude resuming work moves it back to `To Do`

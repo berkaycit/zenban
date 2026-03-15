@@ -110,9 +110,9 @@ struct ZenbanRootView: View {
         }
         .sheet(item: $store.deleteConfirmationRequest) { request in
             DeleteConfirmationView(
-                cardTitle: request.cardTitle,
-                onDelete: store.confirmDeleteSelectedCard,
-                onCancel: store.cancelDeleteSelectedCard
+                content: request.content,
+                onDelete: store.confirmDeleteRequest,
+                onCancel: store.cancelDeleteRequest
             )
         }
     }

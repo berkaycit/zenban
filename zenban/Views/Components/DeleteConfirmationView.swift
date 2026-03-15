@@ -1,8 +1,15 @@
 import AppKit
 import SwiftUI
 
+struct DeleteConfirmationContent {
+    let title: String
+    let message: String
+    let detail: String?
+    let deleteAccessibilityLabel: String
+}
+
 struct DeleteConfirmationView: View {
-    let cardTitle: String
+    let content: DeleteConfirmationContent
     let onDelete: () -> Void
     let onCancel: () -> Void
 
@@ -12,15 +19,18 @@ struct DeleteConfirmationView: View {
                 .font(.system(size: 40))
                 .foregroundStyle(.red)
 
-            Text("Delete Card?")
+            Text(content.title)
                 .font(.headline)
 
             VStack(spacing: 4) {
-                Text("Are you sure you want to delete")
+                Text(content.message)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text("\"\(cardTitle)\"?")
-                    .font(.body.weight(.medium))
+
+                if let detail = content.detail {
+                    Text(detail)
+                        .font(.body.weight(.medium))
+                }
             }
             .multilineTextAlignment(.center)
 
@@ -33,7 +43,7 @@ struct DeleteConfirmationView: View {
 
                 Button("Delete", role: .destructive, action: onDelete)
                     .keyboardShortcut(.defaultAction)
-                    .accessibilityLabel("Delete card")
+                    .accessibilityLabel(content.deleteAccessibilityLabel)
             }
         }
         .padding(24)

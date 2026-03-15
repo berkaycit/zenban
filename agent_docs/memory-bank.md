@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Enable bulk delete for Done cards
+- **Description**: Extended the column-header bulk delete action to the `Done` column so every workflow lane now uses the same confirmation and batch-deletion flow. Updated the focused store regression tests to cover `Done` request creation and kept empty-column guards in place. This keeps the UI and destructive actions consistent across the board.
+
+- **Summary**: Add bulk column card deletion
+- **Description**: `To Do` and `In Review` column headers now expose a trash action that opens the shared delete confirmation sheet for a column snapshot. `BoardStore` now models delete confirmations for both single-card and bulk-column deletes, preserving workspace cleanup, overlay cleanup, and selection fallback while batching persistence. Added focused store regression tests for column snapshots, guarded columns, selection fallback, and cleanup hooks.
+
 - **Summary**: Automate Claude-driven card column moves
 - **Description**: `CmuxHostStore` now observes Claude lifecycle signals from the copied cmux notification and status streams. Completion notifications move the owning card into `In Review`, while Claude returning to active work moves it back to `To Do`. Added focused lifecycle regression tests around the completion and status classification rules.
 

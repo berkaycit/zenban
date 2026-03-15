@@ -10,7 +10,15 @@ struct ColumnView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ColumnHeaderView(column: column, count: cards.count)
+            ColumnHeaderView(
+                column: column,
+                count: cards.count,
+                action: column.supportsBulkDelete
+                    ? .bulkDelete(in: column, isEnabled: !cards.isEmpty) {
+                        store.requestDeleteColumn(column, in: boardID)
+                    }
+                    : nil
+            )
 
             ScrollView {
                 LazyVStack(spacing: 8) {

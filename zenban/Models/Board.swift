@@ -12,6 +12,43 @@ enum Column: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var supportsBulkDelete: Bool {
+        switch self {
+        case .todo, .inProgress, .done: true
+        }
+    }
+
+    var bulkDeleteAccessibilityLabel: String {
+        String.localizedStringWithFormat(
+            String(
+                localized: "Delete cards in %@",
+                defaultValue: "Delete cards in %@"
+            ),
+            rawValue
+        )
+    }
+
+    var bulkDeleteConfirmationTitle: String {
+        String.localizedStringWithFormat(
+            String(
+                localized: "Delete cards in %@?",
+                defaultValue: "Delete cards in %@?"
+            ),
+            rawValue
+        )
+    }
+
+    func bulkDeleteConfirmationMessage(cardCount: Int) -> String {
+        String.localizedStringWithFormat(
+            String(
+                localized: "Are you sure you want to delete %lld cards from \"%@\"?",
+                defaultValue: "Are you sure you want to delete %lld cards from \"%@\"?"
+            ),
+            Int64(cardCount),
+            rawValue
+        )
+    }
+
     var accentColor: Color {
         switch self {
         case .todo: .blue
