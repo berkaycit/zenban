@@ -5,7 +5,6 @@ struct CardView: View {
     let boardID: UUID
     @Environment(BoardStore.self) private var store
     @Environment(CmuxHostStore.self) private var cmuxHost
-    @State private var isHovering = false
 
     private var isSelected: Bool {
         store.selectedCardID == card.id
@@ -16,31 +15,18 @@ struct CardView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(card.title)
-                    .font(.body)
-                    .lineLimit(3)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(card.title)
+                .font(.body)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let agentSummary {
+                Text(agentSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let agentSummary {
-                    Text(agentSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-
-            if isHovering {
-                Button(action: { store.deleteCard(card.id, from: boardID) }) {
-                    Image(systemName: "xmark")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Delete card")
-                .padding(.top, 2)
             }
         }
         .padding(12)
@@ -51,9 +37,6 @@ struct CardView: View {
                 .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
-        .onHover { hovering in
-            isHovering = hovering
-        }
         .onTapGesture {
             store.selectedCardID = card.id
             store.focusRegion = .cards
