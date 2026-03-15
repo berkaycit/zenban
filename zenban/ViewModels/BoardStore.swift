@@ -498,6 +498,13 @@ final class BoardStore {
         scheduleSave()
     }
 
+    func updateCardAgentSummary(_ cardID: UUID, summary: String?, in boardID: UUID) {
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        guard boards[bi].cards[ci].agentSummary != summary else { return }
+        boards[bi].cards[ci].agentSummary = summary
+        scheduleSave()
+    }
+
     func updateFileBrowserSession(_ cardID: UUID, in boardID: UUID, session: FileBrowserSessionState?) {
         guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
         boards[bi].cards[ci].fileBrowserSession = session

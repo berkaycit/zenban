@@ -28,6 +28,7 @@ struct CmuxHostStoreSummaryTests {
         )
 
         #expect(boardStore.card(id: card.id)?.column == .inProgress)
+        #expect(boardStore.card(id: card.id)?.agentSummary == summary)
         #expect(hostStore.agentSummary(for: card.id) == summary)
 
         notificationStore.clearNotifications(forTabId: workspace.id)
@@ -65,12 +66,45 @@ struct CmuxHostStoreSummaryTests {
             value: statusSummary
         )
         #expect(hostStore.agentSummary(for: card.id) == statusSummary)
+        #expect(boardStore.card(id: card.id)?.agentSummary == statusSummary)
 
         workspace.statusEntries["claude_code"] = SidebarStatusEntry(
             key: "claude_code",
             value: "Running"
         )
         #expect(hostStore.agentSummary(for: card.id) == notificationSummary)
+    }
+
+    @Test
+    func persistedClaudeSummarySurvivesFreshHostStoreAfterRestart() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let (boardStore, board, card, hostStore) = makeHostFixture()
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let summary = "Finishing the caching fix for board reloads"
+
+        notificationStore.addNotification(
+            tabId: workspace.id,
+            surfaceId: workspace.focusedPanelId,
+            title: "Claude Code",
+            subtitle: "Waiting",
+            body: summary
+        )
+
+        #expect(boardStore.card(id: card.id)?.agentSummary == summary)
+
+        let relaunchedHostStore = CmuxHostStore()
+        boardStore.cmuxHost = relaunchedHostStore
+        relaunchedHostStore.attach(boardStore: boardStore)
+
+        #expect(relaunchedHostStore.agentSummary(for: card.id) == summary)
     }
 
     @Test
@@ -143,8 +177,7 @@ struct CmuxHostStoreSummaryTests {
             repositoryPath: "/tmp/repo",
             agent: agent
         )
-        let boardStore = BoardStore()
-        boardStore.boards = [board]
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
         boardStore.selectedBoardID = board.id
         boardStore.selectedCardID = card.id
 

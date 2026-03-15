@@ -104,7 +104,11 @@ final class CmuxHostStore {
             return summary
         }
 
-        return cachedClaudeSummaryByCardID[cardID]
+        if let summary = cachedClaudeSummaryByCardID[cardID] {
+            return summary
+        }
+
+        return boardStore?.card(id: cardID)?.agentSummary
     }
 
     func isWaitingForWorktree(for card: Card, boardID: UUID) -> Bool {
@@ -500,10 +504,23 @@ final class CmuxHostStore {
 
     private func observeWorkspaceStatus(in workspace: Workspace) {
         guard workspaceStatusSubscriptions[workspace.id] == nil else { return }
+        let workspaceID = workspace.id
 
-        workspaceStatusSubscriptions[workspace.id] = workspace.$statusEntries.sink { [weak self] _ in
+        workspaceStatusSubscriptions[workspaceID] = workspace.$statusEntries.sink { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.workspaceStatusObservationGeneration &+= 1
+                guard let self else { return }
+
+                self.workspaceStatusObservationGeneration &+= 1
+
+                guard let cardID = self.workspaceToCardID[workspaceID],
+                      let boardID = self.workspaceToBoardID[workspaceID],
+                      self.resolvedAgent(forCardID: cardID) == .claude,
+                      let workspace = self.workspace(forID: workspaceID),
+                      let summary = self.meaningfulClaudeStatus(in: workspace) else {
+                    return
+                }
+
+                self.storeClaudeSummary(summary, for: cardID, in: boardID)
             }
         }
     }
@@ -518,9 +535,14 @@ final class CmuxHostStore {
         return normalizedClaudeSummary(notification.body)
     }
 
-    private func cacheClaudeSummary(from notification: TerminalNotification, for cardID: UUID) {
+    private func cacheClaudeSummary(from notification: TerminalNotification, for cardID: UUID, in boardID: UUID) {
         guard let summary = normalizedClaudeSummary(notification.body) else { return }
+        storeClaudeSummary(summary, for: cardID, in: boardID)
+    }
+
+    private func storeClaudeSummary(_ summary: String, for cardID: UUID, in boardID: UUID) {
         cachedClaudeSummaryByCardID[cardID] = summary
+        boardStore?.updateCardAgentSummary(cardID, summary: summary, in: boardID)
     }
 
     private func normalizedClaudeSummary(
@@ -621,7 +643,7 @@ extension CmuxHostStore: TerminalNotificationStoreObserver {
         }
 
         if resolvedAgent(for: card, boardID: boardID) == .claude {
-            cacheClaudeSummary(from: notification, for: cardID)
+            cacheClaudeSummary(from: notification, for: cardID, in: boardID)
         }
 
         guard card.column == .todo else { return }

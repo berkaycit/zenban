@@ -121,6 +121,7 @@ struct DevServerConfig: Codable, Hashable {
 struct Card: Identifiable, Codable, Hashable, Transferable {
     let id: UUID
     var title: String
+    var agentSummary: String?
     var column: Column
     var createdAt: Date
     var orderIndex: Int
@@ -131,6 +132,7 @@ struct Card: Identifiable, Codable, Hashable, Transferable {
     init(
         id: UUID = UUID(),
         title: String,
+        agentSummary: String? = nil,
         column: Column = .todo,
         orderIndex: Int = 0,
         agent: Agent? = nil,
@@ -139,6 +141,7 @@ struct Card: Identifiable, Codable, Hashable, Transferable {
     ) {
         self.id = id
         self.title = title
+        self.agentSummary = agentSummary
         self.column = column
         self.createdAt = Date()
         self.orderIndex = orderIndex

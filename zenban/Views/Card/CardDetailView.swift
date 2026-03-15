@@ -64,7 +64,7 @@ struct CardDetailView: View {
 
     private var board: Board? { store.board(for: boardID) }
     private var agentSummary: String? {
-        cmuxHost.agentSummary(for: card.id)
+        cmuxHost.agentSummary(for: card.id) ?? card.agentSummary
     }
     private var isGitRepository: Bool {
         guard let path = board?.repositoryPath else { return false }

@@ -12,7 +12,7 @@ struct CardView: View {
     }
 
     private var agentSummary: String? {
-        cmuxHost.agentSummary(for: card.id)
+        cmuxHost.agentSummary(for: card.id) ?? card.agentSummary
     }
 
     var body: some View {
