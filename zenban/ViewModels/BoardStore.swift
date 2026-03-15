@@ -790,6 +790,7 @@ final class BoardStore {
 
         for card in cardsToDelete {
             cmuxHost?.removeWorkspace(for: card.id)
+            cmuxHost?.forgetCardRuntimeState(for: card.id)
             onCardDeleted?(card.id)
         }
 

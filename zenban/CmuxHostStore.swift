@@ -1,5 +1,6 @@
 import AppKit
 import Bonsplit
+import Combine
 import Foundation
 import Observation
 
@@ -28,10 +29,13 @@ final class CmuxHostStore {
     private var cardToBrowserWorkspaceID: [UUID: UUID] = [:]
     private var cardToBrowserPanelID: [UUID: UUID] = [:]
     private var launchSignatureByCardID: [UUID: String] = [:]
+    private var cachedClaudeSummaryByCardID: [UUID: String] = [:]
+    private var workspaceStatusObservationGeneration: UInt64 = 0
 
     @ObservationIgnored private weak var boardStore: BoardStore?
     @ObservationIgnored private weak var registeredWindow: NSWindow?
     @ObservationIgnored private var launchTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var workspaceStatusSubscriptions: [UUID: AnyCancellable] = [:]
     @ObservationIgnored private var didConfigureAppDelegate = false
 #if DEBUG
     @ObservationIgnored private var launchCommandHandlerForTesting: ((UUID, String) -> Void)?
@@ -84,6 +88,23 @@ final class CmuxHostStore {
     func workspace(for cardID: UUID) -> Workspace? {
         guard let workspaceID = cardToWorkspaceID[cardID] else { return nil }
         return workspace(forID: workspaceID)
+    }
+
+    func agentSummary(for cardID: UUID) -> String? {
+        guard resolvedAgent(forCardID: cardID) == .claude else { return nil }
+        _ = workspaceStatusObservationGeneration
+
+        if let workspace = workspace(for: cardID),
+           let summary = meaningfulClaudeStatus(in: workspace) {
+            return summary
+        }
+
+        if let workspace = workspace(for: cardID),
+           let summary = meaningfulNotificationBody(for: workspace.id) {
+            return summary
+        }
+
+        return cachedClaudeSummaryByCardID[cardID]
     }
 
     func isWaitingForWorktree(for card: Card, boardID: UUID) -> Bool {
@@ -240,6 +261,7 @@ final class CmuxHostStore {
         let activeWorkspaceID = cardToWorkspaceID.removeValue(forKey: cardID)
 
         for workspaceID in workspaceIDs {
+            workspaceStatusSubscriptions.removeValue(forKey: workspaceID)
             workspaceToCardID.removeValue(forKey: workspaceID)
             workspaceToBoardID.removeValue(forKey: workspaceID)
         }
@@ -254,6 +276,10 @@ final class CmuxHostStore {
         } else {
             workspace.teardownAllPanels()
         }
+    }
+
+    func forgetCardRuntimeState(for cardID: UUID) {
+        cachedClaudeSummaryByCardID.removeValue(forKey: cardID)
     }
 
     private func configureAppDelegateIfNeeded() {
@@ -310,6 +336,7 @@ final class CmuxHostStore {
         if let workspace = workspace(for: card.id) {
             workspaceToBoardID[workspace.id] = boardID
             workspace.setCustomTitle(card.title)
+            observeWorkspaceStatus(in: workspace)
             return workspace
         }
 
@@ -324,6 +351,7 @@ final class CmuxHostStore {
         cardToWorkspaceID[card.id] = workspace.id
         workspaceToCardID[workspace.id] = card.id
         workspaceToBoardID[workspace.id] = boardID
+        observeWorkspaceStatus(in: workspace)
 
         return workspace
     }
@@ -370,6 +398,17 @@ final class CmuxHostStore {
             return agent
         }
         return boardStore?.board(for: boardID)?.agent ?? .claude
+    }
+
+    private func resolvedAgent(forCardID cardID: UUID) -> Agent? {
+        guard let boardStore else { return nil }
+
+        for board in boardStore.boards {
+            guard let card = board.cards.first(where: { $0.id == cardID }) else { continue }
+            return card.agent ?? board.agent
+        }
+
+        return nil
     }
 
     private func launchSignature(for card: Card, boardID: UUID, agent: Agent) -> String {
@@ -459,6 +498,70 @@ final class CmuxHostStore {
         return workspace(forID: workspaceID)
     }
 
+    private func observeWorkspaceStatus(in workspace: Workspace) {
+        guard workspaceStatusSubscriptions[workspace.id] == nil else { return }
+
+        workspaceStatusSubscriptions[workspace.id] = workspace.$statusEntries.sink { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.workspaceStatusObservationGeneration &+= 1
+            }
+        }
+    }
+
+    private func meaningfulClaudeStatus(in workspace: Workspace) -> String? {
+        guard let entry = workspace.statusEntries["claude_code"] else { return nil }
+        return normalizedClaudeSummary(entry.value, allowsGenericFallback: false)
+    }
+
+    private func meaningfulNotificationBody(for workspaceID: UUID) -> String? {
+        guard let notification = notificationStore.latestNotification(forTabId: workspaceID) else { return nil }
+        return normalizedClaudeSummary(notification.body)
+    }
+
+    private func cacheClaudeSummary(from notification: TerminalNotification, for cardID: UUID) {
+        guard let summary = normalizedClaudeSummary(notification.body) else { return }
+        cachedClaudeSummaryByCardID[cardID] = summary
+    }
+
+    private func normalizedClaudeSummary(
+        _ value: String,
+        allowsGenericFallback: Bool = true
+    ) -> String? {
+        let normalized = value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else { return nil }
+
+        let lowercased = normalized.lowercased()
+        let genericValues = allowsGenericFallback
+            ? Self.genericClaudeSummaries
+            : Self.genericClaudeStatusValues
+        guard !genericValues.contains(lowercased) else { return nil }
+
+        return normalized
+    }
+
+    private static let genericClaudeStatusValues: Set<String> = [
+        "idle",
+        "needs input",
+        "running",
+    ]
+
+    private static let genericClaudeSummaries: Set<String> = genericClaudeStatusValues.union([
+        "approval needed",
+        "attention",
+        "claude is waiting for your input",
+        "claude needs your attention",
+        "claude needs your input",
+        "completed",
+        "done",
+        "task completed",
+        "waiting for input",
+    ])
+
     private func removeBrowserWorkspace(for cardID: UUID) {
         let browserPanelID = cardToBrowserPanelID.removeValue(forKey: cardID)
         let browserWorkspaceID = cardToBrowserWorkspaceID.removeValue(forKey: cardID)
@@ -513,11 +616,15 @@ extension CmuxHostStore: TerminalNotificationStoreObserver {
         guard let boardStore,
               let cardID = workspaceToCardID[notification.tabId],
               let boardID = workspaceToBoardID[notification.tabId],
-              let card = boardStore.card(id: cardID),
-              card.column == .todo else {
+              let card = boardStore.card(id: cardID) else {
             return
         }
 
+        if resolvedAgent(for: card, boardID: boardID) == .claude {
+            cacheClaudeSummary(from: notification, for: cardID)
+        }
+
+        guard card.column == .todo else { return }
         _ = boardStore.moveCard(cardID, to: .inProgress, in: boardID)
     }
 }

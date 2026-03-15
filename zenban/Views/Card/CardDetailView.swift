@@ -63,6 +63,9 @@ struct CardDetailView: View {
     }
 
     private var board: Board? { store.board(for: boardID) }
+    private var agentSummary: String? {
+        cmuxHost.agentSummary(for: card.id)
+    }
     private var isGitRepository: Bool {
         guard let path = board?.repositoryPath else { return false }
         return GitService.isGitRepository(path: path)
@@ -101,6 +104,14 @@ struct CardDetailView: View {
                     }
 
                     // Metadata line
+                    if let agentSummary {
+                        Text(agentSummary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     Text(card.createdAt.formatted(date: .abbreviated, time: .omitted))
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)

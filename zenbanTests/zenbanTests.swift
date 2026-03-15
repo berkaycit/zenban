@@ -9,9 +9,15 @@ import Testing
 @testable import zenban
 
 struct zenbanTests {
+    @MainActor
+    @Test
+    func claudeAutoNamedCardKeepsStableCcPrefix() throws {
+        let board = Board(name: "Auto Name", agent: .claude)
+        let store = BoardStore(initialBoards: [board], persistenceEnabled: false)
 
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+        store.addCardWithAutoName(to: board.id)
+
+        let createdCard = try #require(store.board(for: board.id)?.cards.first)
+        #expect(createdCard.title == "cc-1")
     }
-
 }

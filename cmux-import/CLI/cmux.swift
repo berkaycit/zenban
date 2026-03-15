@@ -8834,7 +8834,7 @@ struct CMUXCLI {
             if let projectName, !projectName.isEmpty {
                 subtitle = "Completed in \(projectName)"
             }
-            return (subtitle, truncate(lastMsg, maxLength: 200))
+            return (subtitle, truncate(lastMsg, maxLength: 480))
         }
 
         // Fallback: use session record data.
@@ -8880,7 +8880,7 @@ struct CMUXCLI {
 
             let text = extractMessageText(from: message)
             guard let text, !text.isEmpty else { continue }
-            lastAssistantMessage = truncate(normalizedSingleLine(text), maxLength: 120)
+            lastAssistantMessage = truncate(normalizedSingleLine(text), maxLength: 480)
         }
 
         guard lastAssistantMessage != nil else { return nil }
@@ -8912,7 +8912,7 @@ struct CMUXCLI {
         guard let data = trimmed.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data, options: []),
               let object = json as? [String: Any] else {
-            let fallback = truncate(normalizedSingleLine(trimmed), maxLength: 180)
+            let fallback = truncate(normalizedSingleLine(trimmed), maxLength: 480)
             return classifyClaudeNotification(signal: fallback, message: fallback)
         }
 
@@ -8933,7 +8933,7 @@ struct CMUXCLI {
         let signal = signalParts.compactMap { $0 }.joined(separator: " ")
         var classified = classifyClaudeNotification(signal: signal, message: normalizedMessage)
 
-        classified.body = truncate(classified.body, maxLength: 180)
+        classified.body = truncate(classified.body, maxLength: 480)
         return classified
     }
 
