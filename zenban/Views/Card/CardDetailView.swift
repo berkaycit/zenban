@@ -480,9 +480,9 @@ struct CardDetailView: View {
 
     private var placeholderSubtitle: String {
         if cmuxHost.isWaitingForWorktree(for: card, boardID: boardID) {
-            return "The card worktree is still being created. The copied cmux workspace will appear here as soon as it is ready."
+            return "The card worktree is still being created. The Zenban workspace will appear here as soon as it is ready."
         }
-        return "The copied cmux workspace is starting up for this card."
+        return "The Zenban workspace is starting up for this card."
     }
 
     private var showsDoneTerminalPlaceholder: Bool {

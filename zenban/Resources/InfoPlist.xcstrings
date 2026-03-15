@@ -13,10 +13,10 @@
         }
       }
     },
-    "cmux Sidebar Tab Reorder" : {
+    "Zenban Sidebar Tab Reorder" : {
 
     },
-    "cmux Tab Transfer" : {
+    "Zenban Tab Transfer" : {
 
     },
     "New $(PRODUCT_NAME) Window Here" : {
@@ -47,7 +47,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Zenban uses camera access for websites opened inside the embedded cmux browser."
+            "value" : "Zenban uses camera access for websites opened inside its embedded browser."
           }
         }
       }
@@ -70,7 +70,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Zenban uses microphone access for websites opened inside the embedded cmux browser."
+            "value" : "Zenban uses microphone access for websites opened inside its embedded browser."
           }
         }
       }

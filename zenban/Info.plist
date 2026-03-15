@@ -12,9 +12,9 @@
 	<key>OSAScriptingDefinition</key>
 	<string>cmux.sdef</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Zenban uses camera access for websites opened inside the embedded cmux browser.</string>
+	<string>Zenban uses camera access for websites opened inside its embedded browser.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Zenban uses microphone access for websites opened inside the embedded cmux browser.</string>
+	<string>Zenban uses microphone access for websites opened inside its embedded browser.</string>
 	<key>NSServices</key>
 	<array>
 		<dict>
@@ -74,7 +74,7 @@
 			<key>UTTypeIdentifier</key>
 			<string>com.splittabbar.tabtransfer</string>
 			<key>UTTypeDescription</key>
-			<string>cmux Tab Transfer</string>
+			<string>Zenban Tab Transfer</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>
@@ -86,7 +86,7 @@
 			<key>UTTypeIdentifier</key>
 			<string>com.cmux.sidebar-tab-reorder</string>
 			<key>UTTypeDescription</key>
-			<string>cmux Sidebar Tab Reorder</string>
+			<string>Zenban Sidebar Tab Reorder</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>

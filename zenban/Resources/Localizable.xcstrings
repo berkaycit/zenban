@@ -86,7 +86,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cmux"
+            "value" : "Zenban"
           }
         }
       }
@@ -656,7 +656,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Always allow this host in cmux"
+            "value" : "Always allow this host in Zenban"
           }
         }
       }
@@ -799,7 +799,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ uses plain HTTP, so traffic can be read or modified on the network.\n\nOpen this URL in your default browser, or proceed in cmux."
+            "value" : "%@ uses plain HTTP, so traffic can be read or modified on the network.\n\nOpen this URL in your default browser, or proceed in Zenban."
           }
         }
       }
@@ -909,7 +909,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Proceed in cmux"
+            "value" : "Proceed in Zenban"
           }
         }
       }
@@ -993,7 +993,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Usage: cmux claude-teams [claude-args...]\n\nLaunch Claude Code with agent teams enabled.\n\nThis command:\n  - defaults Claude teammate mode to auto\n  - sets a tmux-like environment so Claude auto mode uses cmux splits\n  - sets CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1\n  - prepends a private tmux shim to PATH\n  - forwards all remaining arguments to claude\n\nThe tmux shim translates supported tmux window/pane commands into cmux\nworkspace and split operations in the current cmux session.\n\nExamples:\n  cmux claude-teams\n  cmux claude-teams --continue\n  cmux claude-teams --model sonnet"
+            "value" : "Usage: zenban claude-teams [claude-args...]\n\nLaunch Claude Code with agent teams enabled.\n\nThis command:\n  - defaults Claude teammate mode to auto\n  - sets a tmux-like environment so Claude auto mode uses Zenban splits\n  - sets CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1\n  - prepends a private tmux shim to PATH\n  - forwards all remaining arguments to claude\n\nThe tmux shim translates supported tmux window/pane commands into Zenban\nworkspace and split operations in the current Zenban session.\n\nExamples:\n  zenban claude-teams\n  zenban claude-teams --continue\n  zenban claude-teams --model sonnet"
           }
         }
       }
@@ -1026,7 +1026,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cmux CLI Installed"
+            "value" : "Zenban CLI Installed"
           }
         }
       }
@@ -1037,7 +1037,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Couldn't Install cmux CLI"
+            "value" : "Couldn't Install Zenban CLI"
           }
         }
       }
@@ -1059,7 +1059,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No cmux CLI symlink was found at %@."
+            "value" : "No Zenban CLI symlink was found at %@."
           }
         }
       }
@@ -1081,7 +1081,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cmux CLI Uninstalled"
+            "value" : "Zenban CLI Uninstalled"
           }
         }
       }
@@ -1092,7 +1092,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Couldn't Uninstall cmux CLI"
+            "value" : "Couldn't Uninstall Zenban CLI"
           }
         }
       }
@@ -1501,7 +1501,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Shell Command: Install 'cmux' in PATH"
+            "value" : "Shell Command: Install Zenban CLI in PATH"
           }
         }
       }
@@ -2139,7 +2139,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Shell Command: Uninstall 'cmux' from PATH"
+            "value" : "Shell Command: Uninstall Zenban CLI from PATH"
           }
         }
       }
@@ -3291,7 +3291,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Notifications are disabled for cmux. Enable them in System Settings to see alerts."
+            "value" : "Notifications are disabled for Zenban. Enable them in System Settings to see alerts."
           }
         }
       }
@@ -3324,7 +3324,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Enable Notifications for cmux"
+            "value" : "Enable Notifications for Zenban"
           }
         }
       }
@@ -3335,7 +3335,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cmux could not move this tab to the selected destination."
+            "value" : "Zenban could not move this tab to the selected destination."
           }
         }
       }
@@ -3434,7 +3434,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Quit cmux?"
+            "value" : "Quit Zenban?"
           }
         }
       }
@@ -3669,7 +3669,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "About cmux"
+            "value" : "About Zenban"
           }
         }
       }
@@ -4153,7 +4153,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Quit cmux"
+            "value" : "Quit Zenban"
           }
         }
       }
@@ -5028,7 +5028,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Restart cmux to apply"
+            "value" : "Restart Zenban to apply"
           }
         }
       }
@@ -5050,7 +5050,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open Sidebar PR Links in cmux Browser"
+            "value" : "Open Sidebar PR Links in Zenban Browser"
           }
         }
       }
@@ -5072,7 +5072,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Clicks open inside cmux browser."
+            "value" : "Clicks open inside Zenban browser."
           }
         }
       }
@@ -5171,7 +5171,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Keep cmux in the menu bar for unread notifications and quick actions."
+            "value" : "Keep Zenban in the menu bar for unread notifications and quick actions."
           }
         }
       }
@@ -5380,7 +5380,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Share anonymized crash and usage data to help improve cmux."
+            "value" : "Share anonymized crash and usage data to help improve Zenban."
           }
         }
       }
@@ -5457,7 +5457,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "When enabled, cmux wraps the claude command to inject session tracking and notification hooks. Disable if you prefer to manage Claude Code hooks yourself."
+            "value" : "When enabled, Zenban wraps the claude command to inject session tracking and notification hooks. Disable if you prefer to manage Claude Code hooks yourself."
           }
         }
       }
@@ -5468,7 +5468,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Claude Code runs without cmux integration."
+            "value" : "Claude Code runs without Zenban integration."
           }
         }
       }
@@ -5919,7 +5919,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Applies to terminal link clicks and intercepted `open https://...` calls. Only these hosts open in cmux. Others open in your default browser. One host or wildcard per line (for example: example.com, *.internal.example). Leave empty to open all hosts in cmux."
+            "value" : "Applies to terminal link clicks and intercepted `open https://...` calls. Only these hosts open in Zenban. Others open in your default browser. One host or wildcard per line (for example: example.com, *.internal.example). Leave empty to open all hosts in Zenban."
           }
         }
       }
@@ -5941,7 +5941,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Controls which HTTP (non-HTTPS) hosts can open in cmux without a warning prompt. Defaults include localhost, 127.0.0.1, ::1, 0.0.0.0, and *.localtest.me."
+            "value" : "Controls which HTTP (non-HTTPS) hosts can open in Zenban without a warning prompt. Defaults include localhost, 127.0.0.1, ::1, 0.0.0.0, and *.localtest.me."
           }
         }
       }
@@ -5996,7 +5996,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open Terminal Links in cmux Browser"
+            "value" : "Open Terminal Links in Zenban Browser"
           }
         }
       }
@@ -6227,7 +6227,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Briefly flash a blue outline when cmux highlights a pane."
+            "value" : "Briefly flash a blue outline when Zenban highlights a pane."
           }
         }
       }
@@ -7509,7 +7509,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Welcome to cmux!"
+            "value" : "Welcome to Zenban!"
           }
         }
       }
@@ -7724,7 +7724,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Only processes started inside cmux terminals can send commands."
+            "value" : "Only processes started inside Zenban terminals can send commands."
           }
         }
       }
@@ -7735,7 +7735,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cmux processes only"
+            "value" : "Zenban processes only"
           }
         }
       }
@@ -8236,7 +8236,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cmux couldn't download the update feed. Check your connection and try again."
+            "value" : "Zenban couldn't download the update feed. Check your connection and try again."
           }
         }
       }
@@ -8313,7 +8313,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cmux can't reach the update server. Check your internet connection and try again."
+            "value" : "Zenban can't reach the update server. Check your internet connection and try again."
           }
         }
       }
@@ -8335,7 +8335,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Move cmux into Applications and relaunch to enable updates."
+            "value" : "Move Zenban into Applications and relaunch to enable updates."
           }
         }
       }
@@ -8401,7 +8401,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cmux couldn't connect to the update server. Check your connection or try again later."
+            "value" : "Zenban couldn't connect to the update server. Check your connection or try again later."
           }
         }
       }
@@ -8555,7 +8555,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cmux can automatically check for updates in the background."
+            "value" : "Zenban can automatically check for updates in the background."
           }
         }
       }
@@ -8759,7 +8759,7 @@
     "Waiting for output..." : {
 
     },
-    "When disabled, cmux uses normal default titlebar behavior for this window." : {
+    "When disabled, Zenban uses normal default titlebar behavior for this window." : {
 
     },
     "When enabled, each branch appears on its own line in the sidebar." : {
