@@ -36,7 +36,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		23B6DAA62EFDA93600D5AB34 /* zenban.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = zenban.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		23B6DAA62EFDA93600D5AB34 /* Zenban.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Zenban.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DAB32EFDA93700D5AB34 /* zenbanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		23B6DABD2EFDA93700D5AB34 /* zenbanUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zenbanUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -120,7 +120,7 @@
 		23B6DAA72EFDA93600D5AB34 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				23B6DAA62EFDA93600D5AB34 /* zenban.app */,
+				23B6DAA62EFDA93600D5AB34 /* Zenban.app */,
 				23B6DAB32EFDA93700D5AB34 /* zenbanTests.xctest */,
 				23B6DABD2EFDA93700D5AB34 /* zenbanUITests.xctest */,
 			);
@@ -165,8 +165,8 @@
 				A1C0D301B202C303D404E505 /* Sparkle */,
 				8F10A100B000C000D000E202 /* MarkdownUI */,
 			);
-			productName = zenban;
-			productReference = 23B6DAA62EFDA93600D5AB34 /* zenban.app */;
+			productName = Zenban;
+			productReference = 23B6DAA62EFDA93600D5AB34 /* Zenban.app */;
 			productType = "com.apple.product-type.application";
 		};
 		23B6DAB22EFDA93700D5AB34 /* zenbanTests */ = {
@@ -534,7 +534,8 @@
 				);
 				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=$(SRCROOT)/Vendor/libgit2/include/module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenban;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = zenban;
+				PRODUCT_NAME = Zenban;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -609,7 +610,8 @@
 				);
 				OTHER_SWIFT_FLAGS = "-Xcc -fmodule-map-file=$(SRCROOT)/Vendor/libgit2/include/module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.berkaycit.zenban;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = zenban;
+				PRODUCT_NAME = Zenban;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -644,7 +646,7 @@
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/zenban.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/zenban";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Zenban.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Zenban";
 			};
 			name = Debug;
 		};
@@ -669,7 +671,7 @@
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Vendor/libgit2/include";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/zenban.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/zenban";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Zenban.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Zenban";
 			};
 			name = Release;
 		};
