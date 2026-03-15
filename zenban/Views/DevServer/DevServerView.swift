@@ -32,6 +32,7 @@ struct DevServerView: View {
         }
         .onDisappear {
             teardownPreview()
+            cmuxHost.teardownBrowserPreview(for: card.id)
             cmuxHost.restoreTerminalFocus(for: card.id)
         }
         .onReceive(NotificationCenter.default.publisher(for: .reloadDevServer)) { _ in

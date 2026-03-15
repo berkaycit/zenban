@@ -320,15 +320,20 @@ final class SplitViewController {
     // MARK: - Tab Operations
 
     /// Add a tab to the focused pane (or specified pane)
-    func addTab(_ tab: TabItem, toPane paneId: PaneID? = nil, atIndex index: Int? = nil) {
+    func addTab(
+        _ tab: TabItem,
+        toPane paneId: PaneID? = nil,
+        atIndex index: Int? = nil,
+        select: Bool = true
+    ) {
         let targetPaneId = paneId ?? focusedPaneId
         guard let targetPaneId,
               let pane = rootNode.findPane(targetPaneId) else { return }
 
         if let index {
-            pane.insertTab(tab, at: index)
+            pane.insertTab(tab, at: index, select: select)
         } else {
-            pane.addTab(tab)
+            pane.addTab(tab, select: select)
         }
     }
 

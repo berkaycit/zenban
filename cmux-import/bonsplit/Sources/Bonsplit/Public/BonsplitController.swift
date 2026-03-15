@@ -80,6 +80,7 @@ public final class BonsplitController {
     ///   - showsNotificationBadge: Whether the tab shows an "unread/activity" badge
     ///   - isLoading: Whether the tab shows an activity/loading indicator (e.g. spinning icon)
     ///   - isPinned: Whether the tab should be treated as pinned
+    ///   - select: Whether the new tab should become the pane's selected tab
     ///   - pane: Optional pane to add the tab to (defaults to focused pane)
     /// - Returns: The TabID of the created tab, or nil if creation was vetoed by delegate
     @discardableResult
@@ -93,6 +94,7 @@ public final class BonsplitController {
         showsNotificationBadge: Bool = false,
         isLoading: Bool = false,
         isPinned: Bool = false,
+        select: Bool = true,
         inPane pane: PaneID? = nil
     ) -> TabID? {
         let tabId = TabID()
@@ -145,7 +147,12 @@ public final class BonsplitController {
             isLoading: isLoading,
             isPinned: isPinned
         )
-        internalController.addTab(tabItem, toPane: PaneID(id: targetPane.id), atIndex: insertIndex)
+        internalController.addTab(
+            tabItem,
+            toPane: PaneID(id: targetPane.id),
+            atIndex: insertIndex,
+            select: select
+        )
 
         // Notify delegate
         delegate?.splitTabBar(self, didCreateTab: tab, inPane: targetPane)

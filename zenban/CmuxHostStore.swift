@@ -25,6 +25,7 @@ final class CmuxHostStore {
     private var cardToWorkspaceID: [UUID: UUID] = [:]
     private var workspaceToCardID: [UUID: UUID] = [:]
     private var workspaceToBoardID: [UUID: UUID] = [:]
+    private var cardToBrowserWorkspaceID: [UUID: UUID] = [:]
     private var cardToBrowserPanelID: [UUID: UUID] = [:]
     private var launchSignatureByCardID: [UUID: String] = [:]
 
@@ -174,8 +175,7 @@ final class CmuxHostStore {
 
         guard canCreateWorkspace(for: card, boardID: boardID) else { return }
 
-        let workspace = ensureWorkspace(for: card, boardID: boardID)
-        requestBackgroundWorkspaceLoad(for: workspace)
+        let workspace = ensureBrowserWorkspace(for: card, boardID: boardID)
 
         if let panelID = cardToBrowserPanelID[card.id],
            let panel = workspace.panels[panelID] as? BrowserPanel {
@@ -184,7 +184,7 @@ final class CmuxHostStore {
         }
 
         guard let paneID = workspace.bonsplitController.focusedPaneId ?? workspace.bonsplitController.allPaneIds.first,
-              let panel = workspace.newBrowserSurface(inPane: paneID, url: url, focus: false) else {
+              let panel = workspace.newBrowserSurface(inPane: paneID, url: url, focus: true) else {
             return
         }
 
@@ -192,7 +192,7 @@ final class CmuxHostStore {
     }
 
     func browserSurface(for cardID: UUID) -> BrowserSurfaceContext? {
-        guard let workspace = workspace(for: cardID),
+        guard let workspace = browserWorkspace(for: cardID),
               let panelID = cardToBrowserPanelID[cardID],
               let panel = workspace.panels[panelID] as? BrowserPanel,
               let paneID = workspace.paneId(forPanelId: panelID) else {
@@ -203,13 +203,17 @@ final class CmuxHostStore {
     }
 
     func focusBrowserSurface(for cardID: UUID) {
-        guard let workspace = workspace(for: cardID),
+        guard let workspace = browserWorkspace(for: cardID),
               let context = browserSurface(for: cardID) else {
             return
         }
 
         selectWorkspace(workspace)
         workspace.focusPanel(context.panel.id)
+    }
+
+    func teardownBrowserPreview(for cardID: UUID) {
+        removeBrowserWorkspace(for: cardID)
     }
 
     func restoreTerminalFocus(for cardID: UUID) {
@@ -227,7 +231,7 @@ final class CmuxHostStore {
         launchTasks[cardID]?.cancel()
         launchTasks.removeValue(forKey: cardID)
         launchSignatureByCardID.removeValue(forKey: cardID)
-        cardToBrowserPanelID.removeValue(forKey: cardID)
+        removeBrowserWorkspace(for: cardID)
 
         let workspaceIDs = workspaceToCardID
             .filter { $0.value == cardID }
@@ -326,6 +330,25 @@ final class CmuxHostStore {
 
     private func canCreateWorkspace(for card: Card, boardID: UUID) -> Bool {
         !isWaitingForWorktree(for: card, boardID: boardID)
+    }
+
+    @discardableResult
+    private func ensureBrowserWorkspace(for card: Card, boardID: UUID) -> Workspace {
+        if let workspace = browserWorkspace(for: card.id) {
+            workspace.setCustomTitle("\(card.title) Preview")
+            return workspace
+        }
+
+        let workspace = tabManager.addWorkspace(
+            workingDirectory: workingDirectory(for: card, boardID: boardID),
+            select: false,
+            eagerLoadTerminal: false,
+            autoWelcomeIfNeeded: false
+        )
+        workspace.setCustomTitle("\(card.title) Preview")
+
+        cardToBrowserWorkspaceID[card.id] = workspace.id
+        return workspace
     }
 
     private func workingDirectory(for card: Card, boardID: UUID) -> String? {
@@ -429,6 +452,32 @@ final class CmuxHostStore {
             return workspace
         }
         return nil
+    }
+
+    private func browserWorkspace(for cardID: UUID) -> Workspace? {
+        guard let workspaceID = cardToBrowserWorkspaceID[cardID] else { return nil }
+        return workspace(forID: workspaceID)
+    }
+
+    private func removeBrowserWorkspace(for cardID: UUID) {
+        let browserPanelID = cardToBrowserPanelID.removeValue(forKey: cardID)
+        let browserWorkspaceID = cardToBrowserWorkspaceID.removeValue(forKey: cardID)
+
+        guard let browserWorkspaceID,
+              let workspace = workspace(forID: browserWorkspaceID) else {
+            return
+        }
+
+        if let browserPanelID {
+            _ = workspace.closePanel(browserPanelID, force: true)
+        }
+
+        if let owningManager = workspace.owningTabManager
+            ?? AppDelegate.shared?.tabManagerFor(tabId: workspace.id) {
+            owningManager.closeWorkspace(workspace)
+        } else {
+            workspace.teardownAllPanels()
+        }
     }
 
     private func owningTabManager(for workspace: Workspace) -> TabManager {

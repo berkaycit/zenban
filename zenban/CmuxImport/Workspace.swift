@@ -2242,6 +2242,7 @@ final class Workspace: Identifiable, ObservableObject {
             kind: SurfaceKind.terminal,
             isDirty: newPanel.isDirty,
             isPinned: false,
+            select: shouldFocusNewTab,
             inPane: paneId
         ) else {
             panels.removeValue(forKey: newPanel.id)
@@ -2364,6 +2365,7 @@ final class Workspace: Identifiable, ObservableObject {
             isDirty: browserPanel.isDirty,
             isLoading: browserPanel.isLoading,
             isPinned: false,
+            select: shouldFocusNewTab,
             inPane: paneId
         ) else {
             panels.removeValue(forKey: browserPanel.id)
@@ -2484,6 +2486,7 @@ final class Workspace: Identifiable, ObservableObject {
             isDirty: markdownPanel.isDirty,
             isLoading: false,
             isPinned: false,
+            select: shouldFocusNewTab,
             inPane: paneId
         ) else {
             panels.removeValue(forKey: markdownPanel.id)

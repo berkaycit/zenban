@@ -1,4 +1,5 @@
 import AppKit
+import Bonsplit
 import Foundation
 import Testing
 @testable import zenban
@@ -168,6 +169,38 @@ struct CmuxHostStoreLifecycleTests {
 
         let workspace = try #require(hostStore.workspace(for: card.id))
         #expect(workspace.focusedTerminalPanel != nil)
+    }
+
+    @Test
+    func ensureBrowserSurfaceKeepsTerminalFocused() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let focusedPaneId = try #require(workspace.bonsplitController.focusedPaneId)
+        let terminalPanelId = try #require(workspace.focusedPanelId)
+        let terminalTabId = try #require(workspace.surfaceIdFromPanelId(terminalPanelId))
+        let previewURL = URL(string: "http://localhost:5173")!
+
+        hostStore.ensureBrowserSurface(
+            for: card,
+            boardID: board.id,
+            url: previewURL
+        )
+
+        let browserContext = try #require(hostStore.browserSurface(for: card.id))
+
+        #expect(browserContext.panel.id != terminalPanelId)
+        #expect(workspace.focusedPanelId == terminalPanelId)
+        #expect(workspace.bonsplitController.selectedTab(inPane: focusedPaneId)?.id == terminalTabId)
+        #expect(!workspace.panels.values.contains { $0.panelType == .browser })
     }
 
     @Test
