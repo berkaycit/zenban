@@ -103,6 +103,8 @@ final class CmuxHostStore {
         let command = launchCommand(for: agent)
 
         launchTasks[cardID] = Task { [weak self] in
+            var consecutivePromptIdleObservations = 0
+            var unknownShellStateSinceSurfaceReadyAt: Date?
             defer {
                 self?.launchTasks.removeValue(forKey: cardID)
             }
@@ -114,8 +116,37 @@ final class CmuxHostStore {
 
                 if let terminalPanel = self.launchTerminalPanel(in: workspace),
                    terminalPanel.surface.surface != nil {
-                    terminalPanel.sendText("\(command)\r")
-                    return
+                    let shellActivityState = workspace.panelShellActivityState(panelId: terminalPanel.id)
+                    switch shellActivityState {
+                    case .promptIdle:
+                        consecutivePromptIdleObservations += 1
+                        unknownShellStateSinceSurfaceReadyAt = nil
+                        // Give the shell prompt one more polling turn to settle so the
+                        // injected Enter key is not swallowed while the prompt redraws.
+                        if consecutivePromptIdleObservations >= 2 {
+                            terminalPanel.sendShellCommand(command)
+                            return
+                        }
+                    case .unknown:
+                        consecutivePromptIdleObservations = 0
+                        if unknownShellStateSinceSurfaceReadyAt == nil {
+                            unknownShellStateSinceSurfaceReadyAt = Date()
+                        }
+                        // Some shells may never report prompt readiness; fall back only
+                        // after a short grace period so we avoid injecting before the
+                        // initial prompt in the common case.
+                        if let unknownShellStateSinceSurfaceReadyAt,
+                           Date().timeIntervalSince(unknownShellStateSinceSurfaceReadyAt) >= 1.5 {
+                            terminalPanel.sendShellCommand(command)
+                            return
+                        }
+                    case .commandRunning:
+                        consecutivePromptIdleObservations = 0
+                        unknownShellStateSinceSurfaceReadyAt = nil
+                    }
+                } else {
+                    consecutivePromptIdleObservations = 0
+                    unknownShellStateSinceSurfaceReadyAt = nil
                 }
 
                 try? await Task.sleep(for: .milliseconds(200))

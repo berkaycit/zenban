@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AppKit
+import Carbon.HIToolbox
 import Metal
 import QuartzCore
 import Combine
@@ -3328,6 +3329,34 @@ final class TerminalSurface: Identifiable, ObservableObject {
             return
         }
         writeTextData(data, to: surface)
+    }
+
+    func sendShellCommand(_ command: String) {
+        guard !command.isEmpty else { return }
+        guard let surface else {
+            sendText("\(command)\n")
+            return
+        }
+
+        command.withCString { ptr in
+            var keyEvent = ghostty_input_key_s()
+            keyEvent.action = GHOSTTY_ACTION_PRESS
+            keyEvent.keycode = 0
+            keyEvent.mods = GHOSTTY_MODS_NONE
+            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+            keyEvent.text = ptr
+            keyEvent.composing = false
+            _ = ghostty_surface_key(surface, keyEvent)
+        }
+
+        var returnKeyEvent = ghostty_input_key_s()
+        returnKeyEvent.action = GHOSTTY_ACTION_PRESS
+        returnKeyEvent.keycode = UInt32(kVK_Return)
+        returnKeyEvent.mods = GHOSTTY_MODS_NONE
+        returnKeyEvent.consumed_mods = GHOSTTY_MODS_NONE
+        returnKeyEvent.text = nil
+        returnKeyEvent.composing = false
+        _ = ghostty_surface_key(surface, returnKeyEvent)
     }
 
     func requestBackgroundSurfaceStartIfNeeded() {

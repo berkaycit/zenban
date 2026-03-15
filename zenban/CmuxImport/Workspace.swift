@@ -1691,6 +1691,10 @@ final class Workspace: Identifiable, ObservableObject {
 #endif
     }
 
+    func panelShellActivityState(panelId: UUID) -> PanelShellActivityState {
+        panelShellActivityStates[panelId] ?? .unknown
+    }
+
     func panelNeedsConfirmClose(panelId: UUID, fallbackNeedsConfirmClose: Bool) -> Bool {
         Self.resolveCloseConfirmation(
             shellActivityState: panelShellActivityStates[panelId],
