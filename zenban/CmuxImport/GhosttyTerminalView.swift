@@ -4402,153 +4402,61 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         return (hasPIDSession, hasCardSession)
     }
 
-    private func logClaudePromptCapture(
-        _ event: String,
-        workspace: Workspace? = nil,
-        panelID: UUID? = nil,
-        extra: String? = nil
-    ) {
-#if DEBUG
-        let resolvedWorkspace = workspace ?? promptCaptureWorkspace()
-        let workspaceToken = resolvedWorkspace.map { String($0.id.uuidString.prefix(5)) } ?? "nil"
-        let panelToken = panelID.map { String($0.uuidString.prefix(5)) } ??
-            terminalSurface.map { String($0.id.uuidString.prefix(5)) } ?? "nil"
-        var line = "claude.promptCapture.\(event) workspace=\(workspaceToken) panel=\(panelToken) draftLen=\(claudePromptCaptureState.draft.count)"
-        if let extra, !extra.isEmpty {
-            line += " \(extra)"
-        }
-        NSLog("%@", line)
-#endif
-    }
-
-    private func hasClaudePromptCaptureSession() -> Bool {
-        guard let workspace = promptCaptureWorkspace() else { return false }
-        let flags = claudePromptCaptureSessionFlags(for: workspace)
-        return flags.pid || flags.card
-    }
-
-    private func isClaudePromptCaptureActive(logFailures: Bool = false) -> Bool {
+    private func isClaudePromptCaptureActive() -> Bool {
         guard let terminalSurface else {
-            if logFailures {
-                logClaudePromptCapture("inactive", extra: "reason=missingSurface")
-            }
             claudePromptCaptureState.clearDueToUnsupportedEdit()
             return false
         }
 
         guard let workspace = promptCaptureWorkspace() else {
-            if logFailures {
-                logClaudePromptCapture(
-                    "inactive",
-                    panelID: terminalSurface.id,
-                    extra: "reason=missingWorkspace"
-                )
-            }
             claudePromptCaptureState.clearDueToUnsupportedEdit()
             return false
         }
 
         let sessionFlags = claudePromptCaptureSessionFlags(for: workspace)
         guard sessionFlags.pid || sessionFlags.card else {
-            if logFailures {
-                logClaudePromptCapture(
-                    "inactive",
-                    workspace: workspace,
-                    panelID: terminalSurface.id,
-                    extra: "reason=noSession pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
-                )
-            }
             claudePromptCaptureState.clearDueToUnsupportedEdit()
             return false
         }
 
         let shellState = workspace.panelShellActivityState(panelId: terminalSurface.id)
         guard shellState != .commandRunning || sessionFlags.card else {
-            if logFailures {
-                logClaudePromptCapture(
-                    "inactive",
-                    workspace: workspace,
-                    panelID: terminalSurface.id,
-                    extra: "reason=commandRunning pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
-                )
-            }
-            clearClaudePromptCaptureDueToUnsupportedEdit(reason: "commandRunning")
+            claudePromptCaptureState.clearDueToUnsupportedEdit()
             return false
-        }
-
-        if logFailures, shellState == .commandRunning, sessionFlags.card {
-            logClaudePromptCapture(
-                "active",
-                workspace: workspace,
-                panelID: terminalSurface.id,
-                extra: "reason=commandRunningAllowed pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
-            )
         }
 
         return true
     }
 
     private func appendClaudePromptCaptureText(_ text: String) {
-        guard isClaudePromptCaptureActive(logFailures: true) else { return }
+        guard isClaudePromptCaptureActive() else { return }
         claudePromptCaptureState.append(text)
-        logClaudePromptCapture("append", extra: "insertLen=\(text.count)")
     }
 
     private func deleteBackwardFromClaudePromptCapture() {
-        guard isClaudePromptCaptureActive(logFailures: true) else { return }
+        guard isClaudePromptCaptureActive() else { return }
         claudePromptCaptureState.deleteBackward()
-        logClaudePromptCapture("deleteBackward")
     }
 
-    private func clearClaudePromptCaptureDueToUnsupportedEdit(reason: String = "unsupportedEdit") {
-        logClaudePromptCapture(
-            "clear",
-            extra: "reason=\(reason) hadDraft=\(claudePromptCaptureState.hasDraft ? 1 : 0)"
-        )
+    private func clearClaudePromptCaptureDueToUnsupportedEdit(reason _: String = "unsupportedEdit") {
         claudePromptCaptureState.clearDueToUnsupportedEdit()
     }
 
     private func commitCapturedClaudePromptIfNeeded() {
-        guard claudePromptCaptureState.hasDraft else {
-            logClaudePromptCapture("commit.skip", extra: "reason=noDraft")
-            return
-        }
+        guard claudePromptCaptureState.hasDraft else { return }
         guard let workspace = promptCaptureWorkspace(),
               let terminalSurface else {
-            logClaudePromptCapture("commit.drop", extra: "reason=missingWorkspaceOrSurface")
             claudePromptCaptureState.clearDueToUnsupportedEdit()
             return
         }
 
         let sessionFlags = claudePromptCaptureSessionFlags(for: workspace)
         guard sessionFlags.pid || sessionFlags.card else {
-            logClaudePromptCapture(
-                "commit.drop",
-                workspace: workspace,
-                panelID: terminalSurface.id,
-                extra: "reason=noSession pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
-            )
             claudePromptCaptureState.clearDueToUnsupportedEdit()
             return
         }
 
-        guard let prompt = claudePromptCaptureState.commit() else {
-            logClaudePromptCapture(
-                "commit.drop",
-                workspace: workspace,
-                panelID: terminalSurface.id,
-                extra: "reason=normalizedEmpty pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
-            )
-            claudePromptCaptureState.clearDueToUnsupportedEdit()
-            return
-        }
-
-        logClaudePromptCapture(
-            "commit.submit",
-            workspace: workspace,
-            panelID: terminalSurface.id,
-            extra: "promptLen=\(prompt.count) pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
-        )
+        guard let prompt = claudePromptCaptureState.commit() else { return }
         AppDelegate.shared?.zenbanPromptSubmittedHandler?(
             terminalSurface.tabId,
             terminalSurface.id,

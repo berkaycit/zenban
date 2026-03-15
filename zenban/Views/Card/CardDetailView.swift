@@ -35,7 +35,6 @@ struct CardDetailView: View {
         .onAppear {
             editedTitle = card.title
             syncDisplayedWorkspace()
-            logClaudeFanOutAvailability(trigger: "appear")
         }
         .onDisappear(perform: teardownDisplayedWorkspaces)
         .onChange(of: card.id) {
@@ -43,7 +42,6 @@ struct CardDetailView: View {
             isEditing = false
             showsFanOutPopover = false
             syncDisplayedWorkspace()
-            logClaudeFanOutAvailability(trigger: "cardChange")
         }
         .onChange(of: card.worktreePath) {
             syncDisplayedWorkspace()
@@ -53,13 +51,9 @@ struct CardDetailView: View {
         }
         .onChange(of: card.agent) {
             cmuxHost.updateAgentLaunch(for: card, boardID: boardID)
-            logClaudeFanOutAvailability(trigger: "agentChange")
         }
         .onChange(of: card.title) {
             cmuxHost.updateTitle(for: card.id, title: card.title)
-        }
-        .onChange(of: lastSubmittedPrompt) {
-            logClaudeFanOutAvailability(trigger: "promptChange")
         }
     }
 
@@ -84,21 +78,6 @@ struct CardDetailView: View {
     private var isGitRepository: Bool {
         guard let path = board?.repositoryPath else { return false }
         return GitService.isGitRepository(path: path)
-    }
-
-    private func logClaudeFanOutAvailability(trigger: String) {
-#if DEBUG
-        guard currentAgent == .claude else { return }
-        let cardToken = String(card.id.uuidString.prefix(5))
-        let boardToken = String(boardID.uuidString.prefix(5))
-        let promptLength = lastSubmittedPrompt?.count ?? 0
-        let reason = isClaudeFanOutEnabled ? "ready" : "missingPrompt"
-        NSLog(
-            "claude.fanout.button trigger=\(trigger) card=\(cardToken) " +
-            "board=\(boardToken) enabled=\(isClaudeFanOutEnabled ? 1 : 0) " +
-            "promptLen=\(promptLength) reason=\(reason)"
-        )
-#endif
     }
 
     private var cardInfoContent: some View {

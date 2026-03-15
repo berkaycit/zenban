@@ -509,12 +509,6 @@ final class BoardStore {
         guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
         guard boards[bi].cards[ci].lastSubmittedPrompt != prompt else { return }
         boards[bi].cards[ci].lastSubmittedPrompt = prompt
-#if DEBUG
-        NSLog(
-            "claude.prompt.stored card=\(String(cardID.uuidString.prefix(5))) " +
-            "board=\(String(boardID.uuidString.prefix(5))) promptLen=\(prompt?.count ?? 0)"
-        )
-#endif
         scheduleSave()
     }
 
@@ -538,13 +532,6 @@ final class BoardStore {
         let normalizedPrompt = sourceCard.lastSubmittedPrompt?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let normalizedPrompt, !normalizedPrompt.isEmpty else { return }
-
-#if DEBUG
-        NSLog(
-            "claude.fanout.clone card=\(String(sourceCardID.uuidString.prefix(5))) " +
-            "board=\(String(boardID.uuidString.prefix(5))) count=\(count) promptLen=\(normalizedPrompt.count)"
-        )
-#endif
 
         var nextOrderIndex = (
             boards[bi].cards

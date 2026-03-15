@@ -42,43 +42,16 @@ final class CmuxHostStore {
 #endif
     @ObservationIgnored private var selectedCardContext: SelectedCardContext?
 
+    private enum WorkspaceLaunchMode {
+        case selectionSync
+        case interactiveOpen
+        case backgroundPrewarm
+    }
+
     init() {
         UserDefaults.standard.set(true, forKey: WelcomeSettings.shownKey)
         notificationStore = TerminalNotificationStore.shared
         tabManager = TabManager()
-    }
-
-    private func shortDebugID(_ id: UUID?) -> String {
-        guard let id else { return "nil" }
-        return String(id.uuidString.prefix(5))
-    }
-
-    private func logClaudePromptFlow(
-        _ event: String,
-        workspaceID: UUID? = nil,
-        panelID: UUID? = nil,
-        cardID: UUID? = nil,
-        boardID: UUID? = nil,
-        prompt: String? = nil,
-        agent: Agent? = nil,
-        extra: String? = nil
-    ) {
-#if DEBUG
-        var line = "claude.prompt.\(event) workspace=\(shortDebugID(workspaceID))"
-        line += " panel=\(shortDebugID(panelID))"
-        line += " card=\(shortDebugID(cardID))"
-        line += " board=\(shortDebugID(boardID))"
-        if let agent {
-            line += " agent=\(agent.runtimeID)"
-        }
-        if let prompt {
-            line += " promptLen=\(prompt.count)"
-        }
-        if let extra, !extra.isEmpty {
-            line += " \(extra)"
-        }
-        NSLog("%@", line)
-#endif
     }
 
     func attach(boardStore: BoardStore) {
@@ -101,31 +74,15 @@ final class CmuxHostStore {
     }
 
     func syncSelection(card: Card?, boardID: UUID?) {
-        configureAppDelegateIfNeeded()
-        updateSelectedCardContext(card: card, boardID: boardID)
-
-        guard let card, let boardID else { return }
-        guard card.column != .done else { return }
-        guard canCreateWorkspace(for: card, boardID: boardID) else { return }
-
-        activateWorkspace(for: card, boardID: boardID)
+        launchWorkspace(for: card, boardID: boardID, mode: .selectionSync)
     }
 
     func openTerminal(for card: Card, boardID: UUID) {
-        configureAppDelegateIfNeeded()
-        updateSelectedCardContext(card: card, boardID: boardID)
-        guard canCreateWorkspace(for: card, boardID: boardID) else { return }
-        activateWorkspace(for: card, boardID: boardID)
+        launchWorkspace(for: card, boardID: boardID, mode: .interactiveOpen)
     }
 
     func prewarmWorkspaceForBackgroundLaunch(for card: Card, boardID: UUID) {
-        configureAppDelegateIfNeeded()
-        guard canCreateWorkspace(for: card, boardID: boardID) else { return }
-
-        let workspace = ensureWorkspace(for: card, boardID: boardID)
-        requestBackgroundWorkspaceLoad(for: workspace)
-        updateTitle(for: card.id, title: card.title)
-        updateAgentLaunch(for: card, boardID: boardID)
+        launchWorkspace(for: card, boardID: boardID, mode: .backgroundPrewarm)
     }
 
     func workspace(for cardID: UUID) -> Workspace? {
@@ -368,12 +325,6 @@ final class CmuxHostStore {
             return self.resolvedAgent(for: card, boardID: boardID) == .claude
         }
         appDelegate.zenbanPromptSubmittedHandler = { [weak self] workspaceID, panelID, prompt in
-            self?.logClaudePromptFlow(
-                "submittedHandler.received",
-                workspaceID: workspaceID,
-                panelID: panelID,
-                prompt: prompt
-            )
             Task { @MainActor [weak self] in
                 self?.handlePromptSubmission(
                     workspaceID: workspaceID,
@@ -396,103 +347,16 @@ final class CmuxHostStore {
     }
 
     private func handlePromptSubmission(workspaceID: UUID, panelID: UUID, prompt: String) {
-        guard let boardStore else {
-            logClaudePromptFlow(
-                "submitted.ignored",
-                workspaceID: workspaceID,
-                panelID: panelID,
-                prompt: prompt,
-                extra: "reason=missingBoardStore"
-            )
+        guard let boardStore,
+              let cardID = workspaceToCardID[workspaceID],
+              let boardID = workspaceToBoardID[workspaceID],
+              let workspace = workspace(forID: workspaceID),
+              workspace.panels[panelID] != nil,
+              let card = boardStore.card(id: cardID),
+              resolvedAgent(for: card, boardID: boardID) == .claude else {
             return
         }
 
-        guard let cardID = workspaceToCardID[workspaceID] else {
-            logClaudePromptFlow(
-                "submitted.ignored",
-                workspaceID: workspaceID,
-                panelID: panelID,
-                prompt: prompt,
-                extra: "reason=missingCardMapping"
-            )
-            return
-        }
-
-        guard let boardID = workspaceToBoardID[workspaceID] else {
-            logClaudePromptFlow(
-                "submitted.ignored",
-                workspaceID: workspaceID,
-                panelID: panelID,
-                cardID: cardID,
-                prompt: prompt,
-                extra: "reason=missingBoardMapping"
-            )
-            return
-        }
-
-        guard let workspace = workspace(forID: workspaceID) else {
-            logClaudePromptFlow(
-                "submitted.ignored",
-                workspaceID: workspaceID,
-                panelID: panelID,
-                cardID: cardID,
-                boardID: boardID,
-                prompt: prompt,
-                extra: "reason=missingWorkspace"
-            )
-            return
-        }
-
-        guard workspace.panels[panelID] != nil else {
-            logClaudePromptFlow(
-                "submitted.ignored",
-                workspaceID: workspaceID,
-                panelID: panelID,
-                cardID: cardID,
-                boardID: boardID,
-                prompt: prompt,
-                extra: "reason=missingPanel"
-            )
-            return
-        }
-
-        guard let card = boardStore.card(id: cardID) else {
-            logClaudePromptFlow(
-                "submitted.ignored",
-                workspaceID: workspaceID,
-                panelID: panelID,
-                cardID: cardID,
-                boardID: boardID,
-                prompt: prompt,
-                extra: "reason=missingCard"
-            )
-            return
-        }
-
-        let agent = resolvedAgent(for: card, boardID: boardID)
-        guard agent == .claude else {
-            logClaudePromptFlow(
-                "submitted.ignored",
-                workspaceID: workspaceID,
-                panelID: panelID,
-                cardID: cardID,
-                boardID: boardID,
-                prompt: prompt,
-                agent: agent,
-                extra: "reason=nonClaudeCard"
-            )
-            return
-        }
-
-        logClaudePromptFlow(
-            "submitted.accepted",
-            workspaceID: workspaceID,
-            panelID: panelID,
-            cardID: cardID,
-            boardID: boardID,
-            prompt: prompt,
-            agent: agent
-        )
         boardStore.updateCardLastSubmittedPrompt(cardID, prompt: prompt, in: boardID)
     }
 
@@ -511,10 +375,22 @@ final class CmuxHostStore {
         selectedCardContext = nextContext
     }
 
-    private func activateWorkspace(for card: Card, boardID: UUID) {
+    private func launchWorkspace(for card: Card?, boardID: UUID?, mode: WorkspaceLaunchMode) {
+        configureAppDelegateIfNeeded()
+
+        if mode != .backgroundPrewarm {
+            updateSelectedCardContext(card: card, boardID: boardID)
+        }
+
+        guard let card, let boardID else { return }
+        if mode == .selectionSync, card.column == .done { return }
+        guard canCreateWorkspace(for: card, boardID: boardID) else { return }
+
         let workspace = ensureWorkspace(for: card, boardID: boardID)
         requestBackgroundWorkspaceLoad(for: workspace)
-        selectWorkspace(workspace)
+        if mode != .backgroundPrewarm {
+            selectWorkspace(workspace)
+        }
         updateTitle(for: card.id, title: card.title)
         updateAgentLaunch(for: card, boardID: boardID)
     }
