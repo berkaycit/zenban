@@ -11,7 +11,7 @@
 ## Card Management
 
 - Create cards with `Cmd+Shift+A`
-- Delete cards with `Cmd+Shift+D`
+- Delete cards with `Cmd+Shift+E`
 - Override the board agent per card
 - Persist agent choice as card metadata and auto-launch it inside the card workspace
 - Claude completion notifications move the owning card to `In Review`, and Claude resuming work moves it back to `To Do`

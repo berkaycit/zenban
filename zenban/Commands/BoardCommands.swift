@@ -21,7 +21,7 @@ struct BoardCommands: Commands {
             Button("Delete Card") {
                 store.requestDeleteSelectedCard()
             }
-            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .keyboardShortcut("e", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
 
             Button("Toggle Dev Server") {

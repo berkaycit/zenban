@@ -11,7 +11,7 @@ struct KeyboardShortcutsView: View {
         ("Boards & Cards", [
             ("Cmd+Shift+N", "New board"),
             ("Cmd+Shift+A", "New card"),
-            ("Cmd+Shift+D", "Delete card"),
+            ("Cmd+Shift+E", "Delete card"),
         ]),
         ("Panels", [
             ("Cmd+Shift+F", "Toggle file browser"),
