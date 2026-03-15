@@ -107,13 +107,21 @@ private enum ArrowKey {
 
 @main
 struct zenbanApp: App {
-    @State private var store = BoardStore()
-    @State private var devServerManager = DevServerManager()
-    @State private var cmuxHost = CmuxHostStore()
+    @State private var store: BoardStore
+    @State private var devServerManager: DevServerManager
+    @State private var cmuxHost: CmuxHostStore
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var cmuxAppDelegate
 
     init() {
         CmuxEmbeddedBootstrap.prepareEnvironment()
+        ZenbanSentry.startAppIfNeeded()
+
+        let store = BoardStore()
+        let devServerManager = DevServerManager()
+        let cmuxHost = CmuxHostStore()
+        _store = State(initialValue: store)
+        _devServerManager = State(initialValue: devServerManager)
+        _cmuxHost = State(initialValue: cmuxHost)
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,

@@ -40,6 +40,34 @@ Zenban can help install these optional tools from Settings:
 - GitHub CLI
 - Claude Code CLI
 
+## Sentry Symbols
+
+Zenban uploads debug symbols to the `zenban` Sentry project with:
+
+```bash
+./scripts/upload-sentry-dsyms.sh
+```
+
+Before running it, make sure:
+
+- `sentry-cli` is installed and available in `PATH`
+- `SENTRY_AUTH_TOKEN` is set in your current shell or CI environment
+- you have already built the app binary you want to symbolicate
+
+Example:
+
+```bash
+export SENTRY_AUTH_TOKEN='...'
+xcodebuild -project zenban.xcodeproj -scheme zenban -configuration Debug -derivedDataPath build/codex-derived build
+./scripts/upload-sentry-dsyms.sh
+```
+
+Notes:
+
+- `export SENTRY_AUTH_TOKEN=...` only lasts for the current terminal session unless you store it elsewhere
+- rerun the upload script after new app/helper builds, release builds, or archives that produce new debug symbols
+- if nothing changed, the script will report that all files are already on the server
+
 ## Bundle Identifier
 
 `com.berkaycit.zenban`
