@@ -2211,19 +2211,10 @@ class TabManager: ObservableObject {
     }
 
     private func updateWindowTitle(for tab: Workspace?) {
-        let title = windowTitle(for: tab)
         guard let targetWindow = window else { return }
-        targetWindow.title = title
-    }
-
-    private func windowTitle(for tab: Workspace?) -> String {
-        guard let tab else { return "cmux" }
-        let trimmedTitle = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedTitle.isEmpty {
-            return trimmedTitle
-        }
-        let trimmedDirectory = tab.currentDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedDirectory.isEmpty ? "cmux" : trimmedDirectory
+        _ = tab
+        targetWindow.title = ""
+        targetWindow.titleVisibility = .hidden
     }
 
     func focusTab(_ tabId: UUID, surfaceId: UUID? = nil, suppressFlash: Bool = false) {
