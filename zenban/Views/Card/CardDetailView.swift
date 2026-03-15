@@ -14,6 +14,8 @@ struct CardDetailView: View {
     @State private var workspaceHandoffGeneration: UInt64 = 0
     @State private var workspaceHandoffReadyTask: Task<Void, Never>?
     @State private var workspaceHandoffFallbackTask: Task<Void, Never>?
+    @State private var showsFanOutPopover = false
+    @State private var fanOutCount = 3
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -33,12 +35,15 @@ struct CardDetailView: View {
         .onAppear {
             editedTitle = card.title
             syncDisplayedWorkspace()
+            logClaudeFanOutAvailability(trigger: "appear")
         }
         .onDisappear(perform: teardownDisplayedWorkspaces)
         .onChange(of: card.id) {
             editedTitle = card.title
             isEditing = false
+            showsFanOutPopover = false
             syncDisplayedWorkspace()
+            logClaudeFanOutAvailability(trigger: "cardChange")
         }
         .onChange(of: card.worktreePath) {
             syncDisplayedWorkspace()
@@ -48,9 +53,13 @@ struct CardDetailView: View {
         }
         .onChange(of: card.agent) {
             cmuxHost.updateAgentLaunch(for: card, boardID: boardID)
+            logClaudeFanOutAvailability(trigger: "agentChange")
         }
         .onChange(of: card.title) {
             cmuxHost.updateTitle(for: card.id, title: card.title)
+        }
+        .onChange(of: lastSubmittedPrompt) {
+            logClaudeFanOutAvailability(trigger: "promptChange")
         }
     }
 
@@ -66,9 +75,30 @@ struct CardDetailView: View {
     private var agentSummary: String? {
         cmuxHost.agentSummary(for: card.id) ?? card.agentSummary
     }
+    private var lastSubmittedPrompt: String? {
+        store.card(id: card.id)?.lastSubmittedPrompt ?? card.lastSubmittedPrompt
+    }
+    private var isClaudeFanOutEnabled: Bool {
+        lastSubmittedPrompt != nil
+    }
     private var isGitRepository: Bool {
         guard let path = board?.repositoryPath else { return false }
         return GitService.isGitRepository(path: path)
+    }
+
+    private func logClaudeFanOutAvailability(trigger: String) {
+#if DEBUG
+        guard currentAgent == .claude else { return }
+        let cardToken = String(card.id.uuidString.prefix(5))
+        let boardToken = String(boardID.uuidString.prefix(5))
+        let promptLength = lastSubmittedPrompt?.count ?? 0
+        let reason = isClaudeFanOutEnabled ? "ready" : "missingPrompt"
+        NSLog(
+            "claude.fanout.button trigger=\(trigger) card=\(cardToken) " +
+            "board=\(boardToken) enabled=\(isClaudeFanOutEnabled ? 1 : 0) " +
+            "promptLen=\(promptLength) reason=\(reason)"
+        )
+#endif
     }
 
     private var cardInfoContent: some View {
@@ -152,6 +182,23 @@ struct CardDetailView: View {
                             if board?.devServerConfig != nil {
                                 Button("Reconfigure") { store.configureDevServer(for: card) }
                             }
+                        }
+                    }
+
+                    if currentAgent == .claude {
+                        Button {
+                            showsFanOutPopover = true
+                        } label: {
+                            Image(systemName: "plus.square.on.square")
+                                .font(.system(size: 15))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .disabled(!isClaudeFanOutEnabled)
+                        .help(isClaudeFanOutEnabled ? "Start more agents from the same prompt" : "Send a Claude message first")
+                        .accessibilityLabel("Start more agents from the same prompt")
+                        .popover(isPresented: $showsFanOutPopover, arrowEdge: .bottom) {
+                            fanOutPopover
                         }
                     }
 
@@ -256,6 +303,45 @@ struct CardDetailView: View {
                 }
             }
         }
+    }
+
+    private var fanOutPopover: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Start More Agents")
+                .font(.headline)
+
+            if let lastSubmittedPrompt {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Last prompt")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    ScrollView {
+                        Text(lastSubmittedPrompt)
+                            .font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(minHeight: 80, maxHeight: 140)
+                    .padding(10)
+                    .background(Color.codeBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
+                Stepper("Additional agents: \(fanOutCount)", value: $fanOutCount, in: 1...10)
+
+                Button("Start \(fanOutCount) More Agents", action: startClaudeFanOut)
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                Text("Send a Claude message first so Zenban can reuse that prompt.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(width: 360)
     }
 
     private func openWorktreeFolder(_ path: String) {
@@ -544,5 +630,17 @@ struct CardDetailView: View {
             // No config, show configuration sheet
             store.configureDevServer(for: card)
         }
+    }
+
+    private func startClaudeFanOut() {
+#if DEBUG
+        NSLog(
+            "claude.fanout.start card=\(String(card.id.uuidString.prefix(5))) " +
+            "board=\(String(boardID.uuidString.prefix(5))) count=\(fanOutCount) " +
+            "promptLen=\(lastSubmittedPrompt?.count ?? 0)"
+        )
+#endif
+        store.fanOutClaudePrompt(from: card.id, in: boardID, count: fanOutCount)
+        showsFanOutPopover = false
     }
 }

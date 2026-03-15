@@ -505,6 +505,88 @@ final class BoardStore {
         scheduleSave()
     }
 
+    func updateCardLastSubmittedPrompt(_ cardID: UUID, prompt: String?, in boardID: UUID) {
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        guard boards[bi].cards[ci].lastSubmittedPrompt != prompt else { return }
+        boards[bi].cards[ci].lastSubmittedPrompt = prompt
+#if DEBUG
+        NSLog(
+            "claude.prompt.stored card=\(String(cardID.uuidString.prefix(5))) " +
+            "board=\(String(boardID.uuidString.prefix(5))) promptLen=\(prompt?.count ?? 0)"
+        )
+#endif
+        scheduleSave()
+    }
+
+    func consumePendingLaunchPrompt(_ cardID: UUID, in boardID: UUID) {
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+        guard boards[bi].cards[ci].pendingLaunchPrompt != nil else { return }
+        boards[bi].cards[ci].pendingLaunchPrompt = nil
+        scheduleSave()
+    }
+
+    func fanOutClaudePrompt(from sourceCardID: UUID, in boardID: UUID, count: Int) {
+        guard (1...10).contains(count),
+              let (bi, ci) = cardIndices(cardID: sourceCardID, boardID: boardID) else {
+            return
+        }
+
+        let sourceCard = boards[bi].cards[ci]
+        let resolvedAgent = sourceCard.agent ?? boards[bi].agent
+        guard resolvedAgent == .claude else { return }
+
+        let normalizedPrompt = sourceCard.lastSubmittedPrompt?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let normalizedPrompt, !normalizedPrompt.isEmpty else { return }
+
+#if DEBUG
+        NSLog(
+            "claude.fanout.clone card=\(String(sourceCardID.uuidString.prefix(5))) " +
+            "board=\(String(boardID.uuidString.prefix(5))) count=\(count) promptLen=\(normalizedPrompt.count)"
+        )
+#endif
+
+        var nextOrderIndex = (
+            boards[bi].cards
+                .filter { $0.column == sourceCard.column }
+                .map(\.orderIndex)
+                .min() ?? 1
+        ) - 1
+
+        var clonedCards: [Card] = []
+        clonedCards.reserveCapacity(count)
+
+        for copyNumber in stride(from: count + 1, through: 2, by: -1) {
+            clonedCards.append(
+                Card(
+                    title: fanOutCloneTitle(for: sourceCard.title, copyNumber: copyNumber),
+                    lastSubmittedPrompt: normalizedPrompt,
+                    pendingLaunchPrompt: normalizedPrompt,
+                    column: sourceCard.column,
+                    orderIndex: nextOrderIndex,
+                    agent: .claude
+                )
+            )
+            nextOrderIndex -= 1
+        }
+
+        boards[bi].cards.append(contentsOf: clonedCards)
+        scheduleSave()
+
+        if let repositoryPath = boards[bi].repositoryPath,
+           GitService.isGitRepository(path: repositoryPath) {
+            for clonedCard in clonedCards {
+                Task {
+                    await createWorktreeForCard(
+                        clonedCard.id,
+                        in: boardID,
+                        repositoryPath: repositoryPath
+                    )
+                }
+            }
+        }
+    }
+
     func updateFileBrowserSession(_ cardID: UUID, in boardID: UUID, session: FileBrowserSessionState?) {
         guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
         boards[bi].cards[ci].fileBrowserSession = session
@@ -826,6 +908,10 @@ final class BoardStore {
                 }
             }
         }
+    }
+
+    private func fanOutCloneTitle(for title: String, copyNumber: Int) -> String {
+        "\(title) (\(copyNumber))"
     }
 
     // MARK: - Worktree Operations

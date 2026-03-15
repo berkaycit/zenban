@@ -48,6 +48,39 @@ final class CmuxHostStore {
         tabManager = TabManager()
     }
 
+    private func shortDebugID(_ id: UUID?) -> String {
+        guard let id else { return "nil" }
+        return String(id.uuidString.prefix(5))
+    }
+
+    private func logClaudePromptFlow(
+        _ event: String,
+        workspaceID: UUID? = nil,
+        panelID: UUID? = nil,
+        cardID: UUID? = nil,
+        boardID: UUID? = nil,
+        prompt: String? = nil,
+        agent: Agent? = nil,
+        extra: String? = nil
+    ) {
+#if DEBUG
+        var line = "claude.prompt.\(event) workspace=\(shortDebugID(workspaceID))"
+        line += " panel=\(shortDebugID(panelID))"
+        line += " card=\(shortDebugID(cardID))"
+        line += " board=\(shortDebugID(boardID))"
+        if let agent {
+            line += " agent=\(agent.runtimeID)"
+        }
+        if let prompt {
+            line += " promptLen=\(prompt.count)"
+        }
+        if let extra, !extra.isEmpty {
+            line += " \(extra)"
+        }
+        NSLog("%@", line)
+#endif
+    }
+
     func attach(boardStore: BoardStore) {
         self.boardStore = boardStore
         configureAppDelegateIfNeeded()
@@ -141,7 +174,14 @@ final class CmuxHostStore {
 
         let cardID = card.id
         let workspaceID = workspace.id
-        let command = launchCommand(for: agent)
+        let normalizedPrompt = normalizedPendingLaunchPrompt(for: card, agent: agent)
+        let command = launchCommand(for: agent, pendingPrompt: normalizedPrompt)
+        let postLaunchSignature = launchSignature(
+            for: card,
+            boardID: boardID,
+            agent: agent,
+            pendingPrompt: nil
+        )
 
         launchTasks[cardID] = Task { [weak self] in
             var consecutivePromptIdleObservations = 0
@@ -166,6 +206,10 @@ final class CmuxHostStore {
                         // injected Enter key is not swallowed while the prompt redraws.
                         if consecutivePromptIdleObservations >= 2 {
                             self.sendLaunchCommand(command, to: terminalPanel, cardID: cardID)
+                            self.launchSignatureByCardID[cardID] = postLaunchSignature
+                            if normalizedPrompt != nil {
+                                self.boardStore?.consumePendingLaunchPrompt(cardID, in: boardID)
+                            }
                             return
                         }
                     case .unknown:
@@ -179,6 +223,10 @@ final class CmuxHostStore {
                         if let unknownShellStateSinceSurfaceReadyAt,
                            Date().timeIntervalSince(unknownShellStateSinceSurfaceReadyAt) >= 1.5 {
                             self.sendLaunchCommand(command, to: terminalPanel, cardID: cardID)
+                            self.launchSignatureByCardID[cardID] = postLaunchSignature
+                            if normalizedPrompt != nil {
+                                self.boardStore?.consumePendingLaunchPrompt(cardID, in: boardID)
+                            }
                             return
                         }
                     case .commandRunning:
@@ -299,6 +347,31 @@ final class CmuxHostStore {
                 self?.handleNotificationOpen(workspaceID: workspaceID)
             }
         }
+        appDelegate.zenbanClaudePromptCaptureEnabledHandler = { [weak self] workspaceID in
+            guard let self,
+                  let cardID = self.workspaceToCardID[workspaceID],
+                  let boardID = self.workspaceToBoardID[workspaceID],
+                  let card = self.boardStore?.card(id: cardID) else {
+                return false
+            }
+
+            return self.resolvedAgent(for: card, boardID: boardID) == .claude
+        }
+        appDelegate.zenbanPromptSubmittedHandler = { [weak self] workspaceID, panelID, prompt in
+            self?.logClaudePromptFlow(
+                "submittedHandler.received",
+                workspaceID: workspaceID,
+                panelID: panelID,
+                prompt: prompt
+            )
+            Task { @MainActor [weak self] in
+                self?.handlePromptSubmission(
+                    workspaceID: workspaceID,
+                    panelID: panelID,
+                    prompt: prompt
+                )
+            }
+        }
         didConfigureAppDelegate = true
     }
 
@@ -310,6 +383,107 @@ final class CmuxHostStore {
         }
 
         boardStore.selectCard(cardID, in: boardID)
+    }
+
+    private func handlePromptSubmission(workspaceID: UUID, panelID: UUID, prompt: String) {
+        guard let boardStore else {
+            logClaudePromptFlow(
+                "submitted.ignored",
+                workspaceID: workspaceID,
+                panelID: panelID,
+                prompt: prompt,
+                extra: "reason=missingBoardStore"
+            )
+            return
+        }
+
+        guard let cardID = workspaceToCardID[workspaceID] else {
+            logClaudePromptFlow(
+                "submitted.ignored",
+                workspaceID: workspaceID,
+                panelID: panelID,
+                prompt: prompt,
+                extra: "reason=missingCardMapping"
+            )
+            return
+        }
+
+        guard let boardID = workspaceToBoardID[workspaceID] else {
+            logClaudePromptFlow(
+                "submitted.ignored",
+                workspaceID: workspaceID,
+                panelID: panelID,
+                cardID: cardID,
+                prompt: prompt,
+                extra: "reason=missingBoardMapping"
+            )
+            return
+        }
+
+        guard let workspace = workspace(forID: workspaceID) else {
+            logClaudePromptFlow(
+                "submitted.ignored",
+                workspaceID: workspaceID,
+                panelID: panelID,
+                cardID: cardID,
+                boardID: boardID,
+                prompt: prompt,
+                extra: "reason=missingWorkspace"
+            )
+            return
+        }
+
+        guard workspace.panels[panelID] != nil else {
+            logClaudePromptFlow(
+                "submitted.ignored",
+                workspaceID: workspaceID,
+                panelID: panelID,
+                cardID: cardID,
+                boardID: boardID,
+                prompt: prompt,
+                extra: "reason=missingPanel"
+            )
+            return
+        }
+
+        guard let card = boardStore.card(id: cardID) else {
+            logClaudePromptFlow(
+                "submitted.ignored",
+                workspaceID: workspaceID,
+                panelID: panelID,
+                cardID: cardID,
+                boardID: boardID,
+                prompt: prompt,
+                extra: "reason=missingCard"
+            )
+            return
+        }
+
+        let agent = resolvedAgent(for: card, boardID: boardID)
+        guard agent == .claude else {
+            logClaudePromptFlow(
+                "submitted.ignored",
+                workspaceID: workspaceID,
+                panelID: panelID,
+                cardID: cardID,
+                boardID: boardID,
+                prompt: prompt,
+                agent: agent,
+                extra: "reason=nonClaudeCard"
+            )
+            return
+        }
+
+        logClaudePromptFlow(
+            "submitted.accepted",
+            workspaceID: workspaceID,
+            panelID: panelID,
+            cardID: cardID,
+            boardID: boardID,
+            prompt: prompt,
+            agent: agent
+        )
+        boardStore.updateCardLastSubmittedPrompt(cardID, prompt: prompt, in: boardID)
     }
 
     private func updateSelectedCardContext(card: Card?, boardID: UUID?) {
@@ -416,14 +590,29 @@ final class CmuxHostStore {
     }
 
     private func launchSignature(for card: Card, boardID: UUID, agent: Agent) -> String {
-        let directory = workingDirectory(for: card, boardID: boardID) ?? ""
-        return "\(agent.runtimeID)|\(directory)"
+        launchSignature(
+            for: card,
+            boardID: boardID,
+            agent: agent,
+            pendingPrompt: normalizedPendingLaunchPrompt(for: card, agent: agent)
+        )
     }
 
-    private func launchCommand(for agent: Agent) -> String {
+    private func launchSignature(
+        for card: Card,
+        boardID: UUID,
+        agent: Agent,
+        pendingPrompt: String?
+    ) -> String {
+        let directory = workingDirectory(for: card, boardID: boardID) ?? ""
+        let promptSignature = pendingPrompt ?? ""
+        return "\(agent.runtimeID)|\(directory)|\(promptSignature)"
+    }
+
+    private func launchCommand(for agent: Agent, pendingPrompt: String?) -> String {
         switch agent {
         case .claude:
-            return claudeLaunchCommand()
+            return claudeLaunchCommand(prompt: pendingPrompt)
         case .codex:
             return "codex"
         case .gemini:
@@ -431,8 +620,12 @@ final class CmuxHostStore {
         }
     }
 
-    private func claudeLaunchCommand() -> String {
-        "\(claudeBinaryCommand()) --dangerously-skip-permissions"
+    private func claudeLaunchCommand(prompt: String?) -> String {
+        var command = "\(claudeBinaryCommand()) --dangerously-skip-permissions"
+        if let prompt, !prompt.isEmpty {
+            command += " \(shellQuoted(prompt))"
+        }
+        return command
     }
 
     private func claudeBinaryCommand() -> String {
@@ -444,6 +637,19 @@ final class CmuxHostStore {
 
     private func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+    }
+
+    private func normalizedPendingLaunchPrompt(for card: Card, agent: Agent) -> String? {
+        guard agent == .claude else { return nil }
+
+        let normalized = card.pendingLaunchPrompt?
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let normalized, !normalized.isEmpty else { return nil }
+        return normalized
     }
 
     private func isTerminalReadyForLaunch(_ terminalPanel: TerminalPanel) -> Bool {

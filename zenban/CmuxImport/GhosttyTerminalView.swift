@@ -3538,6 +3538,44 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
 // MARK: - Ghostty Surface View
 
+struct ClaudePromptCaptureState {
+    private(set) var draft = ""
+
+    var hasDraft: Bool {
+        !draft.isEmpty
+    }
+
+    mutating func append(_ text: String) {
+        guard !text.isEmpty else { return }
+        draft.append(text)
+    }
+
+    mutating func deleteBackward() {
+        guard !draft.isEmpty else { return }
+        draft.removeLast()
+    }
+
+    mutating func clearDueToUnsupportedEdit() {
+        draft = ""
+    }
+
+    mutating func commit() -> String? {
+        defer { draft = "" }
+        return Self.normalizeCommittedPrompt(draft)
+    }
+
+    static func normalizeCommittedPrompt(_ prompt: String) -> String? {
+        let normalized = prompt
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else { return nil }
+        return normalized
+    }
+}
+
 class GhosttyNSView: NSView, NSUserInterfaceValidations {
     private static let focusDebugEnabled: Bool = {
         if ProcessInfo.processInfo.environment["CMUX_FOCUS_DEBUG"] == "1" {
@@ -3572,6 +3610,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     private var appliedColorScheme: ghostty_color_scheme_e?
     private var lastLoggedSurfaceBackgroundSignature: String?
     private var lastLoggedWindowBackgroundSignature: String?
+    private var claudePromptCaptureState = ClaudePromptCaptureState()
     private var keySequence: [ghostty_input_trigger_s] = []
     private var keyTables: [String] = []
     fileprivate private(set) var keyboardCopyModeActive = false
@@ -4347,6 +4386,185 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     // MARK: - Input Handling
 
+    private func promptCaptureWorkspace() -> Workspace? {
+        guard let terminalSurface,
+              let appDelegate = AppDelegate.shared,
+              let tabManager = appDelegate.tabManagerFor(tabId: terminalSurface.tabId) ?? appDelegate.tabManager else {
+            return nil
+        }
+
+        return tabManager.tabs.first(where: { $0.id == terminalSurface.tabId })
+    }
+
+    private func claudePromptCaptureSessionFlags(for workspace: Workspace) -> (pid: Bool, card: Bool) {
+        let hasPIDSession = workspace.agentPIDs["claude_code"] != nil
+        let hasCardSession = AppDelegate.shared?.zenbanClaudePromptCaptureEnabledHandler?(workspace.id) == true
+        return (hasPIDSession, hasCardSession)
+    }
+
+    private func logClaudePromptCapture(
+        _ event: String,
+        workspace: Workspace? = nil,
+        panelID: UUID? = nil,
+        extra: String? = nil
+    ) {
+#if DEBUG
+        let resolvedWorkspace = workspace ?? promptCaptureWorkspace()
+        let workspaceToken = resolvedWorkspace.map { String($0.id.uuidString.prefix(5)) } ?? "nil"
+        let panelToken = panelID.map { String($0.uuidString.prefix(5)) } ??
+            terminalSurface.map { String($0.id.uuidString.prefix(5)) } ?? "nil"
+        var line = "claude.promptCapture.\(event) workspace=\(workspaceToken) panel=\(panelToken) draftLen=\(claudePromptCaptureState.draft.count)"
+        if let extra, !extra.isEmpty {
+            line += " \(extra)"
+        }
+        NSLog("%@", line)
+#endif
+    }
+
+    private func hasClaudePromptCaptureSession() -> Bool {
+        guard let workspace = promptCaptureWorkspace() else { return false }
+        let flags = claudePromptCaptureSessionFlags(for: workspace)
+        return flags.pid || flags.card
+    }
+
+    private func isClaudePromptCaptureActive(logFailures: Bool = false) -> Bool {
+        guard let terminalSurface else {
+            if logFailures {
+                logClaudePromptCapture("inactive", extra: "reason=missingSurface")
+            }
+            claudePromptCaptureState.clearDueToUnsupportedEdit()
+            return false
+        }
+
+        guard let workspace = promptCaptureWorkspace() else {
+            if logFailures {
+                logClaudePromptCapture(
+                    "inactive",
+                    panelID: terminalSurface.id,
+                    extra: "reason=missingWorkspace"
+                )
+            }
+            claudePromptCaptureState.clearDueToUnsupportedEdit()
+            return false
+        }
+
+        let sessionFlags = claudePromptCaptureSessionFlags(for: workspace)
+        guard sessionFlags.pid || sessionFlags.card else {
+            if logFailures {
+                logClaudePromptCapture(
+                    "inactive",
+                    workspace: workspace,
+                    panelID: terminalSurface.id,
+                    extra: "reason=noSession pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
+                )
+            }
+            claudePromptCaptureState.clearDueToUnsupportedEdit()
+            return false
+        }
+
+        let shellState = workspace.panelShellActivityState(panelId: terminalSurface.id)
+        guard shellState != .commandRunning || sessionFlags.card else {
+            if logFailures {
+                logClaudePromptCapture(
+                    "inactive",
+                    workspace: workspace,
+                    panelID: terminalSurface.id,
+                    extra: "reason=commandRunning pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
+                )
+            }
+            clearClaudePromptCaptureDueToUnsupportedEdit(reason: "commandRunning")
+            return false
+        }
+
+        if logFailures, shellState == .commandRunning, sessionFlags.card {
+            logClaudePromptCapture(
+                "active",
+                workspace: workspace,
+                panelID: terminalSurface.id,
+                extra: "reason=commandRunningAllowed pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
+            )
+        }
+
+        return true
+    }
+
+    private func appendClaudePromptCaptureText(_ text: String) {
+        guard isClaudePromptCaptureActive(logFailures: true) else { return }
+        claudePromptCaptureState.append(text)
+        logClaudePromptCapture("append", extra: "insertLen=\(text.count)")
+    }
+
+    private func deleteBackwardFromClaudePromptCapture() {
+        guard isClaudePromptCaptureActive(logFailures: true) else { return }
+        claudePromptCaptureState.deleteBackward()
+        logClaudePromptCapture("deleteBackward")
+    }
+
+    private func clearClaudePromptCaptureDueToUnsupportedEdit(reason: String = "unsupportedEdit") {
+        logClaudePromptCapture(
+            "clear",
+            extra: "reason=\(reason) hadDraft=\(claudePromptCaptureState.hasDraft ? 1 : 0)"
+        )
+        claudePromptCaptureState.clearDueToUnsupportedEdit()
+    }
+
+    private func commitCapturedClaudePromptIfNeeded() {
+        guard claudePromptCaptureState.hasDraft else {
+            logClaudePromptCapture("commit.skip", extra: "reason=noDraft")
+            return
+        }
+        guard let workspace = promptCaptureWorkspace(),
+              let terminalSurface else {
+            logClaudePromptCapture("commit.drop", extra: "reason=missingWorkspaceOrSurface")
+            claudePromptCaptureState.clearDueToUnsupportedEdit()
+            return
+        }
+
+        let sessionFlags = claudePromptCaptureSessionFlags(for: workspace)
+        guard sessionFlags.pid || sessionFlags.card else {
+            logClaudePromptCapture(
+                "commit.drop",
+                workspace: workspace,
+                panelID: terminalSurface.id,
+                extra: "reason=noSession pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
+            )
+            claudePromptCaptureState.clearDueToUnsupportedEdit()
+            return
+        }
+
+        guard let prompt = claudePromptCaptureState.commit() else {
+            logClaudePromptCapture(
+                "commit.drop",
+                workspace: workspace,
+                panelID: terminalSurface.id,
+                extra: "reason=normalizedEmpty pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
+            )
+            claudePromptCaptureState.clearDueToUnsupportedEdit()
+            return
+        }
+
+        logClaudePromptCapture(
+            "commit.submit",
+            workspace: workspace,
+            panelID: terminalSurface.id,
+            extra: "promptLen=\(prompt.count) pid=\(sessionFlags.pid ? 1 : 0) card=\(sessionFlags.card ? 1 : 0)"
+        )
+        AppDelegate.shared?.zenbanPromptSubmittedHandler?(
+            terminalSurface.tabId,
+            terminalSurface.id,
+            prompt
+        )
+    }
+
+    private func shouldCommitClaudePromptCapture(for event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.isDisjoint(with: [.command, .control, .option]) else {
+            return false
+        }
+
+        return event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter)
+    }
+
     @IBAction func copy(_ sender: Any?) {
         _ = performBindingAction("copy_to_clipboard")
     }
@@ -4354,11 +4572,17 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     // MARK: - Clipboard paste
 
     @IBAction func paste(_ sender: Any?) {
+        if let pastedText = NSPasteboard.general.string(forType: .string) {
+            appendClaudePromptCaptureText(pastedText)
+        }
         _ = performBindingAction("paste_from_clipboard")
     }
 
     /// Pastes clipboard text as plain text, stripping any rich formatting.
     @IBAction func pasteAsPlainText(_ sender: Any?) {
+        if let pastedText = NSPasteboard.general.string(forType: .string) {
+            appendClaudePromptCaptureText(pastedText)
+        }
         _ = performBindingAction("paste_from_clipboard")
     }
 
@@ -4606,7 +4830,36 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     // Prevents NSBeep for unimplemented actions from interpretKeyEvents
     override func doCommand(by selector: Selector) {
-        // Intentionally empty - prevents system beep on unhandled key commands
+        switch selector {
+        case Selector(("deleteBackward:")):
+            deleteBackwardFromClaudePromptCapture()
+        case Selector(("deleteForward:")),
+             Selector(("deleteWordBackward:")),
+             Selector(("deleteWordForward:")),
+             Selector(("moveBackward:")),
+             Selector(("moveForward:")),
+             Selector(("moveLeft:")),
+             Selector(("moveRight:")),
+             Selector(("moveUp:")),
+             Selector(("moveDown:")),
+             Selector(("moveWordLeft:")),
+             Selector(("moveWordRight:")),
+             Selector(("moveToBeginningOfLine:")),
+             Selector(("moveToEndOfLine:")),
+             Selector(("moveToBeginningOfParagraph:")),
+             Selector(("moveToEndOfParagraph:")),
+             Selector(("pageUp:")),
+             Selector(("pageDown:")),
+             Selector(("scrollPageUp:")),
+             Selector(("scrollPageDown:")),
+             Selector(("insertTab:")),
+             Selector(("insertBacktab:")),
+             Selector(("transpose:")),
+             Selector(("yank:")):
+            clearClaudePromptCaptureDueToUnsupportedEdit(reason: NSStringFromSelector(selector))
+        default:
+            break
+        }
     }
 
     /// Some third-party voice input apps inject committed text by sending the
@@ -5131,6 +5384,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 #if DEBUG
             refreshMs = (ProcessInfo.processInfo.systemUptime - refreshStart) * 1000.0
 #endif
+        }
+
+        if shouldCommitClaudePromptCapture(for: event) {
+            commitCapturedClaudePromptIfNeeded()
         }
 
         // Rendering is driven by Ghostty's wakeups/renderer.
@@ -8348,10 +8605,12 @@ extension GhosttyNSView: NSTextInputClient {
         // If we have an accumulator, we're in a keyDown event - accumulate the text
         if keyTextAccumulator != nil {
             keyTextAccumulator?.append(chars)
+            appendClaudePromptCaptureText(chars)
             return
         }
 
         // Otherwise send directly to the terminal
+        appendClaudePromptCaptureText(chars)
         sendTextToSurface(chars)
     }
 }

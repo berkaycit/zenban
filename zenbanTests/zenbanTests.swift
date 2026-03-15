@@ -58,5 +58,63 @@ struct zenbanTests {
 
         #expect(card.title == "cc-1")
         #expect(card.agentSummary == nil)
+        #expect(card.lastSubmittedPrompt == nil)
+        #expect(card.pendingLaunchPrompt == nil)
+    }
+
+    @MainActor
+    @Test
+    func fanOutClaudePromptCreatesSiblingCardsAndPreservesSelection() throws {
+        let prompt = "Investigate the failing login tests"
+        let sourceCard = Card(
+            title: "Login bug",
+            lastSubmittedPrompt: prompt,
+            column: .todo,
+            orderIndex: 0,
+            agent: .claude
+        )
+        let board = Board(name: "Fan Out", cards: [sourceCard], agent: .claude)
+        let store = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        store.selectedBoardID = board.id
+        store.selectedCardID = sourceCard.id
+
+        store.fanOutClaudePrompt(from: sourceCard.id, in: board.id, count: 3)
+
+        let updatedBoard = try #require(store.board(for: board.id))
+        let cards = updatedBoard.cards(in: .todo)
+
+        #expect(cards.map(\.title) == ["Login bug (2)", "Login bug (3)", "Login bug (4)", "Login bug"])
+        #expect(store.selectedCardID == sourceCard.id)
+
+        let clonedCards = cards.filter { $0.id != sourceCard.id }
+        #expect(clonedCards.count == 3)
+        #expect(clonedCards.allSatisfy { $0.agent == .claude })
+        #expect(clonedCards.allSatisfy { $0.column == .todo })
+        #expect(clonedCards.allSatisfy { $0.lastSubmittedPrompt == prompt })
+        #expect(clonedCards.allSatisfy { $0.pendingLaunchPrompt == prompt })
+    }
+
+    @Test
+    func claudePromptCaptureStateCommitsNormalizedPromptAfterDeleteBackward() {
+        var captureState = ClaudePromptCaptureState()
+
+        captureState.append("Fix")
+        captureState.append(" testss")
+        captureState.deleteBackward()
+
+        #expect(captureState.commit() == "Fix tests")
+        #expect(captureState.commit() == nil)
+    }
+
+    @Test
+    func claudePromptCaptureStateNormalizesMultilinePasteAndClearsUnsupportedDraft() {
+        var captureState = ClaudePromptCaptureState()
+
+        captureState.append("Investigate\n  flaky   login\nflow")
+        #expect(captureState.commit() == "Investigate flaky login flow")
+
+        captureState.append("stale draft")
+        captureState.clearDueToUnsupportedEdit()
+        #expect(captureState.commit() == nil)
     }
 }

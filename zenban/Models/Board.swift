@@ -122,6 +122,8 @@ struct Card: Identifiable, Codable, Hashable, Transferable {
     let id: UUID
     var title: String
     var agentSummary: String?
+    var lastSubmittedPrompt: String?
+    var pendingLaunchPrompt: String?
     var column: Column
     var createdAt: Date
     var orderIndex: Int
@@ -133,6 +135,8 @@ struct Card: Identifiable, Codable, Hashable, Transferable {
         id: UUID = UUID(),
         title: String,
         agentSummary: String? = nil,
+        lastSubmittedPrompt: String? = nil,
+        pendingLaunchPrompt: String? = nil,
         column: Column = .todo,
         orderIndex: Int = 0,
         agent: Agent? = nil,
@@ -142,6 +146,8 @@ struct Card: Identifiable, Codable, Hashable, Transferable {
         self.id = id
         self.title = title
         self.agentSummary = agentSummary
+        self.lastSubmittedPrompt = lastSubmittedPrompt
+        self.pendingLaunchPrompt = pendingLaunchPrompt
         self.column = column
         self.createdAt = Date()
         self.orderIndex = orderIndex

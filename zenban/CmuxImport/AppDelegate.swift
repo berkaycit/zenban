@@ -1915,6 +1915,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     weak var fullscreenControlsViewModel: TitlebarControlsViewModel?
     weak var sidebarSelectionState: SidebarSelectionState?
     var zenbanWorkspaceOpenHandler: ((UUID) -> Void)?
+    var zenbanClaudePromptCaptureEnabledHandler: ((UUID) -> Bool)?
+    var zenbanPromptSubmittedHandler: ((UUID, UUID, String) -> Void)?
     var shortcutLayoutCharacterProvider: (UInt16, NSEvent.ModifierFlags) -> String? = KeyboardLayout.character(forKeyCode:modifierFlags:)
     private var workspaceObserver: NSObjectProtocol?
     private var lifecycleSnapshotObservers: [NSObjectProtocol] = []
