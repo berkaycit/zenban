@@ -871,11 +871,12 @@ final class TerminalNotificationStore: ObservableObject {
             AppDelegate.shared?.tabManager?.moveTabToTopForNotification(tabId)
         }
 
+        let resolvedTitle = AppDelegate.shared?.tabTitle(for: tabId) ?? title
         let notification = TerminalNotification(
             id: UUID(),
             tabId: tabId,
             surfaceId: surfaceId,
-            title: title,
+            title: resolvedTitle,
             subtitle: subtitle,
             body: body,
             createdAt: Date(),

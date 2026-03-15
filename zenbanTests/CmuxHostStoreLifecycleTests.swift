@@ -65,10 +65,13 @@ struct CmuxHostStoreLifecycleTests {
             tabId: workspace.id,
             surfaceId: workspace.focusedPanelId,
             title: "Build finished",
-            subtitle: "Workspace notification",
+            subtitle: "Completed in cc-42",
             body: "Done"
         )
 
+        let notification = try #require(notificationStore.notifications.first)
+        #expect(notification.title == card.title)
+        #expect(notification.subtitle == "Completed in cc-42")
         #expect(boardStore.card(id: card.id)?.column == .inProgress)
     }
 
@@ -167,6 +170,64 @@ struct CmuxHostStoreLifecycleTests {
     }
 
     @Test
+    func notificationUsesWorkspaceTitleForNonCardWorkspace() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let appDelegate = AppDelegate()
+        let boardStore = BoardStore()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        let workspace = hostStore.tabManager.addWorkspace(select: false)
+        workspace.setCustomTitle("Infra")
+
+        notificationStore.addNotification(
+            tabId: workspace.id,
+            surfaceId: workspace.focusedPanelId,
+            title: "Build finished",
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        let notification = try #require(notificationStore.notifications.first)
+        #expect(notification.title == "Infra")
+        #expect(notification.subtitle == "Workspace notification")
+    }
+
+    @Test
+    func notificationFallsBackToCallerTitleWhenWorkspaceTitleIsUnavailable() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let title = "Build finished"
+        notificationStore.addNotification(
+            tabId: UUID(),
+            surfaceId: nil,
+            title: title,
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        let notification = try #require(notificationStore.notifications.first)
+        #expect(notification.title == title)
+        #expect(notification.subtitle == "Workspace notification")
+    }
+
+    @Test
     func suppressedNotificationStillMovesMappedTodoCardToInReview() throws {
         let notificationStore = TerminalNotificationStore.shared
         var deliveryCount = 0
@@ -200,7 +261,10 @@ struct CmuxHostStoreLifecycleTests {
             body: "Done"
         )
 
+        let notification = try #require(notificationStore.notifications.first)
         #expect(deliveryCount == 0)
+        #expect(notification.title == card.title)
+        #expect(notification.subtitle == "Workspace notification")
         #expect(boardStore.card(id: card.id)?.column == .inProgress)
     }
 
