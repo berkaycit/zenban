@@ -634,6 +634,14 @@ struct TerminalNotification: Identifiable, Hashable {
 }
 
 @MainActor
+protocol TerminalNotificationStoreObserver: AnyObject {
+    func terminalNotificationStore(
+        _ store: TerminalNotificationStore,
+        didAdd notification: TerminalNotification
+    )
+}
+
+@MainActor
 final class TerminalNotificationStore: ObservableObject {
     private struct TabSurfaceKey: Hashable {
         let tabId: UUID
@@ -689,6 +697,7 @@ final class TerminalNotificationStore: ObservableObject {
     private var notificationSettingsURLOpener: (URL) -> Void = { url in
         NSWorkspace.shared.open(url)
     }
+    weak var observer: (any TerminalNotificationStoreObserver)?
     private var notificationDeliveryHandler: (TerminalNotificationStore, TerminalNotification) -> Void = {
         store,
         notification in
@@ -874,6 +883,7 @@ final class TerminalNotificationStore: ObservableObject {
         )
         updated.insert(notification, at: 0)
         notifications = updated
+        observer?.terminalNotificationStore(self, didAdd: notification)
         if !idsToClear.isEmpty {
             center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
             center.removePendingNotificationRequestsOffMain(withIdentifiers: idsToClear)

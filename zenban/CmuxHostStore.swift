@@ -1,6 +1,5 @@
 import AppKit
 import Bonsplit
-import Combine
 import Observation
 
 @MainActor
@@ -27,8 +26,6 @@ final class CmuxHostStore {
     @ObservationIgnored private weak var registeredWindow: NSWindow?
     @ObservationIgnored private var launchTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var didConfigureAppDelegate = false
-    @ObservationIgnored private var notificationsObserver: AnyCancellable?
-    @ObservationIgnored private var knownNotificationIDs = Set<UUID>()
 
     init() {
         UserDefaults.standard.set(true, forKey: WelcomeSettings.shownKey)
@@ -39,7 +36,7 @@ final class CmuxHostStore {
     func attach(boardStore: BoardStore) {
         self.boardStore = boardStore
         configureAppDelegateIfNeeded()
-        installNotificationsObserverIfNeeded()
+        notificationStore.observer = self
     }
 
     func registerMainWindow(_ window: NSWindow) {
@@ -225,44 +222,6 @@ final class CmuxHostStore {
         didConfigureAppDelegate = true
     }
 
-    private func installNotificationsObserverIfNeeded() {
-        guard notificationsObserver == nil else { return }
-        knownNotificationIDs = Set(notificationStore.notifications.map(\.id))
-        notificationsObserver = notificationStore.$notifications
-            .sink { [weak self] notifications in
-                self?.handleNotificationsChanged(notifications)
-            }
-    }
-
-    private func handleNotificationsChanged(_ notifications: [TerminalNotification]) {
-        let currentIDs = Set(notifications.map(\.id))
-        let newNotifications = notifications.filter { !knownNotificationIDs.contains($0.id) }
-        knownNotificationIDs = currentIDs
-
-        for notification in newNotifications {
-            handleDeliveredNotification(notification)
-        }
-    }
-
-    private func handleDeliveredNotification(_ notification: TerminalNotification) {
-        guard !notification.isRead,
-              isClaudeCompletionNotification(notification),
-              let boardStore,
-              let cardID = workspaceToCardID[notification.tabId],
-              let boardID = workspaceToBoardID[notification.tabId],
-              let card = boardStore.card(id: cardID),
-              resolvedAgent(for: card, boardID: boardID) == .claude else {
-            return
-        }
-
-        _ = boardStore.moveCard(cardID, to: .inProgress, in: boardID)
-    }
-
-    private func isClaudeCompletionNotification(_ notification: TerminalNotification) -> Bool {
-        guard notification.title == Agent.claude.rawValue else { return false }
-        return notification.subtitle.hasPrefix("Completed")
-    }
-
     private func handleNotificationOpen(workspaceID: UUID) {
         guard let boardStore,
               let cardID = workspaceToCardID[workspaceID],
@@ -379,5 +338,22 @@ final class CmuxHostStore {
 
     private func selectWorkspace(_ workspace: Workspace) {
         owningTabManager(for: workspace).selectedTabId = workspace.id
+    }
+}
+
+extension CmuxHostStore: TerminalNotificationStoreObserver {
+    func terminalNotificationStore(
+        _ store: TerminalNotificationStore,
+        didAdd notification: TerminalNotification
+    ) {
+        guard let boardStore,
+              let cardID = workspaceToCardID[notification.tabId],
+              let boardID = workspaceToBoardID[notification.tabId],
+              let card = boardStore.card(id: cardID),
+              card.column == .todo else {
+            return
+        }
+
+        _ = boardStore.moveCard(cardID, to: .inProgress, in: boardID)
     }
 }

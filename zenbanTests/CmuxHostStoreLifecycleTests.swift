@@ -41,7 +41,7 @@ struct CmuxHostStoreLifecycleTests {
     }
 
     @Test
-    func claudeCompletionNotificationMovesCardToInReview() throws {
+    func notificationMovesMappedTodoCardToInReview() throws {
         let notificationStore = TerminalNotificationStore.shared
         notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }
         notificationStore.replaceNotificationsForTesting([])
@@ -64,11 +64,143 @@ struct CmuxHostStoreLifecycleTests {
         notificationStore.addNotification(
             tabId: workspace.id,
             surfaceId: workspace.focusedPanelId,
-            title: Agent.claude.rawValue,
-            subtitle: "Completed in \(card.title)",
+            title: "Build finished",
+            subtitle: "Workspace notification",
             body: "Done"
         )
 
+        #expect(boardStore.card(id: card.id)?.column == .inProgress)
+    }
+
+    @Test
+    func notificationLeavesMappedInReviewCardUntouched() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture(column: .inProgress)
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+
+        notificationStore.addNotification(
+            tabId: workspace.id,
+            surfaceId: workspace.focusedPanelId,
+            title: "Build finished",
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        #expect(boardStore.card(id: card.id)?.column == .inProgress)
+    }
+
+    @Test
+    func notificationLeavesMappedDoneCardUntouched() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture(column: .done)
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+
+        notificationStore.addNotification(
+            tabId: workspace.id,
+            surfaceId: workspace.focusedPanelId,
+            title: "Build finished",
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        #expect(boardStore.card(id: card.id)?.column == .done)
+    }
+
+    @Test
+    func notificationForUnmappedWorkspaceDoesNothing() {
+        let notificationStore = TerminalNotificationStore.shared
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let appDelegate = AppDelegate()
+        let (boardStore, _, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+            _ = hostStore
+        }
+
+        notificationStore.addNotification(
+            tabId: UUID(),
+            surfaceId: nil,
+            title: "Build finished",
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        #expect(boardStore.card(id: card.id)?.column == .todo)
+    }
+
+    @Test
+    func suppressedNotificationStillMovesMappedTodoCardToInReview() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        var deliveryCount = 0
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
+            deliveryCount += 1
+        }
+        notificationStore.replaceNotificationsForTesting([])
+        AppFocusState.overrideIsFocused = true
+        defer {
+            AppFocusState.overrideIsFocused = nil
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+
+        notificationStore.addNotification(
+            tabId: workspace.id,
+            surfaceId: workspace.focusedPanelId,
+            title: "Build finished",
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        #expect(deliveryCount == 0)
         #expect(boardStore.card(id: card.id)?.column == .inProgress)
     }
 
@@ -145,8 +277,8 @@ struct CmuxHostStoreLifecycleTests {
         #expect(!tabManager.tabs.contains(where: { $0.id == workspace.id }))
     }
 
-    private func makeBoardFixture() -> (BoardStore, Board, Card) {
-        let card = Card(title: "cc-42", agent: .claude, worktreePath: "/tmp/cc-42")
+    private func makeBoardFixture(column: Column = .todo) -> (BoardStore, Board, Card) {
+        let card = Card(title: "cc-42", column: column, agent: .claude, worktreePath: "/tmp/cc-42")
         let board = Board(
             name: "Workspace Ownership",
             cards: [card],
