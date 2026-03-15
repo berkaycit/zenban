@@ -228,6 +228,17 @@ struct CardDetailView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
                     .truncationMode(.middle)
+
+                Button {
+                    openWorktreeFolder(path)
+                } label: {
+                    Image(systemName: "arrow.up.forward.square")
+                        .font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Open Worktree Folder")
+                .accessibilityLabel("Open worktree folder")
             } else {
                 Text("Creating...")
                     .font(.subheadline)
@@ -245,6 +256,11 @@ struct CardDetailView: View {
                 }
             }
         }
+    }
+
+    private func openWorktreeFolder(_ path: String) {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        _ = NSWorkspace.shared.open(url)
     }
 
     private var currentAgent: Agent {
