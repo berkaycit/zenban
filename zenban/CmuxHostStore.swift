@@ -1,5 +1,6 @@
 import AppKit
 import Bonsplit
+import Foundation
 import Observation
 
 @MainActor
@@ -26,6 +27,9 @@ final class CmuxHostStore {
     @ObservationIgnored private weak var registeredWindow: NSWindow?
     @ObservationIgnored private var launchTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var didConfigureAppDelegate = false
+#if DEBUG
+    @ObservationIgnored private var launchCommandHandlerForTesting: ((UUID, String) -> Void)?
+#endif
 
     init() {
         UserDefaults.standard.set(true, forKey: WelcomeSettings.shownKey)
@@ -115,7 +119,7 @@ final class CmuxHostStore {
                 self.requestBackgroundWorkspaceLoad(for: workspace)
 
                 if let terminalPanel = self.launchTerminalPanel(in: workspace),
-                   terminalPanel.surface.surface != nil {
+                   self.isTerminalReadyForLaunch(terminalPanel) {
                     let shellActivityState = workspace.panelShellActivityState(panelId: terminalPanel.id)
                     switch shellActivityState {
                     case .promptIdle:
@@ -124,7 +128,7 @@ final class CmuxHostStore {
                         // Give the shell prompt one more polling turn to settle so the
                         // injected Enter key is not swallowed while the prompt redraws.
                         if consecutivePromptIdleObservations >= 2 {
-                            terminalPanel.sendShellCommand(command)
+                            self.sendLaunchCommand(command, to: terminalPanel, cardID: cardID)
                             return
                         }
                     case .unknown:
@@ -137,7 +141,7 @@ final class CmuxHostStore {
                         // initial prompt in the common case.
                         if let unknownShellStateSinceSurfaceReadyAt,
                            Date().timeIntervalSince(unknownShellStateSinceSurfaceReadyAt) >= 1.5 {
-                            terminalPanel.sendShellCommand(command)
+                            self.sendLaunchCommand(command, to: terminalPanel, cardID: cardID)
                             return
                         }
                     case .commandRunning:
@@ -319,10 +323,7 @@ final class CmuxHostStore {
     private func launchCommand(for agent: Agent) -> String {
         switch agent {
         case .claude:
-            let binaryURL = Bundle.main.resourceURL?
-                .appendingPathComponent("bin", isDirectory: true)
-                .appendingPathComponent("claude", isDirectory: false)
-            return shellQuoted(binaryURL?.path ?? "claude")
+            return claudeLaunchCommand()
         case .codex:
             return "codex"
         case .gemini:
@@ -330,8 +331,38 @@ final class CmuxHostStore {
         }
     }
 
+    private func claudeLaunchCommand() -> String {
+        "\(claudeBinaryCommand()) --dangerously-skip-permissions"
+    }
+
+    private func claudeBinaryCommand() -> String {
+        let binaryURL = Bundle.main.resourceURL?
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("claude", isDirectory: false)
+        return shellQuoted(binaryURL?.path ?? "claude")
+    }
+
     private func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+    }
+
+    private func isTerminalReadyForLaunch(_ terminalPanel: TerminalPanel) -> Bool {
+#if DEBUG
+        if launchCommandHandlerForTesting != nil {
+            return true
+        }
+#endif
+        return terminalPanel.surface.surface != nil
+    }
+
+    private func sendLaunchCommand(_ command: String, to terminalPanel: TerminalPanel, cardID: UUID) {
+#if DEBUG
+        if let launchCommandHandlerForTesting {
+            launchCommandHandlerForTesting(cardID, command)
+            return
+        }
+#endif
+        terminalPanel.sendShellCommand(command)
     }
 
     private func launchTerminalPanel(in workspace: Workspace) -> TerminalPanel? {
@@ -346,6 +377,11 @@ final class CmuxHostStore {
     }
 
     private func requestBackgroundWorkspaceLoad(for workspace: Workspace) {
+#if DEBUG
+        if launchCommandHandlerForTesting != nil {
+            return
+        }
+#endif
         workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
         owningTabManager(for: workspace).requestBackgroundWorkspaceLoad(for: workspace.id)
     }
@@ -371,6 +407,20 @@ final class CmuxHostStore {
         owningTabManager(for: workspace).selectedTabId = workspace.id
     }
 }
+
+#if DEBUG
+extension CmuxHostStore {
+    func configureClaudeLaunchHooksForTesting(
+        launchCommandHandler: ((UUID, String) -> Void)? = nil
+    ) {
+        launchCommandHandlerForTesting = launchCommandHandler
+    }
+
+    func resetClaudeLaunchHooksForTesting() {
+        launchCommandHandlerForTesting = nil
+    }
+}
+#endif
 
 extension CmuxHostStore: TerminalNotificationStoreObserver {
     func terminalNotificationStore(
