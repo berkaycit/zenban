@@ -1212,8 +1212,16 @@ class GhosttyApp {
         loadLegacyGhosttyConfigIfNeeded(config)
         ghostty_config_load_recursive_files(config)
         loadCmuxAppSupportGhosttyConfigIfNeeded(config)
+        loadEmbeddedPerformanceOverridesIfNeeded(config)
         loadCJKFontFallbackIfNeeded(config)
         ghostty_config_finalize(config)
+    }
+
+    private func loadEmbeddedPerformanceOverridesIfNeeded(_ config: ghostty_config_t) {
+        guard let overridePath = GhosttyConfig.embeddedPerformanceOverridePath() else { return }
+        overridePath.withCString { path in
+            ghostty_config_load_file(config, path)
+        }
     }
 
     /// When the user has not configured `font-codepoint-map` for CJK ranges,
@@ -2762,7 +2770,16 @@ final class TerminalSurface: Identifiable, ObservableObject {
     @MainActor
     func teardownSurface() {
         markPortalLifecycleClosed(reason: "teardown")
+        releaseRuntimeSurface()
+    }
 
+    @MainActor
+    func releaseRuntimeSurfaceForReuse() {
+        releaseRuntimeSurface()
+    }
+
+    @MainActor
+    private func releaseRuntimeSurface() {
         let callbackContext = surfaceCallbackContext
         surfaceCallbackContext = nil
 
@@ -3183,6 +3200,8 @@ final class TerminalSurface: Identifiable, ObservableObject {
         // transition nudges the renderer.
         view.forceRefreshSurface()
         ghostty_surface_refresh(createdSurface)
+        view.invalidateOcclusionState()
+        view.updateOcclusionState()
 
 #if DEBUG
         let runtimeFontText = cmuxCurrentSurfaceFontSizePoints(createdSurface).map {
@@ -3645,9 +3664,13 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 #endif
     private var eventMonitor: Any?
     private var trackingArea: NSTrackingArea?
-    private var windowObserver: NSObjectProtocol?
+    private var windowScreenObserver: NSObjectProtocol?
+    private var windowOcclusionObserver: NSObjectProtocol?
     private var lastScrollEventTime: CFTimeInterval = 0
     private var visibleInUI: Bool = true
+    private var appliedOcclusionVisible: Bool?
+    private var pendingOcclusionVisible: Bool?
+    private var occlusionDebounceWorkItem: DispatchWorkItem?
     private var pendingSurfaceSize: CGSize?
     private var deferredSurfaceSizeRetryQueued = false
     private var lastDrawableSize: CGSize = .zero
@@ -3678,11 +3701,25 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         return true
     }
 
-        // Visibility is used for focus gating, not for libghostty occlusion.
-        fileprivate var isVisibleInUI: Bool { visibleInUI }
-        fileprivate func setVisibleInUI(_ visible: Bool) {
-            visibleInUI = visible
+    static func effectiveSurfaceOcclusionVisibility(
+        visibleInUI: Bool,
+        hiddenInHierarchy: Bool,
+        windowVisible: Bool
+    ) -> Bool {
+        visibleInUI && !hiddenInHierarchy && windowVisible
+    }
+
+    fileprivate var isVisibleInUI: Bool { visibleInUI }
+
+    fileprivate func setVisibleInUI(_ visible: Bool) {
+        guard visibleInUI != visible else {
+            updateOcclusionState()
+            return
         }
+
+        visibleInUI = visible
+        updateOcclusionState()
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -3844,10 +3881,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let windowObserver {
-            NotificationCenter.default.removeObserver(windowObserver)
-            self.windowObserver = nil
-        }
+        removeWindowObservers()
 #if DEBUG
         dlog(
             "surface.view.windowMove surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
@@ -3855,17 +3889,27 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             "pending=\(String(format: "%.1fx%.1f", pendingSurfaceSize?.width ?? 0, pendingSurfaceSize?.height ?? 0))"
         )
 #endif
-        guard let window else { return }
+        guard let window else {
+            updateOcclusionState()
+            return
+        }
 
         // If the surface creation was deferred while detached, create/attach it now.
         terminalSurface?.attachToView(self)
 
-        windowObserver = NotificationCenter.default.addObserver(
+        windowScreenObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didChangeScreenNotification,
             object: window,
             queue: .main
         ) { [weak self] notification in
             self?.windowDidChangeScreen(notification)
+        }
+        windowOcclusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateOcclusionState()
         }
 
         if let surface = terminalSurface?.surface,
@@ -3887,6 +3931,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         )
         applyWindowBackgroundIfActive()
         invalidateTextInputCoordinates()
+        updateOcclusionState()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -3905,8 +3950,44 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     }
 
     fileprivate func updateOcclusionState() {
-        // Intentionally no-op: we don't drive libghostty occlusion from AppKit occlusion state.
-        // This avoids transient clears during reparenting and keeps rendering logic minimal.
+        let hiddenInHierarchy = isHiddenOrHasHiddenAncestor
+        let windowVisible = (window?.occlusionState.contains(.visible) ?? false) || (window?.isKeyWindow ?? false)
+        let effectiveVisible = Self.effectiveSurfaceOcclusionVisibility(
+            visibleInUI: visibleInUI,
+            hiddenInHierarchy: hiddenInHierarchy,
+            windowVisible: windowVisible
+        )
+
+        guard pendingOcclusionVisible != effectiveVisible || appliedOcclusionVisible != effectiveVisible else {
+            return
+        }
+
+        pendingOcclusionVisible = effectiveVisible
+        occlusionDebounceWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let hiddenInHierarchy = self.isHiddenOrHasHiddenAncestor
+            let windowVisible = (self.window?.occlusionState.contains(.visible) ?? false) || (self.window?.isKeyWindow ?? false)
+            let effectiveVisible = Self.effectiveSurfaceOcclusionVisibility(
+                visibleInUI: self.visibleInUI,
+                hiddenInHierarchy: hiddenInHierarchy,
+                windowVisible: windowVisible
+            )
+            self.pendingOcclusionVisible = effectiveVisible
+            guard self.appliedOcclusionVisible != effectiveVisible else { return }
+            self.appliedOcclusionVisible = effectiveVisible
+            self.terminalSurface?.setOcclusion(effectiveVisible)
+        }
+
+        occlusionDebounceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150), execute: workItem)
+    }
+
+    fileprivate func invalidateOcclusionState() {
+        occlusionDebounceWorkItem?.cancel()
+        pendingOcclusionVisible = nil
+        appliedOcclusionVisible = nil
     }
 
     override func viewDidChangeBackingProperties() {
@@ -3925,6 +4006,18 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         super.layout()
         updateSurfaceSize()
         invalidateTextInputCoordinates()
+        updateOcclusionState()
+    }
+
+    private func removeWindowObservers() {
+        if let windowScreenObserver {
+            NotificationCenter.default.removeObserver(windowScreenObserver)
+            self.windowScreenObserver = nil
+        }
+        if let windowOcclusionObserver {
+            NotificationCenter.default.removeObserver(windowOcclusionObserver)
+            self.windowOcclusionObserver = nil
+        }
     }
 
     override var isOpaque: Bool { false }
@@ -5835,9 +5928,8 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
         }
-        if let windowObserver {
-            NotificationCenter.default.removeObserver(windowObserver)
-        }
+        occlusionDebounceWorkItem?.cancel()
+        removeWindowObservers()
         if let trackingArea {
             removeTrackingArea(trackingArea)
         }
@@ -7130,6 +7222,7 @@ final class GhosttySurfaceScrollView: NSView {
         let wasVisible = surfaceView.isVisibleInUI
         surfaceView.setVisibleInUI(visible)
         isHidden = !visible
+        surfaceView.updateOcclusionState()
 #if DEBUG
         if wasVisible != visible {
             let transition = "\(wasVisible ? 1 : 0)->\(visible ? 1 : 0)"

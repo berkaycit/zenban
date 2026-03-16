@@ -117,4 +117,52 @@ struct zenbanTests {
         captureState.clearDueToUnsupportedEdit()
         #expect(captureState.commit() == nil)
     }
+
+    @Test
+    func ghosttyDiskConfigPathsAppendEmbeddedOverrideLast() throws {
+        let resourceDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: resourceDirectory, withIntermediateDirectories: true)
+        let overrideURL = resourceDirectory
+            .appendingPathComponent("ghostty-embedded-performance", isDirectory: false)
+            .appendingPathExtension("config")
+        try """
+        scrollback-limit = 8000000
+        image-storage-limit = 8000000
+        background-blur = false
+        """.write(to: overrideURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: resourceDirectory) }
+
+        let configPaths = GhosttyConfig.configPathsForDiskLoad(
+            currentBundleIdentifier: "com.berkaycit.zenban.tests",
+            bundleResourceURL: resourceDirectory
+        )
+
+        #expect(configPaths.last == overrideURL.path)
+        #expect(configPaths.contains(NSString(string: "~/.config/ghostty/config").expandingTildeInPath))
+    }
+
+    @Test
+    func ghosttySurfaceOcclusionVisibilityRequiresUiAndWindowVisibility() {
+        #expect(GhosttyNSView.effectiveSurfaceOcclusionVisibility(
+            visibleInUI: true,
+            hiddenInHierarchy: false,
+            windowVisible: true
+        ))
+        #expect(!GhosttyNSView.effectiveSurfaceOcclusionVisibility(
+            visibleInUI: false,
+            hiddenInHierarchy: false,
+            windowVisible: true
+        ))
+        #expect(!GhosttyNSView.effectiveSurfaceOcclusionVisibility(
+            visibleInUI: true,
+            hiddenInHierarchy: true,
+            windowVisible: true
+        ))
+        #expect(!GhosttyNSView.effectiveSurfaceOcclusionVisibility(
+            visibleInUI: true,
+            hiddenInHierarchy: false,
+            windowVisible: false
+        ))
+    }
 }

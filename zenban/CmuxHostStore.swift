@@ -17,6 +17,17 @@ final class CmuxHostStore {
         let boardID: UUID
     }
 
+    private enum WorkspaceResidency {
+        case interactive
+        case backgroundPrewarmOnly
+    }
+
+    private struct WorkspaceRuntimeState {
+        var residency: WorkspaceResidency
+        var hiddenSince: Date?
+        var lastObservedAgentActivityAt: Date?
+    }
+
     let tabManager: TabManager
     let notificationStore: TerminalNotificationStore
     let sidebarState = SidebarState()
@@ -30,15 +41,20 @@ final class CmuxHostStore {
     private var cardToBrowserPanelID: [UUID: UUID] = [:]
     private var launchSignatureByCardID: [UUID: String] = [:]
     private var cachedClaudeSummaryByCardID: [UUID: String] = [:]
+    private var workspaceRuntimeStateByID: [UUID: WorkspaceRuntimeState] = [:]
     private var workspaceStatusObservationGeneration: UInt64 = 0
 
     @ObservationIgnored private weak var boardStore: BoardStore?
     @ObservationIgnored private weak var registeredWindow: NSWindow?
     @ObservationIgnored private var launchTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var hiddenWorkspaceReclaimTask: Task<Void, Never>?
     @ObservationIgnored private var workspaceStatusSubscriptions: [UUID: AnyCancellable] = [:]
     @ObservationIgnored private var didConfigureAppDelegate = false
+    @ObservationIgnored private var hiddenWorkspaceReclaimTimeout: TimeInterval = 5 * 60
+    @ObservationIgnored private var hiddenWorkspaceReclaimPollingInterval: Duration = .seconds(30)
 #if DEBUG
     @ObservationIgnored private var launchCommandHandlerForTesting: ((UUID, String) -> Void)?
+    @ObservationIgnored private var backgroundReclaimHandlerForTesting: ((UUID) -> Void)?
 #endif
     @ObservationIgnored private var selectedCardContext: SelectedCardContext?
 
@@ -52,6 +68,11 @@ final class CmuxHostStore {
         UserDefaults.standard.set(true, forKey: WelcomeSettings.shownKey)
         notificationStore = TerminalNotificationStore.shared
         tabManager = TabManager()
+        startHiddenWorkspaceReclaimLoop()
+    }
+
+    deinit {
+        hiddenWorkspaceReclaimTask?.cancel()
     }
 
     func attach(boardStore: BoardStore) {
@@ -283,6 +304,7 @@ final class CmuxHostStore {
             workspaceStatusSubscriptions.removeValue(forKey: workspaceID)
             workspaceToCardID.removeValue(forKey: workspaceID)
             workspaceToBoardID.removeValue(forKey: workspaceID)
+            workspaceRuntimeStateByID.removeValue(forKey: workspaceID)
         }
 
         guard let activeWorkspaceID else {
@@ -357,6 +379,7 @@ final class CmuxHostStore {
             return
         }
 
+        recordWorkspaceAgentActivity(workspaceID)
         boardStore.updateCardLastSubmittedPrompt(cardID, prompt: prompt, in: boardID)
     }
 
@@ -391,6 +414,10 @@ final class CmuxHostStore {
         if mode != .backgroundPrewarm {
             selectWorkspace(workspace)
         }
+        setWorkspaceResidency(
+            mode == .backgroundPrewarm ? .backgroundPrewarmOnly : .interactive,
+            for: workspace.id
+        )
         updateTitle(for: card.id, title: card.title)
         updateAgentLaunch(for: card, boardID: boardID)
     }
@@ -399,6 +426,13 @@ final class CmuxHostStore {
     private func ensureWorkspace(for card: Card, boardID: UUID) -> Workspace {
         if let workspace = workspace(for: card.id) {
             workspaceToBoardID[workspace.id] = boardID
+            if workspaceRuntimeStateByID[workspace.id] == nil {
+                workspaceRuntimeStateByID[workspace.id] = WorkspaceRuntimeState(
+                    residency: .interactive,
+                    hiddenSince: nil,
+                    lastObservedAgentActivityAt: nil
+                )
+            }
             workspace.setCustomTitle(card.title)
             observeWorkspaceStatus(in: workspace)
             return workspace
@@ -415,6 +449,11 @@ final class CmuxHostStore {
         cardToWorkspaceID[card.id] = workspace.id
         workspaceToCardID[workspace.id] = card.id
         workspaceToBoardID[workspace.id] = boardID
+        workspaceRuntimeStateByID[workspace.id] = WorkspaceRuntimeState(
+            residency: .interactive,
+            hiddenSince: nil,
+            lastObservedAgentActivityAt: nil
+        )
         observeWorkspaceStatus(in: workspace)
 
         return workspace
@@ -548,6 +587,9 @@ final class CmuxHostStore {
     }
 
     private func sendLaunchCommand(_ command: String, to terminalPanel: TerminalPanel, cardID: UUID) {
+        if let workspaceID = cardToWorkspaceID[cardID] {
+            recordWorkspaceAgentActivity(workspaceID)
+        }
 #if DEBUG
         if let launchCommandHandlerForTesting {
             launchCommandHandlerForTesting(cardID, command)
@@ -603,6 +645,10 @@ final class CmuxHostStore {
                 guard let self else { return }
 
                 self.workspaceStatusObservationGeneration &+= 1
+                if let workspace = self.workspace(forID: workspaceID),
+                   workspace.statusEntries.values.contains(where: { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                    self.recordWorkspaceAgentActivity(workspaceID)
+                }
 
                 guard let cardID = self.workspaceToCardID[workspaceID],
                       let boardID = self.workspaceToBoardID[workspaceID],
@@ -705,6 +751,121 @@ final class CmuxHostStore {
 
     private func selectWorkspace(_ workspace: Workspace) {
         owningTabManager(for: workspace).selectedTabId = workspace.id
+        if workspaceToCardID[workspace.id] != nil {
+            setWorkspaceResidency(.interactive, for: workspace.id)
+        }
+        refreshWorkspaceHiddenState()
+    }
+
+    private func startHiddenWorkspaceReclaimLoop() {
+        hiddenWorkspaceReclaimTask?.cancel()
+        hiddenWorkspaceReclaimTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let pollingInterval = self.hiddenWorkspaceReclaimPollingInterval
+                try? await Task.sleep(for: pollingInterval)
+                self.evaluateHiddenWorkspaceReclaim()
+            }
+        }
+    }
+
+    private func setWorkspaceResidency(_ residency: WorkspaceResidency, for workspaceID: UUID, now: Date = Date()) {
+        var runtimeState = workspaceRuntimeStateByID[workspaceID] ?? WorkspaceRuntimeState(
+            residency: residency,
+            hiddenSince: nil,
+            lastObservedAgentActivityAt: nil
+        )
+        runtimeState.residency = residency
+        if isWorkspaceSelected(workspaceID) {
+            runtimeState.hiddenSince = nil
+        } else if runtimeState.hiddenSince == nil {
+            runtimeState.hiddenSince = now
+        }
+        workspaceRuntimeStateByID[workspaceID] = runtimeState
+    }
+
+    private func recordWorkspaceAgentActivity(_ workspaceID: UUID, at date: Date = Date()) {
+        var runtimeState = workspaceRuntimeStateByID[workspaceID] ?? WorkspaceRuntimeState(
+            residency: .interactive,
+            hiddenSince: nil,
+            lastObservedAgentActivityAt: nil
+        )
+        runtimeState.lastObservedAgentActivityAt = date
+        workspaceRuntimeStateByID[workspaceID] = runtimeState
+    }
+
+    private func refreshWorkspaceHiddenState(now: Date = Date()) {
+        for workspaceID in workspaceToCardID.keys {
+            var runtimeState = workspaceRuntimeStateByID[workspaceID] ?? WorkspaceRuntimeState(
+                residency: .interactive,
+                hiddenSince: nil,
+                lastObservedAgentActivityAt: nil
+            )
+            if isWorkspaceSelected(workspaceID) {
+                runtimeState.hiddenSince = nil
+            } else if runtimeState.hiddenSince == nil {
+                runtimeState.hiddenSince = now
+            }
+            workspaceRuntimeStateByID[workspaceID] = runtimeState
+        }
+    }
+
+    private func isWorkspaceSelected(_ workspaceID: UUID) -> Bool {
+        guard let workspace = workspace(forID: workspaceID) else { return false }
+        return owningTabManager(for: workspace).selectedTabId == workspaceID
+    }
+
+    private func evaluateHiddenWorkspaceReclaim(now: Date = Date()) {
+        refreshWorkspaceHiddenState(now: now)
+
+        for (workspaceID, cardID) in workspaceToCardID {
+            guard let runtimeState = workspaceRuntimeStateByID[workspaceID],
+                  runtimeState.residency == .backgroundPrewarmOnly,
+                  !isWorkspaceSelected(workspaceID),
+                  let hiddenSince = runtimeState.hiddenSince,
+                  now.timeIntervalSince(hiddenSince) >= hiddenWorkspaceReclaimTimeout,
+                  runtimeState.lastObservedAgentActivityAt == nil,
+                  launchTasks[cardID] == nil,
+                  let workspace = workspace(forID: workspaceID) else {
+                continue
+            }
+
+            let terminalPanels = workspace.panels.values.compactMap { $0 as? TerminalPanel }
+            guard !terminalPanels.isEmpty else { continue }
+
+            let shellStates = terminalPanels.map { workspace.panelShellActivityState(panelId: $0.id) }
+            if shellStates.contains(.commandRunning) {
+                recordWorkspaceAgentActivity(workspaceID, at: now)
+                continue
+            }
+
+            guard shellStates.allSatisfy({ $0 == .promptIdle }) else { continue }
+
+#if DEBUG
+            if backgroundReclaimHandlerForTesting != nil {
+                reclaimWorkspaceRuntime(workspace, cardID: cardID)
+                continue
+            }
+#endif
+
+            guard workspace.hasLoadedTerminalSurface() else { continue }
+            reclaimWorkspaceRuntime(workspace, cardID: cardID)
+        }
+    }
+
+    private func reclaimWorkspaceRuntime(_ workspace: Workspace, cardID: UUID) {
+        launchTasks[cardID]?.cancel()
+        launchTasks.removeValue(forKey: cardID)
+        launchSignatureByCardID.removeValue(forKey: cardID)
+#if DEBUG
+        if let backgroundReclaimHandlerForTesting {
+            backgroundReclaimHandlerForTesting(cardID)
+            return
+        }
+#endif
+        for terminalPanel in workspace.panels.values.compactMap({ $0 as? TerminalPanel }) {
+            terminalPanel.releaseRuntimeSurfaceForBackgroundReclaim()
+        }
     }
 }
 
@@ -718,6 +879,55 @@ extension CmuxHostStore {
 
     func resetClaudeLaunchHooksForTesting() {
         launchCommandHandlerForTesting = nil
+    }
+
+    func configureBackgroundReclaimHookForTesting(_ handler: ((UUID) -> Void)? = nil) {
+        backgroundReclaimHandlerForTesting = handler
+    }
+
+    func setWorkspaceHiddenSinceForTesting(cardID: UUID, date: Date?) {
+        guard let workspaceID = cardToWorkspaceID[cardID] else { return }
+        var runtimeState = workspaceRuntimeStateByID[workspaceID] ?? WorkspaceRuntimeState(
+            residency: .interactive,
+            hiddenSince: nil,
+            lastObservedAgentActivityAt: nil
+        )
+        runtimeState.hiddenSince = date
+        workspaceRuntimeStateByID[workspaceID] = runtimeState
+    }
+
+    func setWorkspaceObservedAgentActivityForTesting(cardID: UUID, date: Date?) {
+        guard let workspaceID = cardToWorkspaceID[cardID] else { return }
+        var runtimeState = workspaceRuntimeStateByID[workspaceID] ?? WorkspaceRuntimeState(
+            residency: .interactive,
+            hiddenSince: nil,
+            lastObservedAgentActivityAt: nil
+        )
+        runtimeState.lastObservedAgentActivityAt = date
+        workspaceRuntimeStateByID[workspaceID] = runtimeState
+    }
+
+    func markWorkspaceInteractiveForTesting(cardID: UUID) {
+        guard let workspaceID = cardToWorkspaceID[cardID] else { return }
+        setWorkspaceResidency(.interactive, for: workspaceID)
+    }
+
+    func markWorkspaceBackgroundPrewarmOnlyForTesting(cardID: UUID) {
+        guard let workspaceID = cardToWorkspaceID[cardID] else { return }
+        setWorkspaceResidency(.backgroundPrewarmOnly, for: workspaceID)
+    }
+
+    func cancelLaunchTaskForTesting(cardID: UUID) {
+        launchTasks[cardID]?.cancel()
+        launchTasks.removeValue(forKey: cardID)
+    }
+
+    func setHiddenWorkspaceReclaimTimeoutForTesting(_ timeout: TimeInterval) {
+        hiddenWorkspaceReclaimTimeout = timeout
+    }
+
+    func evaluateHiddenWorkspaceReclaimForTesting(now: Date = Date()) {
+        evaluateHiddenWorkspaceReclaim(now: now)
     }
 }
 #endif
@@ -737,6 +947,8 @@ extension CmuxHostStore: TerminalNotificationStoreObserver {
         if resolvedAgent(for: card, boardID: boardID) == .claude {
             cacheClaudeSummary(from: notification, for: cardID, in: boardID)
         }
+
+        recordWorkspaceAgentActivity(notification.tabId)
 
         guard card.column == .todo else { return }
         _ = boardStore.moveCard(cardID, to: .inProgress, in: boardID)

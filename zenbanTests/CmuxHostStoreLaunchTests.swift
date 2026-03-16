@@ -255,6 +255,183 @@ struct CmuxHostStoreLaunchTests {
         #expect(commands == [expectedClaudeLaunchCommand()])
     }
 
+    @Test
+    func backgroundPrewarmIdleWorkspaceReclaimsAfterTimeoutWithoutChangingSelection() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let sourceCard = Card(title: "cc-42", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
+        let cloneCard = Card(title: "cc-43", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
+        let board = Board(
+            name: "Background Reclaim",
+            cards: [sourceCard, cloneCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = sourceCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        var reclaimedCardIDs: [UUID] = []
+        hostStore.configureBackgroundReclaimHookForTesting { cardID in
+            reclaimedCardIDs.append(cardID)
+        }
+        defer {
+            hostStore.configureBackgroundReclaimHookForTesting(nil)
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: sourceCard, boardID: board.id)
+        hostStore.prewarmWorkspaceForBackgroundLaunch(for: cloneCard, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: cloneCard.id)
+        hostStore.cancelLaunchTaskForTesting(cardID: cloneCard.id)
+        hostStore.markWorkspaceBackgroundPrewarmOnlyForTesting(cardID: cloneCard.id)
+        hostStore.setWorkspaceObservedAgentActivityForTesting(cardID: cloneCard.id, date: nil)
+
+        let evaluationTime = Date()
+        hostStore.setWorkspaceHiddenSinceForTesting(
+            cardID: cloneCard.id,
+            date: evaluationTime.addingTimeInterval(-301)
+        )
+
+        hostStore.evaluateHiddenWorkspaceReclaimForTesting(now: evaluationTime)
+
+        #expect(reclaimedCardIDs == [cloneCard.id])
+        #expect(boardStore.selectedCardID == sourceCard.id)
+        #expect(hostStore.workspace(for: cloneCard.id) != nil)
+    }
+
+    @Test
+    func interactiveWorkspaceIsNotReclaimedWhileHidden() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let sourceCard = Card(title: "cc-42", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
+        let siblingCard = Card(title: "cc-43", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
+        let board = Board(
+            name: "Interactive",
+            cards: [sourceCard, siblingCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = sourceCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        var reclaimedCardIDs: [UUID] = []
+        hostStore.configureBackgroundReclaimHookForTesting { cardID in
+            reclaimedCardIDs.append(cardID)
+        }
+        defer {
+            hostStore.configureBackgroundReclaimHookForTesting(nil)
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: sourceCard, boardID: board.id)
+        hostStore.syncSelection(card: siblingCard, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: sourceCard.id)
+        hostStore.cancelLaunchTaskForTesting(cardID: sourceCard.id)
+        hostStore.markWorkspaceInteractiveForTesting(cardID: sourceCard.id)
+        hostStore.setWorkspaceObservedAgentActivityForTesting(cardID: sourceCard.id, date: nil)
+
+        let evaluationTime = Date()
+        hostStore.setWorkspaceHiddenSinceForTesting(
+            cardID: sourceCard.id,
+            date: evaluationTime.addingTimeInterval(-301)
+        )
+
+        hostStore.evaluateHiddenWorkspaceReclaimForTesting(now: evaluationTime)
+
+        #expect(reclaimedCardIDs.isEmpty)
+    }
+
+    @Test
+    func backgroundPrewarmWorkspaceWithObservedActivityIsNotReclaimed() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let sourceCard = Card(title: "cc-42", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
+        let cloneCard = Card(title: "cc-43", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
+        let board = Board(
+            name: "Observed Activity",
+            cards: [sourceCard, cloneCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = sourceCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        var reclaimedCardIDs: [UUID] = []
+        hostStore.configureBackgroundReclaimHookForTesting { cardID in
+            reclaimedCardIDs.append(cardID)
+        }
+        defer {
+            hostStore.configureBackgroundReclaimHookForTesting(nil)
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: sourceCard, boardID: board.id)
+        hostStore.prewarmWorkspaceForBackgroundLaunch(for: cloneCard, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: cloneCard.id)
+        hostStore.cancelLaunchTaskForTesting(cardID: cloneCard.id)
+        hostStore.markWorkspaceBackgroundPrewarmOnlyForTesting(cardID: cloneCard.id)
+
+        let evaluationTime = Date()
+        hostStore.setWorkspaceHiddenSinceForTesting(
+            cardID: cloneCard.id,
+            date: evaluationTime.addingTimeInterval(-301)
+        )
+        hostStore.setWorkspaceObservedAgentActivityForTesting(
+            cardID: cloneCard.id,
+            date: evaluationTime.addingTimeInterval(-30)
+        )
+
+        hostStore.evaluateHiddenWorkspaceReclaimForTesting(now: evaluationTime)
+
+        #expect(reclaimedCardIDs.isEmpty)
+    }
+
+    @Test
+    func backgroundPrewarmWorkspaceRunningCommandIsNotReclaimed() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let sourceCard = Card(title: "cc-42", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
+        let cloneCard = Card(title: "cc-43", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
+        let board = Board(
+            name: "Command Running",
+            cards: [sourceCard, cloneCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = sourceCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        var reclaimedCardIDs: [UUID] = []
+        hostStore.configureBackgroundReclaimHookForTesting { cardID in
+            reclaimedCardIDs.append(cardID)
+        }
+        defer {
+            hostStore.configureBackgroundReclaimHookForTesting(nil)
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: sourceCard, boardID: board.id)
+        hostStore.prewarmWorkspaceForBackgroundLaunch(for: cloneCard, boardID: board.id)
+        try setWorkspaceShellActivityState(
+            hostStore: hostStore,
+            cardID: cloneCard.id,
+            state: .commandRunning
+        )
+        hostStore.cancelLaunchTaskForTesting(cardID: cloneCard.id)
+        hostStore.markWorkspaceBackgroundPrewarmOnlyForTesting(cardID: cloneCard.id)
+        hostStore.setWorkspaceObservedAgentActivityForTesting(cardID: cloneCard.id, date: nil)
+
+        let evaluationTime = Date()
+        hostStore.setWorkspaceHiddenSinceForTesting(
+            cardID: cloneCard.id,
+            date: evaluationTime.addingTimeInterval(-301)
+        )
+
+        hostStore.evaluateHiddenWorkspaceReclaimForTesting(now: evaluationTime)
+
+        #expect(reclaimedCardIDs.isEmpty)
+    }
+
     private func makeBoardFixture(
         agent: Agent,
         worktreePath: String,
@@ -289,9 +466,17 @@ struct CmuxHostStoreLaunchTests {
     }
 
     private func markWorkspacePromptIdle(hostStore: CmuxHostStore, cardID: UUID) throws {
+        try setWorkspaceShellActivityState(hostStore: hostStore, cardID: cardID, state: .promptIdle)
+    }
+
+    private func setWorkspaceShellActivityState(
+        hostStore: CmuxHostStore,
+        cardID: UUID,
+        state: Workspace.PanelShellActivityState
+    ) throws {
         let workspace = try #require(hostStore.workspace(for: cardID))
         let terminalPanel = try #require(workspace.focusedTerminalPanel)
-        workspace.updatePanelShellActivityState(panelId: terminalPanel.id, state: .promptIdle)
+        workspace.updatePanelShellActivityState(panelId: terminalPanel.id, state: state)
     }
 
     private func waitUntil(

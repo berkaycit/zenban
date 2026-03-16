@@ -168,6 +168,12 @@ final class TerminalPanel: Panel, ObservableObject {
         surface.teardownSurface()
     }
 
+    func releaseRuntimeSurfaceForBackgroundReclaim() {
+        unfocus()
+        hostedView.setVisibleInUI(false)
+        surface.releaseRuntimeSurfaceForReuse()
+    }
+
     func requestViewReattach() {
         viewReattachToken &+= 1
     }

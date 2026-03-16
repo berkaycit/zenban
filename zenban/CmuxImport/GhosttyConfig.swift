@@ -134,16 +134,58 @@ struct GhosttyConfig {
         return []
     }
 
-    private static func loadFromDisk(preferredColorScheme: ColorSchemePreference) -> GhosttyConfig {
-        var config = GhosttyConfig()
+    static func embeddedPerformanceOverridePath(
+        bundleResourceURL: URL? = Bundle.main.resourceURL,
+        fileManager: FileManager = .default
+    ) -> String? {
+        guard let bundleResourceURL else { return nil }
 
-        // Match Ghostty's default load order on macOS.
-        let configPaths = [
+        let candidate = bundleResourceURL
+            .appendingPathComponent("ghostty-embedded-performance", isDirectory: false)
+            .appendingPathExtension("config")
+
+        guard let attributes = try? fileManager.attributesOfItem(atPath: candidate.path),
+              let type = attributes[.type] as? FileAttributeType,
+              type == .typeRegular,
+              let size = attributes[.size] as? NSNumber,
+              size.intValue > 0 else {
+            return nil
+        }
+
+        return candidate.path
+    }
+
+    static func configPathsForDiskLoad(
+        fileManager: FileManager = .default,
+        currentBundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        bundleResourceURL: URL? = Bundle.main.resourceURL
+    ) -> [String] {
+        let defaultPaths = [
             "~/.config/ghostty/config",
             "~/.config/ghostty/config.ghostty",
             "~/Library/Application Support/com.mitchellh.ghostty/config",
             "~/Library/Application Support/com.mitchellh.ghostty/config.ghostty",
-        ].map { NSString(string: $0).expandingTildeInPath } + cmuxConfigPaths()
+        ].map { NSString(string: $0).expandingTildeInPath }
+
+        var configPaths = defaultPaths + cmuxConfigPaths(
+            fileManager: fileManager,
+            currentBundleIdentifier: currentBundleIdentifier
+        )
+        if let embeddedOverridePath = embeddedPerformanceOverridePath(
+            bundleResourceURL: bundleResourceURL,
+            fileManager: fileManager
+        ) {
+            configPaths.append(embeddedOverridePath)
+        }
+
+        return configPaths
+    }
+
+    private static func loadFromDisk(preferredColorScheme: ColorSchemePreference) -> GhosttyConfig {
+        var config = GhosttyConfig()
+
+        // Match Ghostty's default load order on macOS.
+        let configPaths = configPathsForDiskLoad()
 
         for path in configPaths {
             if let contents = readConfigFile(at: path) {

@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Reduce hidden Ghostty workspace load
+- **Description**: Hidden card terminals now drive real Ghostty occlusion so off-screen workspaces stop rendering while staying reopenable. Zenban also loads an embedded Ghostty performance override after user config to cap scrollback and image memory and disable blur for embedded surfaces. `CmuxHostStore` tracks hidden prewarm workspace residency and only reclaims runtime surfaces for long-hidden, prompt-idle shells that never showed agent activity, avoiding session loss for interactive or active workspaces.
+
 - **Summary**: Keep Done card terminals manual
 - **Description**: `Done` cards now close their cmux workspace as soon as they move into the completed column and no longer auto-open a terminal when selected. The detail pane shows an `Open Terminal` CTA instead, and that manual session is torn down again when the user leaves the card. Added focused lifecycle and launch regression coverage around the new manual-open flow.
 
