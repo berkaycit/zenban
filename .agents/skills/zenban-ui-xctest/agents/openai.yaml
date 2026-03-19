@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zenban UI XCTest"
+  short_description: "Zenban macOS UI test playbook"
+  default_prompt: "Use $zenban-ui-xctest to write or debug a Zenban UI test involving cards, Ghostty terminals, screenshots, and Peekaboo diagnosis."
