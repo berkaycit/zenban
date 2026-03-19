@@ -45,7 +45,7 @@ The detail pane shows card metadata, column controls, agent selection, and workt
 
 ## Dev Server
 
-Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup`. `DevServerView` keeps logs visible during startup, then mounts a cmux `BrowserPanelView` for the selected card once the server is ready. `ProcessEnvironment` still sets `BROWSER=none` so dev commands do not open an external browser automatically.
+Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup`. `DevServerView` keeps logs visible during startup, then mounts a cmux `BrowserPanelView` for the selected card once the server is ready. `DevServerManager` persists app-owned process groups so quit and next-launch recovery can reclaim stale listeners before falling back to an alternate port. `ProcessEnvironment` still sets `BROWSER=none` so dev commands do not open an external browser automatically.
 
 ## Notifications And Scripting
 
@@ -53,4 +53,4 @@ Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup
 
 ## Keyboard Shortcuts
 
-`Cmd+Shift+N` creates a board, `Cmd+Shift+A` creates a card, `Cmd+Shift+E` deletes the selected card, `Cmd+Shift+S` toggles the dev server, `Cmd+Shift+R` refreshes the dev server preview, `Cmd+Shift+X` toggles Git Changes, and `Shift+Arrow` shortcuts move selection across boards, cards, and columns.
+`Cmd+Shift+N` creates a board, `Cmd+Shift+A` creates a card, `Cmd+Shift+E` deletes the selected card, `Cmd+Shift+S` toggles the dev server, `Cmd+Shift+R` refreshes the dev server preview, `Cmd+Shift+C` toggles the focused preview console or drives the Git commit flow, `Cmd+Shift+X` toggles Git Changes, and `Shift+Arrow` shortcuts move selection across boards, cards, and columns.

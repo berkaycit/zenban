@@ -219,7 +219,7 @@ struct DevServerView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.horizontal, 32)
 
-            retryReconfigureButtons(onRetry: startServer)
+            errorActionButtons(message: message, onRetry: startServer)
 
             Button("Close") {
                 onDismiss()
@@ -233,8 +233,12 @@ struct DevServerView: View {
 
     // MARK: - Components
 
-    private func retryReconfigureButtons(onRetry: @escaping () -> Void) -> some View {
+    private func errorActionButtons(message: String, onRetry: @escaping () -> Void) -> some View {
         HStack(spacing: 12) {
+            Button("Copy Error") {
+                Clipboard.copy(message)
+            }
+
             Button("Retry", action: onRetry)
 
             if let reconfigure = onReconfigure {

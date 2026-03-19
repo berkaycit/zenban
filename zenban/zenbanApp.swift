@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Bonsplit
 import SwiftUI
 
 private enum CmuxEmbeddedBootstrap {
@@ -105,6 +106,115 @@ private enum ArrowKey {
     }
 }
 
+private func responderChainContains(_ start: NSResponder?, target: NSResponder) -> Bool {
+    var responder = start
+    var hops = 0
+    while let current = responder, hops < 64 {
+        if current === target { return true }
+        responder = current.nextResponder
+        hops += 1
+    }
+    return false
+}
+
+private let previewConsoleShortcut = StoredShortcut(
+    key: "c",
+    command: true,
+    shift: true,
+    option: false,
+    control: false
+)
+
+@MainActor
+func shortcutEventWindow(for event: NSEvent) -> NSWindow? {
+    event.window ?? NSApp.keyWindow ?? NSApp.mainWindow
+}
+
+@MainActor
+func isShortcutBlockedByPresentedSheet(event: NSEvent) -> Bool {
+    shortcutBlockedByPresentedSheet(
+        modalWindow: NSApp.modalWindow,
+        candidateWindows: [
+            event.window,
+            NSApp.keyWindow,
+            NSApp.mainWindow,
+        ].compactMap { $0 },
+        allWindows: NSApp.windows
+    )
+}
+
+func shortcutBlockedByPresentedSheet(
+    modalWindow: NSWindow?,
+    candidateWindows: [NSWindow],
+    allWindows: [NSWindow]
+) -> Bool {
+    if modalWindow != nil {
+        return true
+    }
+
+    if candidateWindows.contains(where: { $0.attachedSheet != nil || $0.sheetParent != nil }) {
+        return true
+    }
+
+    return allWindows.contains { $0.attachedSheet != nil || $0.sheetParent != nil }
+}
+
+@MainActor
+func isPreviewWebViewFocused(
+    event: NSEvent,
+    context: CmuxHostStore.BrowserSurfaceContext
+) -> Bool {
+    let candidateWindow =
+        shortcutEventWindow(for: event)
+        ?? context.panel.webView.window
+    let responderFocused = candidateWindow.map {
+        responderChainContains($0.firstResponder, target: context.panel.webView)
+    } ?? false
+    let portalFocused = candidateWindow.flatMap {
+        BrowserWindowPortalRegistry.webViewAtWindowPoint($0.mouseLocationOutsideOfEventStream, in: $0)
+    } === context.panel.webView
+    return responderFocused || portalFocused
+}
+
+@MainActor
+func handleZenbanShortcutOverride(
+    event: NSEvent,
+    store: BoardStore,
+    cmuxHost: CmuxHostStore,
+    appDelegate: AppDelegate
+) -> Bool {
+    if isShortcutBlockedByPresentedSheet(event: event) {
+        return false
+    }
+
+    if appDelegate.matchesShortcut(
+        event: event,
+        shortcut: KeyboardShortcutSettings.shortcut(for: .renameWorkspace)
+    ) {
+        guard let card = store.devServerCard else { return false }
+        _ = cmuxHost.reloadBrowserSurface(for: card.id)
+        return true
+    }
+
+    guard appDelegate.matchesShortcut(event: event, shortcut: previewConsoleShortcut) else {
+        return false
+    }
+    guard let card = store.devServerCard,
+          let context = cmuxHost.browserSurface(for: card.id),
+          isPreviewWebViewFocused(event: event, context: context),
+          let tabManager = appDelegate.tabManager else {
+        return false
+    }
+
+    cmuxHost.focusBrowserSurface(for: card.id)
+    if context.panel.isDeveloperToolsVisible() {
+        _ = tabManager.toggleDeveloperToolsFocusedBrowser()
+        return true
+    }
+    _ = tabManager.showJavaScriptConsoleFocusedBrowser()
+    return true
+}
+
 @main
 struct zenbanApp: App {
     @State private var store: BoardStore
@@ -129,7 +239,7 @@ struct zenbanApp: App {
             queue: .main
         ) { [devServerManager] _ in
             MainActor.assumeIsolated {
-                devServerManager.stopAllServers()
+                devServerManager.shutdownForAppTermination()
             }
         }
 
@@ -199,14 +309,12 @@ struct zenbanApp: App {
                 .onAppear {
                     _ = cmuxAppDelegate
                     cmuxAppDelegate.zenbanShortcutOverrideHandler = { [store, cmuxHost] event in
-                        guard cmuxAppDelegate.matchesRenameWorkspaceShortcut(event) else {
-                            return false
-                        }
-
-                        if let card = store.devServerCard {
-                            _ = cmuxHost.reloadBrowserSurface(for: card.id)
-                        }
-                        return true
+                        handleZenbanShortcutOverride(
+                            event: event,
+                            store: store,
+                            cmuxHost: cmuxHost,
+                            appDelegate: cmuxAppDelegate
+                        )
                     }
                     store.onCardDeleted = { [devServerManager] cardID in
                         devServerManager.stopServer(for: cardID)

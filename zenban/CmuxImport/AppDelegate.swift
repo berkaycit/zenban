@@ -7851,11 +7851,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return false
         }
 
-        if NSApp.modalWindow != nil || NSApp.keyWindow?.attachedSheet != nil {
+        if isShortcutBlockedByPresentedSheet(event: event) {
             return false
         }
 
-        if zenbanShortcutOverrideHandler?(event) == true {
+        let zenbanHandled = zenbanShortcutOverrideHandler?(event) == true
+        if zenbanHandled {
             return true
         }
 
@@ -9238,8 +9239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         handleCustomShortcut(event: event)
     }
 
-    func matchesRenameWorkspaceShortcut(_ event: NSEvent) -> Bool {
-        matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .renameWorkspace))
+    func matchesShortcut(event: NSEvent, shortcut: StoredShortcut) -> Bool {
+        matchShortcut(event: event, shortcut: shortcut)
     }
 
     @discardableResult

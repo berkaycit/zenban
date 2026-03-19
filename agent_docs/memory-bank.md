@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Simplify preview shortcuts and dev server cleanup
+- **Description**: Preview shortcut routing now stays in one Zenban override that reuses the copied cmux browser APIs and treats `Cmd+Shift+C` as a focused-preview toggle instead of a one-way console opener. `DevServerManager` dropped the root-PID tree cleanup model in favor of persisted app-owned process groups, which makes quit-time cleanup and next-launch orphan reaping smaller and easier to reason about. Shortcut copy and dev server docs were updated to match the new behavior.
+
+- **Summary**: Make Cmd+Shift+C context-aware
+- **Description**: `Cmd+Shift+C` now opens the dev server preview console only when the selected card's preview browser is actually focused. The same shortcut still opens Git commit flow from Git Changes and now submits the commit while the sheet is open. This keeps preview/browser behavior and Git behavior in one shortcut without changing the copied cmux defaults.
+
 - **Summary**: Route Cmd+Shift+R to preview refresh
 - **Description**: When the dev server overlay is open, `Cmd+Shift+R` now refreshes the selected card's embedded preview browser instead of restarting the process. The menu command is enabled only when a real preview surface exists, the old restart notification path was removed, and the copied cmux `renameWorkspace` shortcut conflict is resolved through an app delegate override. This keeps the shortcut behavior consistent even while the browser surface is focused.
 

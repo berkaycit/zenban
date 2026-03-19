@@ -10,6 +10,11 @@ struct CommitSheet: View {
     @State private var isCommitting = false
     @State private var isGenerating = false
     @State private var errorMessage: String?
+    @FocusState private var isShortcutScopeFocused: Bool
+
+    private var canCommit: Bool {
+        !summary.trimmingCharacters(in: .whitespaces).isEmpty && !isCommitting
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -18,9 +23,13 @@ struct CommitSheet: View {
         }
         .padding(24)
         .frame(width: 450)
+        .focusable()
+        .focused($isShortcutScopeFocused)
+        .onAppear { isShortcutScopeFocused = true }
         .task {
             generateWithAI()
         }
+        .backport.onKeyPress(KeyEquivalent("c"), action: handleCommitShortcut)
     }
 
     private var headerSection: some View {
@@ -63,6 +72,7 @@ struct CommitSheet: View {
                     .padding(10)
                     .background(Color.inputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .backport.onKeyPress(KeyEquivalent("c"), action: handleCommitShortcut)
             }
 
             // Description field (optional)
@@ -96,6 +106,7 @@ struct CommitSheet: View {
                     .background(Color.inputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .scrollContentBackground(.hidden)
+                    .backport.onKeyPress(KeyEquivalent("c"), action: handleCommitShortcut)
             }
 
             if let error = errorMessage {
@@ -128,7 +139,7 @@ struct CommitSheet: View {
                 }
                 .buttonStyle(ConfirmationButtonStyle(isSelected: true, isDestructive: false))
                 .keyboardShortcut(.defaultAction)
-                .disabled(summary.trimmingCharacters(in: .whitespaces).isEmpty || isCommitting)
+                .disabled(!canCommit)
             }
         }
     }
@@ -149,6 +160,13 @@ struct CommitSheet: View {
             }
             isGenerating = false
         }
+    }
+
+    private func handleCommitShortcut(_ modifiers: EventModifiers) -> BackportKeyPressResult {
+        guard modifiers == [.command, .shift] else { return .ignored }
+        guard canCommit else { return .handled }
+        commit()
+        return .handled
     }
 
     private func commit() {

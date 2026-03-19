@@ -3289,7 +3289,8 @@ extension BrowserPanel {
 
     @discardableResult
     func showDeveloperToolsConsole() -> Bool {
-        guard showDeveloperTools() else { return false }
+        let didShowDeveloperTools = showDeveloperTools()
+        guard didShowDeveloperTools else { return false }
         guard !isDeveloperToolsTransitionInFlight else { return true }
         guard let inspector = webView.cmuxInspectorObject() else { return true }
         // WebKit private inspector API differs by OS; try known console selectors.

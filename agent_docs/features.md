@@ -30,6 +30,7 @@
 - Each card gets its own git worktree on branch `card/<uuid>`
 - Worktrees are created lazily and cleaned up on delete
 - Git Changes opens a board-area diff and history workspace
+- `Cmd+Shift+C` opens the commit sheet in Git Changes and submits the commit when the sheet is open
 
 ## Dev Server
 
@@ -37,7 +38,10 @@
 - Package-manager-aware command detection
 - Live setup and process logs during startup
 - Ready-state embedded cmux browser preview for the selected card
+- App-owned dev server process groups are cleaned up on quit and reaped on the next launch if the app was interrupted
+- Same-worktree port conflicts reclaim stale listeners first, then retry once on a fallback port only when another process still owns the requested port
 - `Cmd+Shift+S` toggles the session
+- `Cmd+Shift+C` toggles the preview browser developer tools when that preview is focused, opening the JavaScript console when closed
 - `Cmd+Shift+R` refreshes the current dev server preview
 
 ## Notifications And Finder Services
