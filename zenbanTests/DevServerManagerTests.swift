@@ -8,6 +8,20 @@ struct DevServerManagerTests {
     private static let ownedProcessGroupsDefaultsKey = "zenban.devServer.ownedProcessGroups.v2"
 
     @Test
+    func outputLineStripsLeadingHTMLStylePrefixes() {
+        let line = OutputLine(text: "<i> [webpack-dev-server] Project is running at:", isError: true)
+
+        #expect(line.text == "[webpack-dev-server] Project is running at:")
+    }
+
+    @Test
+    func webpackInfoOnStderrIsNotDisplayedAsError() {
+        let line = OutputLine(text: "[webpack-dev-server] Project is running at:", isError: true)
+
+        #expect(!line.isError)
+    }
+
+    @Test
     func parsePortConflictPortReadsEaddrinuseOutput() {
         let output = """
         Error: listen EADDRINUSE: address already in use :::3000

@@ -13,13 +13,43 @@ struct OutputLine: Identifiable, Equatable {
     let timestamp: Date
 
     var isError: Bool {
-        source == .serverStderr
+        source == .serverStderr && !Self.isInformationalServerStderr(text)
     }
 
     init(text: String, isError: Bool, timestamp: Date = Date()) {
-        self.text = text
+        self.text = Self.sanitizedDisplayText(text)
         self.source = isError ? .serverStderr : .serverStdout
         self.timestamp = timestamp
+    }
+
+    private static func sanitizedDisplayText(_ text: String) -> String {
+        var sanitized = text
+        while let next = stripHTMLPrefix(from: sanitized) {
+            sanitized = next
+        }
+        return sanitized
+    }
+
+    private static func stripHTMLPrefix(from text: String) -> String? {
+        guard text.first == "<", let closeIndex = text.firstIndex(of: ">") else { return nil }
+
+        let rawTag = text[text.index(after: text.startIndex)..<closeIndex]
+        guard !rawTag.isEmpty else { return nil }
+
+        let tagName = rawTag.hasPrefix("/") ? rawTag.dropFirst() : rawTag[rawTag.startIndex...]
+        guard !tagName.isEmpty, tagName.allSatisfy(\.isLetter) else { return nil }
+
+        let remainder = text[text.index(after: closeIndex)...]
+        return remainder.trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func isInformationalServerStderr(_ text: String) -> Bool {
+        let normalized = text.lowercased()
+        guard normalized.contains("[webpack-dev-server]") else { return false }
+        return normalized.contains("project is running at:")
+            || normalized.contains("loopback:")
+            || normalized.contains("on your network:")
+            || normalized.contains("content not from webpack is served from")
     }
 }
 
