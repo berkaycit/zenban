@@ -5,9 +5,34 @@ struct CardView: View {
     let boardID: UUID
     @Environment(BoardStore.self) private var store
     @Environment(CmuxHostStore.self) private var cmuxHost
+    @ObservedObject private var notificationStore = TerminalNotificationStore.shared
+    @AppStorage(NotificationPaneRingSettings.enabledKey)
+    private var notificationPaneRingEnabled = NotificationPaneRingSettings.defaultEnabled
 
     private var isSelected: Bool {
         store.selectedCardID == card.id
+    }
+
+    private var showsUnreadOutline: Bool {
+        guard !isSelected,
+              notificationPaneRingEnabled,
+              card.column == .inProgress else {
+            return false
+        }
+
+        return cmuxHost.hasUnreadTerminalNotification(for: card.id)
+    }
+
+    private var outlineColor: Color {
+        if isSelected {
+            return .accentColor
+        }
+
+        if showsUnreadOutline {
+            return card.column.accentColor
+        }
+
+        return .clear
     }
 
     private var agentSummary: String? {
@@ -34,7 +59,7 @@ struct CardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                .stroke(outlineColor, lineWidth: 2)
         )
         .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
         .onTapGesture {

@@ -111,6 +111,18 @@ final class CmuxHostStore {
         return workspace(forID: workspaceID)
     }
 
+    func hasUnreadTerminalNotification(for cardID: UUID) -> Bool {
+        guard let workspace = workspace(for: cardID),
+              let terminalPanel = launchTerminalPanel(in: workspace) else {
+            return false
+        }
+
+        return notificationStore.hasUnreadNotification(
+            forTabId: workspace.id,
+            surfaceId: terminalPanel.id
+        )
+    }
+
     func agentSummary(for cardID: UUID) -> String? {
         guard resolvedAgent(forCardID: cardID) == .claude else { return nil }
         _ = workspaceStatusObservationGeneration
