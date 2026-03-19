@@ -38,7 +38,7 @@
 - Live setup and process logs during startup
 - Ready-state embedded cmux browser preview for the selected card
 - `Cmd+Shift+S` toggles the session
-- `Cmd+Shift+R` restarts the current session
+- `Cmd+Shift+R` refreshes the current dev server preview
 
 ## Notifications And Finder Services
 

@@ -7,7 +7,4 @@ extension Notification.Name {
 
     // File browser
     static let closeFileBrowserTab = Notification.Name("closeFileBrowserTab")
-
-    // Dev server
-    static let reloadDevServer = Notification.Name("reloadDevServer")
 }

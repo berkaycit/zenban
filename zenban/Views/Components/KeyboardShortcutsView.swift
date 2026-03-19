@@ -17,7 +17,7 @@ struct KeyboardShortcutsView: View {
             ("Cmd+Shift+F", "Toggle file browser"),
             ("Cmd+Shift+X", "Toggle git changes"),
             ("Cmd+Shift+S", "Toggle dev server"),
-            ("Cmd+Shift+R", "Reload dev server"),
+            ("Cmd+Shift+R", "Refresh dev server preview"),
             ("Cmd+W", "Close file tab"),
         ]),
     ]

@@ -1917,6 +1917,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var zenbanWorkspaceOpenHandler: ((UUID) -> Void)?
     var zenbanClaudePromptCaptureEnabledHandler: ((UUID) -> Bool)?
     var zenbanPromptSubmittedHandler: ((UUID, UUID, String) -> Void)?
+    var zenbanShortcutOverrideHandler: ((NSEvent) -> Bool)?
     var shortcutLayoutCharacterProvider: (UInt16, NSEvent.ModifierFlags) -> String? = KeyboardLayout.character(forKeyCode:modifierFlags:)
     private var workspaceObserver: NSObjectProtocol?
     private var lifecycleSnapshotObservers: [NSObjectProtocol] = []
@@ -7854,6 +7855,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return false
         }
 
+        if zenbanShortcutOverrideHandler?(event) == true {
+            return true
+        }
+
         let normalizedFlags = flags.subtracting([.numericPad, .function, .capsLock])
         let commandPaletteTargetWindow = commandPaletteWindowForShortcutEvent(event)
         let commandPaletteShortcutWindow = shouldHandleCommandPaletteShortcutEvent(
@@ -9228,11 +9233,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return true
     }
 
-    /// Allow AppKit-backed browser surfaces (WKWebView) to route non-menu shortcuts
-    /// through the same app-level shortcut handler used by the local key monitor.
     @discardableResult
     func handleBrowserSurfaceKeyEquivalent(_ event: NSEvent) -> Bool {
         handleCustomShortcut(event: event)
+    }
+
+    func matchesRenameWorkspaceShortcut(_ event: NSEvent) -> Bool {
+        matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .renameWorkspace))
     }
 
     @discardableResult

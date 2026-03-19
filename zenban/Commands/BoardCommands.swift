@@ -1,9 +1,21 @@
+import Foundation
 import SwiftUI
 
 struct BoardCommands: Commands {
     let store: BoardStore
+    let cmuxHost: CmuxHostStore
+
+    private var refreshPreviewCard: Card? {
+        guard let card = store.devServerCard,
+              cmuxHost.browserSurface(for: card.id) != nil else {
+            return nil
+        }
+        return card
+    }
 
     var body: some Commands {
+        let refreshPreviewCard = refreshPreviewCard
+
         CommandGroup(after: .newItem) {
             Button("New Board") {
                 NotificationCenter.default.post(name: .newBoard, object: nil)
@@ -30,11 +42,12 @@ struct BoardCommands: Commands {
             .keyboardShortcut("s", modifiers: [.command, .shift])
             .disabled(store.selectedCardID == nil)
 
-            Button("Reload Dev Server") {
-                NotificationCenter.default.post(name: .reloadDevServer, object: nil)
+            Button("Refresh Dev Server Preview") {
+                guard let card = refreshPreviewCard else { return }
+                _ = cmuxHost.reloadBrowserSurface(for: card.id)
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
-            .disabled(!store.showDevServer)
+            .disabled(refreshPreviewCard == nil)
 
             Button("Toggle Git Changes") {
                 store.toggleGitChanges()

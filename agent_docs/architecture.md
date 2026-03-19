@@ -53,4 +53,4 @@ Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup
 
 ## Keyboard Shortcuts
 
-`Cmd+Shift+N` creates a board, `Cmd+Shift+A` creates a card, `Cmd+Shift+E` deletes the selected card, `Cmd+Shift+S` toggles the dev server, `Cmd+Shift+R` reloads it, `Cmd+Shift+X` toggles Git Changes, and `Shift+Arrow` shortcuts move selection across boards, cards, and columns.
+`Cmd+Shift+N` creates a board, `Cmd+Shift+A` creates a card, `Cmd+Shift+E` deletes the selected card, `Cmd+Shift+S` toggles the dev server, `Cmd+Shift+R` refreshes the dev server preview, `Cmd+Shift+X` toggles Git Changes, and `Shift+Arrow` shortcuts move selection across boards, cards, and columns.

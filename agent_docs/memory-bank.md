@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Route Cmd+Shift+R to preview refresh
+- **Description**: When the dev server overlay is open, `Cmd+Shift+R` now refreshes the selected card's embedded preview browser instead of restarting the process. The menu command is enabled only when a real preview surface exists, the old restart notification path was removed, and the copied cmux `renameWorkspace` shortcut conflict is resolved through an app delegate override. This keeps the shortcut behavior consistent even while the browser surface is focused.
+
 - **Summary**: Reduce hidden Ghostty workspace load
 - **Description**: Hidden card terminals now drive real Ghostty occlusion so off-screen workspaces stop rendering while staying reopenable. Zenban also loads an embedded Ghostty performance override after user config to cap scrollback and image memory and disable blur for embedded surfaces. `CmuxHostStore` tracks hidden prewarm workspace residency and only reclaims runtime surfaces for long-hidden, prompt-idle shells that never showed agent activity, avoiding session loss for interactive or active workspaces.
 

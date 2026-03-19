@@ -204,6 +204,48 @@ struct CmuxHostStoreLifecycleTests {
     }
 
     @Test
+    func reloadBrowserSurfaceReturnsFalseWhenPreviewHasNotBeenCreated() {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        #expect(!hostStore.reloadBrowserSurface(for: card.id))
+    }
+
+    @Test
+    func reloadBrowserSurfaceReturnsTrueAndKeepsSameBrowserContext() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        hostStore.ensureBrowserSurface(
+            for: card,
+            boardID: board.id,
+            url: URL(string: "http://localhost:5173")!
+        )
+
+        let originalContext = try #require(hostStore.browserSurface(for: card.id))
+
+        #expect(hostStore.reloadBrowserSurface(for: card.id))
+
+        let reloadedContext = try #require(hostStore.browserSurface(for: card.id))
+        #expect(reloadedContext.panel === originalContext.panel)
+        #expect(reloadedContext.panel.id == originalContext.panel.id)
+        #expect(reloadedContext.paneId == originalContext.paneId)
+    }
+
+    @Test
     func manualDoneWorkspaceClosesWhenSelectionLeavesCardAndDoesNotReopenOnReturn() throws {
         let appDelegate = AppDelegate()
         let doneCard = Card(title: "done", column: .done, orderIndex: 0, agent: .claude, worktreePath: "/tmp/done")

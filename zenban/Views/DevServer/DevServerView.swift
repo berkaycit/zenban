@@ -35,9 +35,6 @@ struct DevServerView: View {
             cmuxHost.teardownBrowserPreview(for: card.id)
             cmuxHost.restoreTerminalFocus(for: card.id)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .reloadDevServer)) { _ in
-            handleReload()
-        }
         .onChange(of: state) { _, newState in
             handleServerStateChange(newState)
         }
@@ -281,7 +278,7 @@ struct DevServerView: View {
                         requestID: requestID
                     )
                 } catch is CancellationError {
-                    // Cancellation is expected when the preview closes or restarts.
+                    // Cancellation is expected when the preview closes or is reconfigured.
                 } catch {
                     // DevServerManager drives the visible state.
                 }
@@ -297,11 +294,6 @@ struct DevServerView: View {
             }
         }
         startupTask = task
-    }
-
-    private func handleReload() {
-        guard case .ready = devServerManager.state(for: card.id) else { return }
-        startServer()
     }
 
     private func handleServerStateChange(_ state: DevServerManager.ServerState) {

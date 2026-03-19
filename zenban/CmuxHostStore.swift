@@ -245,9 +245,7 @@ final class CmuxHostStore {
         }
 
         guard let paneID = workspace.bonsplitController.focusedPaneId ?? workspace.bonsplitController.allPaneIds.first,
-              let panel = workspace.newBrowserSurface(inPane: paneID, url: url, focus: true) else {
-            return
-        }
+              let panel = workspace.newBrowserSurface(inPane: paneID, url: url, focus: true) else { return }
 
         cardToBrowserPanelID[card.id] = panel.id
     }
@@ -261,6 +259,13 @@ final class CmuxHostStore {
         }
 
         return BrowserSurfaceContext(panel: panel, paneId: paneID)
+    }
+
+    @discardableResult
+    func reloadBrowserSurface(for cardID: UUID) -> Bool {
+        guard let context = browserSurface(for: cardID) else { return false }
+        context.panel.reload()
+        return true
     }
 
     func focusBrowserSurface(for cardID: UUID) {

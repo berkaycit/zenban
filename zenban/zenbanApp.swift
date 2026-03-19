@@ -198,6 +198,16 @@ struct zenbanApp: App {
                 .navigationTitle("")
                 .onAppear {
                     _ = cmuxAppDelegate
+                    cmuxAppDelegate.zenbanShortcutOverrideHandler = { [store, cmuxHost] event in
+                        guard cmuxAppDelegate.matchesRenameWorkspaceShortcut(event) else {
+                            return false
+                        }
+
+                        if let card = store.devServerCard {
+                            _ = cmuxHost.reloadBrowserSurface(for: card.id)
+                        }
+                        return true
+                    }
                     store.onCardDeleted = { [devServerManager] cardID in
                         devServerManager.stopServer(for: cardID)
                     }
@@ -206,7 +216,7 @@ struct zenbanApp: App {
                 }
         }
         .commands {
-            BoardCommands(store: store)
+            BoardCommands(store: store, cmuxHost: cmuxHost)
         }
 
         Settings {
