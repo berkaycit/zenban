@@ -4,7 +4,12 @@ struct BoardStorage {
     private static let fileName = "boards.json"
 
     private static var directoryURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if let override = ProcessInfo.processInfo.environment["CMUX_UI_TEST_BOARD_STORAGE_DIRECTORY"],
+           !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("com.berkaycit.zenban", isDirectory: true)
     }
 

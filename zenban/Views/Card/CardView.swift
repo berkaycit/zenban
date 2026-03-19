@@ -62,6 +62,9 @@ struct CardView: View {
                 .stroke(outlineColor, lineWidth: 2)
         )
         .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("BoardCard.\(card.title)")
+        .accessibilityLabel(card.title)
         .onTapGesture {
             store.selectedCardID = card.id
             store.focusRegion = .cards

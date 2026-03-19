@@ -1988,6 +1988,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var didSetupJumpUnreadUITest = false
     private var jumpUnreadFocusExpectation: (tabId: UUID, surfaceId: UUID)?
     private var jumpUnreadFocusObserver: NSObjectProtocol?
+    private var didSetupCardOutlineUITest = false
     private var didSetupGotoSplitUITest = false
     private var gotoSplitUITestObservers: [NSObjectProtocol] = []
     private var didSetupMultiWindowNotificationsUITest = false
@@ -2337,6 +2338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         startSocketListenerHealthMonitorIfNeeded()
 #if DEBUG
         setupJumpUnreadUITestIfNeeded()
+        setupCardOutlineUITestIfNeeded()
         setupGotoSplitUITestIfNeeded()
         setupMultiWindowNotificationsUITestIfNeeded()
 
@@ -6347,6 +6349,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
                     tabManager.selectTab(at: initialIndex)
                 }
+            }
+        }
+    }
+
+    private func setupCardOutlineUITestIfNeeded() {
+        guard !didSetupCardOutlineUITest else { return }
+        didSetupCardOutlineUITest = true
+
+        let env = ProcessInfo.processInfo.environment
+        guard env["CMUX_UI_TEST_CARD_OUTLINE_SETUP"] == "1" else { return }
+        guard let notificationStore else { return }
+
+        let sourceTitle = env["CMUX_UI_TEST_CARD_OUTLINE_SOURCE_TITLE"] ?? "cc-1"
+        let triggerTitle = env["CMUX_UI_TEST_CARD_OUTLINE_TRIGGER_TITLE"] ?? "cc-2"
+        let notificationTitle = env["CMUX_UI_TEST_CARD_OUTLINE_NOTIFICATION_TITLE"] ?? "Claude Code"
+        let notificationBody = env["CMUX_UI_TEST_CARD_OUTLINE_NOTIFICATION_BODY"] ?? "Selam! Nasıl yardımcı olabilirim?"
+        let deadline = Date().addingTimeInterval(20.0)
+
+        @MainActor
+        func poll() {
+            guard let tabManager = self.tabManager else {
+                retry()
+                return
+            }
+
+            guard let sourceTab = tabManager.tabs.first(where: { $0.title == sourceTitle }) else {
+                retry()
+                return
+            }
+            guard tabManager.tabs.contains(where: { $0.title == triggerTitle }) else {
+                retry()
+                return
+            }
+            guard let selectedTabId = tabManager.selectedTabId,
+                  let selectedTab = tabManager.tabs.first(where: { $0.id == selectedTabId }),
+                  selectedTab.title == triggerTitle else {
+                retry()
+                return
+            }
+
+            let sourcePanel = sourceTab.focusedTerminalPanel
+                ?? sourceTab.terminalPanelForConfigInheritance()
+                ?? sourceTab.panels.values
+                    .compactMap { $0 as? TerminalPanel }
+                    .sorted(by: { $0.id.uuidString < $1.id.uuidString })
+                    .first
+            guard let sourcePanel else {
+                retry()
+                return
+            }
+
+            notificationStore.addNotification(
+                tabId: sourceTab.id,
+                surfaceId: sourcePanel.id,
+                title: notificationTitle,
+                subtitle: "",
+                body: notificationBody
+            )
+        }
+
+        @MainActor
+        func retry() {
+            guard Date() < deadline else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                Task { @MainActor in
+                    poll()
+                }
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            Task { @MainActor in
+                poll()
             }
         }
     }
