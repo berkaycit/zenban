@@ -176,6 +176,14 @@ func isPreviewWebViewFocused(
     return responderFocused || portalFocused
 }
 
+func shouldHandlePreviewConsoleShortcut(
+    previewWebViewFocused: Bool,
+    developerToolsVisible: Bool,
+    previewPanelIsFocusedBrowser: Bool
+) -> Bool {
+    previewWebViewFocused || (developerToolsVisible && previewPanelIsFocusedBrowser)
+}
+
 @MainActor
 func handleZenbanShortcutOverride(
     event: NSEvent,
@@ -201,8 +209,17 @@ func handleZenbanShortcutOverride(
     }
     guard let card = store.devServerCard,
           let context = cmuxHost.browserSurface(for: card.id),
-          isPreviewWebViewFocused(event: event, context: context),
           let tabManager = appDelegate.tabManager else {
+        return false
+    }
+
+    let previewWebViewFocused = isPreviewWebViewFocused(event: event, context: context)
+    let previewPanelIsFocusedBrowser = tabManager.focusedBrowserPanel === context.panel
+    guard shouldHandlePreviewConsoleShortcut(
+        previewWebViewFocused: previewWebViewFocused,
+        developerToolsVisible: context.panel.isDeveloperToolsVisible(),
+        previewPanelIsFocusedBrowser: previewPanelIsFocusedBrowser
+    ) else {
         return false
     }
 

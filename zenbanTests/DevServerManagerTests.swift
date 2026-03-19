@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 @testable import zenban
 
+@Suite(.serialized)
 struct DevServerManagerTests {
     private static let ownedProcessGroupsDefaultsKey = "zenban.devServer.ownedProcessGroups.v2"
 

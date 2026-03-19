@@ -61,6 +61,24 @@ struct AppDelegateShortcutOverrideTests {
     }
 
     @Test
+    func previewConsoleShortcutHandleDecisionAllowsFocusedDevtoolsPanel() {
+        #expect(
+            shouldHandlePreviewConsoleShortcut(
+                previewWebViewFocused: false,
+                developerToolsVisible: true,
+                previewPanelIsFocusedBrowser: true
+            )
+        )
+        #expect(
+            !shouldHandlePreviewConsoleShortcut(
+                previewWebViewFocused: false,
+                developerToolsVisible: true,
+                previewPanelIsFocusedBrowser: false
+            )
+        )
+    }
+
+    @Test
     func commandShiftCDoesNotHandleWithoutPreviewSurface() throws {
         let appDelegate = AppDelegate()
         let (boardStore, board, card) = makeBoardFixture()
