@@ -1011,7 +1011,7 @@ class TabManager: ObservableObject {
         }
         if eagerLoadTerminal {
             requestBackgroundWorkspaceLoad(for: newWorkspace.id)
-            newWorkspace.requestBackgroundTerminalSurfaceStartIfNeeded()
+            newWorkspace.requestBackgroundTerminalRuntimeStartIfNeeded()
         }
         if select {
 #if DEBUG

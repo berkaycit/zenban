@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Document Ghostty daemon packaging
+- **Description**: Updated the app architecture and feature docs to describe the app-scoped Ghostty daemon-backed terminal runtime, including hidden-card detach behavior and the legacy opt-out path. The release signing script now explicitly validates and signs `cmux`, `zenban-terminal-daemon`, and `zenban-terminal-bridge` so the helper binaries are treated as first-class release artifacts.
+
 - **Summary**: Simplify preview shortcuts and dev server cleanup
 - **Description**: Preview shortcut routing now stays in one Zenban override that reuses the copied cmux browser APIs and treats `Cmd+Shift+C` as a focused-preview toggle instead of a one-way console opener. `DevServerManager` dropped the root-PID tree cleanup model in favor of persisted app-owned process groups, which makes quit-time cleanup and next-launch orphan reaping smaller and easier to reason about. Shortcut copy and dev server docs were updated to match the new behavior.
 

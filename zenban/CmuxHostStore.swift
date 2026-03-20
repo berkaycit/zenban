@@ -48,13 +48,16 @@ final class CmuxHostStore {
     @ObservationIgnored private weak var registeredWindow: NSWindow?
     @ObservationIgnored private var launchTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var hiddenWorkspaceReclaimTask: Task<Void, Never>?
+    @ObservationIgnored private var hiddenWorkspaceDetachTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var workspaceStatusSubscriptions: [UUID: AnyCancellable] = [:]
     @ObservationIgnored private var didConfigureAppDelegate = false
     @ObservationIgnored private var hiddenWorkspaceReclaimTimeout: TimeInterval = 5 * 60
     @ObservationIgnored private var hiddenWorkspaceReclaimPollingInterval: Duration = .seconds(30)
+    @ObservationIgnored private var hiddenWorkspaceDetachDelay: Duration = .seconds(1)
 #if DEBUG
     @ObservationIgnored private var launchCommandHandlerForTesting: ((UUID, String) -> Void)?
     @ObservationIgnored private var backgroundReclaimHandlerForTesting: ((UUID) -> Void)?
+    @ObservationIgnored private var hiddenWorkspaceDetachHandlerForTesting: ((UUID) -> Void)?
 #endif
     @ObservationIgnored private var selectedCardContext: SelectedCardContext?
 
@@ -69,10 +72,16 @@ final class CmuxHostStore {
         notificationStore = TerminalNotificationStore.shared
         tabManager = TabManager()
         startHiddenWorkspaceReclaimLoop()
+        Task {
+            await ZenbanTerminalRuntimeService.shared.startDaemonIfNeeded()
+        }
     }
 
     deinit {
         hiddenWorkspaceReclaimTask?.cancel()
+        for task in hiddenWorkspaceDetachTasks.values {
+            task.cancel()
+        }
     }
 
     func attach(boardStore: BoardStore) {
@@ -182,6 +191,79 @@ final class CmuxHostStore {
             agent: agent,
             pendingPrompt: nil
         )
+
+        if ZenbanTerminalRuntimeService.isEnabled {
+            if let terminalPanel = launchTerminalPanel(in: workspace) {
+                if let workspaceID = cardToWorkspaceID[cardID] {
+                    recordWorkspaceAgentActivity(workspaceID)
+                }
+#if DEBUG
+                if let launchCommandHandlerForTesting {
+                    launchCommandHandlerForTesting(cardID, command)
+                } else {
+                    terminalPanel.configurePersistentRuntimeLaunch(
+                        sessionKind: .agent,
+                        launchCommand: command
+                    )
+                    terminalPanel.preparePersistentRuntimeIfNeeded()
+                }
+#else
+                terminalPanel.configurePersistentRuntimeLaunch(
+                    sessionKind: .agent,
+                    launchCommand: command
+                )
+                terminalPanel.preparePersistentRuntimeIfNeeded()
+#endif
+                launchSignatureByCardID[cardID] = postLaunchSignature
+                if normalizedPrompt != nil {
+                    boardStore?.consumePendingLaunchPrompt(cardID, in: boardID)
+                }
+                return
+            }
+
+            launchTasks[cardID] = Task { [weak self] in
+                defer {
+                    self?.launchTasks.removeValue(forKey: cardID)
+                }
+
+                for _ in 0..<120 {
+                    guard !Task.isCancelled, let self else { return }
+                    guard let workspace = self.workspace(for: cardID), workspace.id == workspaceID else { return }
+                    self.requestBackgroundWorkspaceLoad(for: workspace)
+
+                    if let terminalPanel = self.launchTerminalPanel(in: workspace) {
+                        if let workspaceID = self.cardToWorkspaceID[cardID] {
+                            self.recordWorkspaceAgentActivity(workspaceID)
+                        }
+#if DEBUG
+                        if let launchCommandHandlerForTesting {
+                            launchCommandHandlerForTesting(cardID, command)
+                        } else {
+                            terminalPanel.configurePersistentRuntimeLaunch(
+                                sessionKind: .agent,
+                                launchCommand: command
+                            )
+                            terminalPanel.preparePersistentRuntimeIfNeeded()
+                        }
+#else
+                        terminalPanel.configurePersistentRuntimeLaunch(
+                            sessionKind: .agent,
+                            launchCommand: command
+                        )
+                        terminalPanel.preparePersistentRuntimeIfNeeded()
+#endif
+                        self.launchSignatureByCardID[cardID] = postLaunchSignature
+                        if normalizedPrompt != nil {
+                            self.boardStore?.consumePendingLaunchPrompt(cardID, in: boardID)
+                        }
+                        return
+                    }
+
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+            }
+            return
+        }
 
         launchTasks[cardID] = Task { [weak self] in
             var consecutivePromptIdleObservations = 0
@@ -305,6 +387,11 @@ final class CmuxHostStore {
         workspace.focusPanel(terminalPanel.id)
     }
 
+    func detachTerminalRuntimeForHiddenWorkspace(_ workspace: Workspace?) {
+        guard ZenbanTerminalRuntimeService.isEnabled else { return }
+        scheduleTerminalRuntimeDetachForHiddenWorkspace(workspace)
+    }
+
     func removeWorkspace(for cardID: UUID) {
         launchTasks[cardID]?.cancel()
         launchTasks.removeValue(forKey: cardID)
@@ -318,6 +405,7 @@ final class CmuxHostStore {
         let activeWorkspaceID = cardToWorkspaceID.removeValue(forKey: cardID)
 
         for workspaceID in workspaceIDs {
+            cancelPendingHiddenWorkspaceDetach(for: workspaceID)
             workspaceStatusSubscriptions.removeValue(forKey: workspaceID)
             workspaceToCardID.removeValue(forKey: workspaceID)
             workspaceToBoardID.removeValue(forKey: workspaceID)
@@ -427,6 +515,10 @@ final class CmuxHostStore {
         guard canCreateWorkspace(for: card, boardID: boardID) else { return }
 
         let workspace = ensureWorkspace(for: card, boardID: boardID)
+        cancelPendingHiddenWorkspaceDetach(for: workspace.id)
+        ensureInitialTerminalPanelIfNeeded(for: card, boardID: boardID, in: workspace, mode: mode)
+        updateTitle(for: card.id, title: card.title)
+        updateAgentLaunch(for: card, boardID: boardID)
         requestBackgroundWorkspaceLoad(for: workspace)
         if mode != .backgroundPrewarm {
             selectWorkspace(workspace)
@@ -435,8 +527,6 @@ final class CmuxHostStore {
             mode == .backgroundPrewarm ? .backgroundPrewarmOnly : .interactive,
             for: workspace.id
         )
-        updateTitle(for: card.id, title: card.title)
-        updateAgentLaunch(for: card, boardID: boardID)
     }
 
     @discardableResult
@@ -451,6 +541,7 @@ final class CmuxHostStore {
                 )
             }
             workspace.setCustomTitle(card.title)
+            configurePersistentSessionIdentity(for: workspace, cardID: card.id)
             observeWorkspaceStatus(in: workspace)
             return workspace
         }
@@ -458,7 +549,7 @@ final class CmuxHostStore {
         let workspace = tabManager.addWorkspace(
             workingDirectory: workingDirectory(for: card, boardID: boardID),
             select: false,
-            eagerLoadTerminal: true,
+            eagerLoadTerminal: false,
             autoWelcomeIfNeeded: false
         )
         workspace.setCustomTitle(card.title)
@@ -471,9 +562,56 @@ final class CmuxHostStore {
             hiddenSince: nil,
             lastObservedAgentActivityAt: nil
         )
+        configurePersistentSessionIdentity(for: workspace, cardID: card.id)
         observeWorkspaceStatus(in: workspace)
 
         return workspace
+    }
+
+    private func ensureInitialTerminalPanelIfNeeded(
+        for card: Card,
+        boardID: UUID,
+        in workspace: Workspace,
+        mode: WorkspaceLaunchMode
+    ) {
+        guard mode != .backgroundPrewarm else { return }
+        configurePersistentSessionIdentity(for: workspace, cardID: card.id)
+        let terminalPanel: TerminalPanel
+        if let existingTerminalPanel = launchTerminalPanel(in: workspace) {
+            terminalPanel = existingTerminalPanel
+        } else {
+            guard let paneID = workspace.bonsplitController.focusedPaneId ?? workspace.bonsplitController.allPaneIds.first,
+                  let newTerminalPanel = workspace.newTerminalSurface(inPane: paneID, focus: false) else {
+                return
+            }
+            configurePersistentSessionIdentity(for: workspace, cardID: card.id)
+            terminalPanel = newTerminalPanel
+        }
+
+        if ZenbanTerminalRuntimeService.isEnabled {
+            let agent = resolvedAgent(for: card, boardID: boardID)
+            let normalizedPrompt = normalizedPendingLaunchPrompt(for: card, agent: agent)
+            let command = launchCommand(for: agent, pendingPrompt: normalizedPrompt)
+            terminalPanel.configurePersistentRuntimeLaunch(
+                sessionKind: .agent,
+                launchCommand: command
+            )
+            terminalPanel.preparePersistentRuntimeIfNeeded()
+        }
+
+        workspace.focusPanel(terminalPanel.id)
+    }
+
+    private func configurePersistentSessionIdentity(for workspace: Workspace, cardID: UUID) {
+        let terminalPanels = workspace.panels.values
+            .compactMap { $0 as? TerminalPanel }
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+        for (index, terminalPanel) in terminalPanels.enumerated() {
+            let sessionID = index == 0
+                ? "zenban-card-\(cardID.uuidString)"
+                : "zenban-card-\(cardID.uuidString)-panel-\(terminalPanel.id.uuidString)"
+            terminalPanel.setPersistentSessionID(sessionID)
+        }
     }
 
     private func canCreateWorkspace(for card: Card, boardID: UUID) -> Bool {
@@ -600,7 +738,7 @@ final class CmuxHostStore {
             return true
         }
 #endif
-        return terminalPanel.surface.surface != nil
+        return terminalPanel.isPersistentRuntimeReadyForLaunch()
     }
 
     private func sendLaunchCommand(_ command: String, to terminalPanel: TerminalPanel, cardID: UUID) {
@@ -613,7 +751,7 @@ final class CmuxHostStore {
             return
         }
 #endif
-        terminalPanel.sendShellCommand(command)
+        terminalPanel.sendPersistentRuntimeCommand(command)
     }
 
     private func launchTerminalPanel(in workspace: Workspace) -> TerminalPanel? {
@@ -633,7 +771,7 @@ final class CmuxHostStore {
             return
         }
 #endif
-        workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
+        workspace.requestBackgroundTerminalRuntimeStartIfNeeded()
         owningTabManager(for: workspace).requestBackgroundWorkspaceLoad(for: workspace.id)
     }
 
@@ -767,11 +905,60 @@ final class CmuxHostStore {
     }
 
     private func selectWorkspace(_ workspace: Workspace) {
+        cancelPendingHiddenWorkspaceDetach(for: workspace.id)
         owningTabManager(for: workspace).selectedTabId = workspace.id
+        if ZenbanTerminalRuntimeService.isEnabled {
+            for terminalPanel in workspace.panels.values.compactMap({ $0 as? TerminalPanel }) {
+                terminalPanel.requestViewReattach()
+            }
+        }
         if workspaceToCardID[workspace.id] != nil {
             setWorkspaceResidency(.interactive, for: workspace.id)
         }
         refreshWorkspaceHiddenState()
+    }
+
+    private func scheduleTerminalRuntimeDetachForHiddenWorkspace(_ workspace: Workspace?) {
+        guard ZenbanTerminalRuntimeService.isEnabled else { return }
+        guard let workspace else { return }
+        let workspaceID = workspace.id
+        guard workspaceToCardID[workspaceID] != nil else { return }
+        guard !isWorkspaceSelected(workspaceID) else {
+            cancelPendingHiddenWorkspaceDetach(for: workspaceID)
+            return
+        }
+
+        hiddenWorkspaceDetachTasks[workspaceID]?.cancel()
+        hiddenWorkspaceDetachTasks[workspaceID] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.hiddenWorkspaceDetachTasks.removeValue(forKey: workspaceID)
+            }
+
+            try? await Task.sleep(for: self.hiddenWorkspaceDetachDelay)
+            if Task.isCancelled { return }
+            guard let workspace = self.workspace(forID: workspaceID),
+                  !self.isWorkspaceSelected(workspaceID) else {
+                return
+            }
+
+#if DEBUG
+            if let hiddenWorkspaceDetachHandlerForTesting,
+               let cardID = self.workspaceToCardID[workspaceID] {
+                hiddenWorkspaceDetachHandlerForTesting(cardID)
+                return
+            }
+#endif
+
+            for terminalPanel in workspace.panels.values.compactMap({ $0 as? TerminalPanel }) {
+                terminalPanel.detachRuntimeSurfaceForHiddenWorkspace()
+            }
+        }
+    }
+
+    private func cancelPendingHiddenWorkspaceDetach(for workspaceID: UUID) {
+        hiddenWorkspaceDetachTasks[workspaceID]?.cancel()
+        hiddenWorkspaceDetachTasks.removeValue(forKey: workspaceID)
     }
 
     private func startHiddenWorkspaceReclaimLoop() {
@@ -833,6 +1020,7 @@ final class CmuxHostStore {
     }
 
     private func evaluateHiddenWorkspaceReclaim(now: Date = Date()) {
+        guard !ZenbanTerminalRuntimeService.isEnabled else { return }
         refreshWorkspaceHiddenState(now: now)
 
         for (workspaceID, cardID) in workspaceToCardID {
@@ -865,12 +1053,13 @@ final class CmuxHostStore {
             }
 #endif
 
-            guard workspace.hasLoadedTerminalSurface() else { continue }
+            guard workspace.hasLoadedTerminalSurface() || workspace.hasPreparedTerminalRuntime() else { continue }
             reclaimWorkspaceRuntime(workspace, cardID: cardID)
         }
     }
 
     private func reclaimWorkspaceRuntime(_ workspace: Workspace, cardID: UUID) {
+        cancelPendingHiddenWorkspaceDetach(for: workspace.id)
         launchTasks[cardID]?.cancel()
         launchTasks.removeValue(forKey: cardID)
         launchSignatureByCardID.removeValue(forKey: cardID)
@@ -945,6 +1134,14 @@ extension CmuxHostStore {
 
     func evaluateHiddenWorkspaceReclaimForTesting(now: Date = Date()) {
         evaluateHiddenWorkspaceReclaim(now: now)
+    }
+
+    func configureHiddenWorkspaceDetachHookForTesting(_ handler: ((UUID) -> Void)? = nil) {
+        hiddenWorkspaceDetachHandlerForTesting = handler
+    }
+
+    func setHiddenWorkspaceDetachDelayForTesting(_ delay: Duration) {
+        hiddenWorkspaceDetachDelay = delay
     }
 }
 #endif

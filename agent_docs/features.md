@@ -21,6 +21,7 @@
 ## Card Workspaces
 
 - The lower detail pane embeds a cmux-derived Ghostty workspace per card
+- The Ghostty workspace is daemon-backed in the same app session, so hiding a card detaches the renderer while the shell keeps running
 - `Done` cards keep their terminal closed by default and expose an `Open Terminal` action for manual reopening
 - Agent pills update stored card state and relaunch the selected command when needed
 - Git Changes, File Browser, and Dev Server actions still open from the card header

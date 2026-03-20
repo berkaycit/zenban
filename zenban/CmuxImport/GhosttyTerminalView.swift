@@ -2536,6 +2536,18 @@ final class TerminalSurface: Identifiable, ObservableObject {
     private let workingDirectory: String?
     var requestedWorkingDirectory: String? { workingDirectory }
     private var additionalEnvironment: [String: String]
+    private var persistentSessionID: String
+    private var persistentRuntimeSessionKind: ZenbanTerminalRuntimeSessionKind = .shell
+    private var persistentRuntimeLaunchCommand: String?
+    private var persistentRuntimePreparationTask: Task<Void, Never>?
+    private enum PersistentRuntimeState {
+        case idle
+        case preparing
+        case ready
+        case failed
+    }
+    private var persistentRuntimeState: PersistentRuntimeState = .idle
+    private var persistentRuntimeBridgeReady = false
     let hostedView: GhosttySurfaceScrollView
     private let surfaceView: GhosttyNSView
     private var lastPixelWidth: UInt32 = 0
@@ -2545,6 +2557,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
     private var pendingTextQueue: [Data] = []
     private var pendingTextBytes: Int = 0
     private let maxPendingTextBytes = 1_048_576
+    private var pendingRuntimeWriteQueue: [Data] = []
+    private var pendingRuntimeWriteBytes: Int = 0
+    private let maxPendingRuntimeWriteBytes = 262_144
+    private var runtimeWriteFlushInFlight = false
     private var backgroundSurfaceStartQueued = false
     private var surfaceCallbackContext: Unmanaged<GhosttySurfaceCallbackContext>?
 #if DEBUG
@@ -2614,6 +2630,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
         self.configTemplate = configTemplate
         self.workingDirectory = workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.additionalEnvironment = additionalEnvironment
+        self.persistentSessionID = self.id.uuidString
         // Match Ghostty's own SurfaceView: ensure a non-zero initial frame so the backing layer
         // has non-zero bounds and the renderer can initialize without presenting a blank/stretched
         // intermediate frame on the first real resize.
@@ -2629,6 +2646,120 @@ final class TerminalSurface: Identifiable, ObservableObject {
         tabId = newTabId
         attachedView?.tabId = newTabId
         surfaceView.tabId = newTabId
+    }
+
+    func setPersistentSessionID(_ sessionID: String) {
+        let normalized = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, normalized != persistentSessionID else { return }
+        persistentSessionID = normalized
+        persistentRuntimePreparationTask?.cancel()
+        persistentRuntimePreparationTask = nil
+        persistentRuntimeState = .idle
+        persistentRuntimeBridgeReady = false
+        pendingRuntimeWriteQueue.removeAll(keepingCapacity: false)
+        pendingRuntimeWriteBytes = 0
+        runtimeWriteFlushInFlight = false
+    }
+
+    @discardableResult
+    func configurePersistentRuntimeLaunch(
+        sessionKind: ZenbanTerminalRuntimeSessionKind,
+        launchCommand: String?
+    ) -> Bool {
+        let trimmedLaunchCommand = launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedLaunchCommand: String?
+        if let trimmedLaunchCommand, !trimmedLaunchCommand.isEmpty {
+            normalizedLaunchCommand = trimmedLaunchCommand
+        } else {
+            normalizedLaunchCommand = nil
+        }
+        guard persistentRuntimeSessionKind != sessionKind || persistentRuntimeLaunchCommand != normalizedLaunchCommand else {
+            return false
+        }
+
+        persistentRuntimeSessionKind = sessionKind
+        persistentRuntimeLaunchCommand = normalizedLaunchCommand
+        persistentRuntimePreparationTask?.cancel()
+        persistentRuntimePreparationTask = nil
+        persistentRuntimeState = .idle
+        persistentRuntimeBridgeReady = false
+        pendingRuntimeWriteQueue.removeAll(keepingCapacity: false)
+        pendingRuntimeWriteBytes = 0
+        runtimeWriteFlushInFlight = false
+
+        if ZenbanTerminalRuntimeService.isEnabled {
+            releaseRuntimeSurface()
+            killPersistentRuntime()
+        }
+        return true
+    }
+
+    func isPersistentRuntimeReadyForLaunch() -> Bool {
+        if ZenbanTerminalRuntimeService.isEnabled {
+            return persistentRuntimeState == .ready && persistentRuntimeBridgeReady
+        }
+        return surface != nil
+    }
+
+    func preparePersistentRuntimeIfNeeded() {
+        guard ZenbanTerminalRuntimeService.isEnabled else {
+            persistentRuntimePreparationTask?.cancel()
+            persistentRuntimePreparationTask = nil
+            persistentRuntimeState = .idle
+            return
+        }
+        if let preflightError = ZenbanTerminalRuntimeService.runtimePreflightError() {
+            persistentRuntimeState = .failed
+            NSLog("terminal.runtime.preflight failed: %@", preflightError)
+            return
+        }
+        guard persistentRuntimeState != .ready, persistentRuntimeState != .preparing else { return }
+        persistentRuntimeState = .preparing
+        persistentRuntimePreparationTask?.cancel()
+
+        let sessionID = persistentSessionID
+        let workingDirectory = self.workingDirectory
+        let environment = resolvedLaunchEnvironment()
+        let shell = ZenbanTerminalRuntimeService.resolvedShellPath(from: environment)
+        let sessionKind = persistentRuntimeSessionKind
+        let launchCommand = persistentRuntimeLaunchCommand
+
+        persistentRuntimePreparationTask = Task { @MainActor [weak self] in
+            do {
+                try await ZenbanTerminalRuntimeService.shared.prepareSession(
+                    sessionID: sessionID,
+                    cwd: workingDirectory,
+                    env: environment,
+                    shell: shell,
+                    sessionKind: sessionKind,
+                    launchCommand: launchCommand
+                )
+                guard let self, self.persistentSessionID == sessionID else { return }
+                self.persistentRuntimeState = .ready
+                if self.surface == nil,
+                   let attachedView = self.attachedView,
+                   attachedView.window != nil {
+                    self.createSurface(for: attachedView)
+                }
+                self.flushPendingRuntimeWritesIfPossible()
+            } catch {
+                guard let self, self.persistentSessionID == sessionID else { return }
+                self.persistentRuntimeState = .failed
+                NSLog("terminal.runtime.prepare failed for %@: %@", sessionID, String(describing: error))
+            }
+        }
+    }
+
+    func sendPersistentRuntimeCommand(_ command: String) {
+        guard !command.isEmpty else { return }
+        guard ZenbanTerminalRuntimeService.isEnabled else {
+            sendShellCommand(command)
+            return
+        }
+        let payload = Data((command + "\n").utf8)
+        enqueuePendingRuntimeWrite(payload)
+        preparePersistentRuntimeIfNeeded()
+        flushPendingRuntimeWritesIfPossible()
     }
 
     func isAttached(to view: GhosttyNSView) -> Bool {
@@ -2771,6 +2902,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
     func teardownSurface() {
         markPortalLifecycleClosed(reason: "teardown")
         releaseRuntimeSurface()
+        killPersistentRuntime()
     }
 
     @MainActor
@@ -2779,12 +2911,30 @@ final class TerminalSurface: Identifiable, ObservableObject {
     }
 
     @MainActor
+    func reclaimPersistentRuntime() {
+        releaseRuntimeSurface()
+        killPersistentRuntime()
+    }
+
+    @MainActor
     private func releaseRuntimeSurface() {
         let callbackContext = surfaceCallbackContext
         surfaceCallbackContext = nil
+        let hostedView = self.hostedView
 
         let surfaceToFree = surface
         surface = nil
+        attachedView = nil
+        activePortalHostLease = nil
+        TerminalWindowPortalRegistry.detach(hostedView: hostedView)
+        pendingTextQueue.removeAll(keepingCapacity: false)
+        pendingTextBytes = 0
+        lastPixelWidth = 0
+        lastPixelHeight = 0
+        lastXScale = 0
+        lastYScale = 0
+        persistentRuntimeBridgeReady = false
+        hostedView.resetDetachedRuntimeViewState()
 
         guard let surfaceToFree else {
             callbackContext?.release()
@@ -2796,6 +2946,20 @@ final class TerminalSurface: Identifiable, ObservableObject {
             // the next main-actor turn so SIGHUP delivery is deterministic but non-reentrant.
             ghostty_surface_free(surfaceToFree)
             callbackContext?.release()
+        }
+    }
+
+    private func killPersistentRuntime() {
+        persistentRuntimePreparationTask?.cancel()
+        persistentRuntimePreparationTask = nil
+        persistentRuntimeState = .idle
+        persistentRuntimeBridgeReady = false
+        pendingRuntimeWriteQueue.removeAll(keepingCapacity: false)
+        pendingRuntimeWriteBytes = 0
+        runtimeWriteFlushInFlight = false
+        let sessionID = persistentSessionID
+        Task {
+            await ZenbanTerminalRuntimeService.shared.kill(sessionID: sessionID)
         }
     }
 
@@ -2858,6 +3022,103 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
     private func scaleApproximatelyEqual(_ lhs: CGFloat, _ rhs: CGFloat, epsilon: CGFloat = 0.0001) -> Bool {
         abs(lhs - rhs) <= epsilon
+    }
+
+    private func resolvedLaunchEnvironment(baseEnvironment: [String: String] = [:]) -> [String: String] {
+        var env = baseEnvironment
+
+        env["CMUX_SURFACE_ID"] = id.uuidString
+        env["CMUX_WORKSPACE_ID"] = tabId.uuidString
+        env["CMUX_PANEL_ID"] = id.uuidString
+        env["CMUX_TAB_ID"] = tabId.uuidString
+        env["CMUX_SOCKET_PATH"] = SocketControlSettings.socketPath()
+        if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
+            env["CMUX_BUNDLE_ID"] = bundleId
+        }
+
+        let startPort = Self.sessionPortBase + portOrdinal * Self.sessionPortRangeSize
+        env["CMUX_PORT"] = String(startPort)
+        env["CMUX_PORT_END"] = String(startPort + Self.sessionPortRangeSize - 1)
+        env["CMUX_PORT_RANGE"] = String(Self.sessionPortRangeSize)
+
+        if !ClaudeCodeIntegrationSettings.hooksEnabled() {
+            env["CMUX_CLAUDE_HOOKS_DISABLED"] = "1"
+        }
+
+        if let cliBinPath = Bundle.main.resourceURL?.appendingPathComponent("bin").path {
+            let currentPath = env["PATH"]
+                ?? getenv("PATH").map { String(cString: $0) }
+                ?? ProcessInfo.processInfo.environment["PATH"]
+                ?? ""
+            if !currentPath.split(separator: ":").contains(Substring(cliBinPath)) {
+                let separator = currentPath.isEmpty ? "" : ":"
+                env["PATH"] = "\(cliBinPath)\(separator)\(currentPath)"
+            }
+        }
+
+        let shellIntegrationEnabled = UserDefaults.standard.object(forKey: "sidebarShellIntegration") as? Bool ?? true
+        if shellIntegrationEnabled,
+           let integrationDir = Bundle.main.resourceURL?.appendingPathComponent("shell-integration").path {
+            env["CMUX_SHELL_INTEGRATION"] = "1"
+            env["CMUX_SHELL_INTEGRATION_DIR"] = integrationDir
+
+            let shell = (env["SHELL"]?.isEmpty == false ? env["SHELL"] : nil)
+                ?? getenv("SHELL").map { String(cString: $0) }
+                ?? ProcessInfo.processInfo.environment["SHELL"]
+                ?? "/bin/zsh"
+            let shellName = URL(fileURLWithPath: shell).lastPathComponent
+
+            if shellName == "zsh" {
+                if GhosttyApp.shared.shellIntegrationMode() != "none" {
+                    env["CMUX_LOAD_GHOSTTY_ZSH_INTEGRATION"] = "1"
+                }
+                let candidateZdotdir = (env["ZDOTDIR"]?.isEmpty == false ? env["ZDOTDIR"] : nil)
+                    ?? getenv("ZDOTDIR").map { String(cString: $0) }
+                    ?? (ProcessInfo.processInfo.environment["ZDOTDIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["ZDOTDIR"] : nil)
+
+                if let candidateZdotdir, !candidateZdotdir.isEmpty {
+                    var isGhosttyInjected = false
+                    let ghosttyResources = (env["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? env["GHOSTTY_RESOURCES_DIR"] : nil)
+                        ?? getenv("GHOSTTY_RESOURCES_DIR").map { String(cString: $0) }
+                        ?? (ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"] : nil)
+                    if let ghosttyResources {
+                        let ghosttyZdotdir = URL(fileURLWithPath: ghosttyResources)
+                            .appendingPathComponent("shell-integration/zsh").path
+                        isGhosttyInjected = candidateZdotdir == ghosttyZdotdir
+                    }
+                    if !isGhosttyInjected {
+                        env["CMUX_ZSH_ZDOTDIR"] = candidateZdotdir
+                    }
+                }
+
+                env["ZDOTDIR"] = integrationDir
+            } else if shellName == "bash" {
+                if GhosttyApp.shared.shellIntegrationMode() != "none" {
+                    env["CMUX_LOAD_GHOSTTY_BASH_INTEGRATION"] = "1"
+                }
+                env["PROMPT_COMMAND"] = """
+                unset PROMPT_COMMAND; \
+                if [[ "${CMUX_LOAD_GHOSTTY_BASH_INTEGRATION:-0}" == "1" && -n "${GHOSTTY_RESOURCES_DIR:-}" ]]; then \
+                _cmux_ghostty_bash="$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"; \
+                [[ -r "$_cmux_ghostty_bash" ]] && source "$_cmux_ghostty_bash"; \
+                fi; \
+                if [[ "${CMUX_SHELL_INTEGRATION:-1}" != "0" && -n "${CMUX_SHELL_INTEGRATION_DIR:-}" ]]; then \
+                _cmux_bash_integration="$CMUX_SHELL_INTEGRATION_DIR/cmux-bash-integration.bash"; \
+                [[ -r "$_cmux_bash_integration" ]] && source "$_cmux_bash_integration"; \
+                fi; \
+                unset _cmux_ghostty_bash _cmux_bash_integration; \
+                if declare -F _cmux_prompt_command >/dev/null 2>&1; then _cmux_prompt_command; fi
+                """
+            }
+        }
+
+        if !additionalEnvironment.isEmpty {
+            for (key, value) in additionalEnvironment where !key.isEmpty && !value.isEmpty {
+                env[key] = value
+            }
+        }
+
+        return env
     }
 
     func attachToView(_ view: GhosttyNSView) {
@@ -2978,7 +3239,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             }
         }
 
-        var env: [String: String] = [:]
+        var inheritedEnvironment: [String: String] = [:]
         if surfaceConfig.env_var_count > 0, let existingEnv = surfaceConfig.env_vars {
             let count = Int(surfaceConfig.env_var_count)
             if count > 0 {
@@ -2986,112 +3247,12 @@ final class TerminalSurface: Identifiable, ObservableObject {
                     let item = existingEnv[i]
                     if let key = String(cString: item.key, encoding: .utf8),
                        let value = String(cString: item.value, encoding: .utf8) {
-                        env[key] = value
+                        inheritedEnvironment[key] = value
                     }
                 }
             }
         }
-
-        env["CMUX_SURFACE_ID"] = id.uuidString
-        env["CMUX_WORKSPACE_ID"] = tabId.uuidString
-        // Backward-compatible shell integration keys used by existing scripts/tests.
-        env["CMUX_PANEL_ID"] = id.uuidString
-        env["CMUX_TAB_ID"] = tabId.uuidString
-        env["CMUX_SOCKET_PATH"] = SocketControlSettings.socketPath()
-        if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
-            env["CMUX_BUNDLE_ID"] = bundleId
-        }
-
-        // Port range for this workspace (base/range snapshotted once per app session)
-        do {
-            let startPort = Self.sessionPortBase + portOrdinal * Self.sessionPortRangeSize
-            env["CMUX_PORT"] = String(startPort)
-            env["CMUX_PORT_END"] = String(startPort + Self.sessionPortRangeSize - 1)
-            env["CMUX_PORT_RANGE"] = String(Self.sessionPortRangeSize)
-        }
-
-        let claudeHooksEnabled = ClaudeCodeIntegrationSettings.hooksEnabled()
-        if !claudeHooksEnabled {
-            env["CMUX_CLAUDE_HOOKS_DISABLED"] = "1"
-        }
-
-        if let cliBinPath = Bundle.main.resourceURL?.appendingPathComponent("bin").path {
-            let currentPath = env["PATH"]
-                ?? getenv("PATH").map { String(cString: $0) }
-                ?? ProcessInfo.processInfo.environment["PATH"]
-                ?? ""
-            if !currentPath.split(separator: ":").contains(Substring(cliBinPath)) {
-                let separator = currentPath.isEmpty ? "" : ":"
-                env["PATH"] = "\(cliBinPath)\(separator)\(currentPath)"
-            }
-        }
-
-        // Shell integration: inject ZDOTDIR wrapper for zsh shells.
-        let shellIntegrationEnabled = UserDefaults.standard.object(forKey: "sidebarShellIntegration") as? Bool ?? true
-        if shellIntegrationEnabled,
-           let integrationDir = Bundle.main.resourceURL?.appendingPathComponent("shell-integration").path {
-            env["CMUX_SHELL_INTEGRATION"] = "1"
-            env["CMUX_SHELL_INTEGRATION_DIR"] = integrationDir
-
-            let shell = (env["SHELL"]?.isEmpty == false ? env["SHELL"] : nil)
-                ?? getenv("SHELL").map { String(cString: $0) }
-                ?? ProcessInfo.processInfo.environment["SHELL"]
-                ?? "/bin/zsh"
-            let shellName = URL(fileURLWithPath: shell).lastPathComponent
-            if shellName == "zsh" {
-                if GhosttyApp.shared.shellIntegrationMode() != "none" {
-                    env["CMUX_LOAD_GHOSTTY_ZSH_INTEGRATION"] = "1"
-                }
-                let candidateZdotdir = (env["ZDOTDIR"]?.isEmpty == false ? env["ZDOTDIR"] : nil)
-                    ?? getenv("ZDOTDIR").map { String(cString: $0) }
-                    ?? (ProcessInfo.processInfo.environment["ZDOTDIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["ZDOTDIR"] : nil)
-
-                if let candidateZdotdir, !candidateZdotdir.isEmpty {
-                    var isGhosttyInjected = false
-                    let ghosttyResources = (env["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? env["GHOSTTY_RESOURCES_DIR"] : nil)
-                        ?? getenv("GHOSTTY_RESOURCES_DIR").map { String(cString: $0) }
-                        ?? (ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"] : nil)
-                    if let ghosttyResources {
-                        let ghosttyZdotdir = URL(fileURLWithPath: ghosttyResources)
-                            .appendingPathComponent("shell-integration/zsh").path
-                        isGhosttyInjected = (candidateZdotdir == ghosttyZdotdir)
-                    }
-                    if !isGhosttyInjected {
-                        env["CMUX_ZSH_ZDOTDIR"] = candidateZdotdir
-                    }
-                }
-
-                env["ZDOTDIR"] = integrationDir
-            } else if shellName == "bash" {
-                if GhosttyApp.shared.shellIntegrationMode() != "none" {
-                    env["CMUX_LOAD_GHOSTTY_BASH_INTEGRATION"] = "1"
-                }
-                // macOS ships /bin/bash 3.2, where Ghostty's automatic bash
-                // integration is unsupported and HOME-based wrapper startup is
-                // not reliable. Bootstrap cmux bash integration on the first
-                // interactive prompt instead.
-                env["PROMPT_COMMAND"] = """
-                unset PROMPT_COMMAND; \
-                if [[ "${CMUX_LOAD_GHOSTTY_BASH_INTEGRATION:-0}" == "1" && -n "${GHOSTTY_RESOURCES_DIR:-}" ]]; then \
-                _cmux_ghostty_bash="$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"; \
-                [[ -r "$_cmux_ghostty_bash" ]] && source "$_cmux_ghostty_bash"; \
-                fi; \
-                if [[ "${CMUX_SHELL_INTEGRATION:-1}" != "0" && -n "${CMUX_SHELL_INTEGRATION_DIR:-}" ]]; then \
-                _cmux_bash_integration="$CMUX_SHELL_INTEGRATION_DIR/cmux-bash-integration.bash"; \
-                [[ -r "$_cmux_bash_integration" ]] && source "$_cmux_bash_integration"; \
-                fi; \
-                unset _cmux_ghostty_bash _cmux_bash_integration; \
-                if declare -F _cmux_prompt_command >/dev/null 2>&1; then _cmux_prompt_command; fi
-                """
-            }
-        }
-
-        let startupEnvironment = additionalEnvironment
-        if !startupEnvironment.isEmpty {
-            for (key, value) in startupEnvironment where !key.isEmpty && !value.isEmpty {
-                env[key] = value
-            }
-        }
+        let env = resolvedLaunchEnvironment(baseEnvironment: inheritedEnvironment)
 
         if !env.isEmpty {
             envVars.reserveCapacity(env.count)
@@ -3116,18 +3277,51 @@ final class TerminalSurface: Identifiable, ObservableObject {
             }
         }
 
+        let createConfiguredSurface = { [self] in
+            if ZenbanTerminalRuntimeService.isEnabled {
+                if self.persistentRuntimeSessionKind == .agent {
+                    self.preparePersistentRuntimeIfNeeded()
+                    guard self.persistentRuntimeState == .ready else {
+                        return
+                    }
+                }
+                if let preflightError = ZenbanTerminalRuntimeService.runtimePreflightError() {
+                    persistentRuntimeState = .failed
+                    NSLog("terminal.runtime.surface preflight failed: %@", preflightError)
+#if DEBUG
+                    Self.surfaceLog("createSurface FAILED surface=\(id.uuidString): \(preflightError)")
+#endif
+                    return
+                }
+                let command = ZenbanTerminalRuntimeService.bridgeCommand(
+                    sessionID: self.persistentSessionID,
+                    cwd: self.workingDirectory,
+                    sessionKind: self.persistentRuntimeSessionKind,
+                    launchCommand: self.persistentRuntimeLaunchCommand
+                )
+                command.withCString { cCommand in
+                    surfaceConfig.command = cCommand
+                    createSurface()
+                }
+                return
+            }
+
+            createSurface()
+        }
+
         if let workingDirectory, !workingDirectory.isEmpty {
             workingDirectory.withCString { cWorkingDir in
                 surfaceConfig.working_directory = cWorkingDir
-                createSurface()
+                createConfiguredSurface()
             }
         } else {
-            createSurface()
+            createConfiguredSurface()
         }
 
         if surface == nil {
             surfaceCallbackContext?.release()
             surfaceCallbackContext = nil
+            persistentRuntimeState = .failed
             print("Failed to create ghostty surface")
             #if DEBUG
             Self.surfaceLog("createSurface FAILED surface=\(id.uuidString): ghostty_surface_new returned nil")
@@ -3146,6 +3340,12 @@ final class TerminalSurface: Identifiable, ObservableObject {
             return
         }
         guard let createdSurface = surface else { return }
+        if ZenbanTerminalRuntimeService.isEnabled {
+            persistentRuntimeBridgeReady = true
+        }
+        if persistentRuntimeState != .failed {
+            persistentRuntimeState = .ready
+        }
 
         // Session scrollback replay must be one-shot. Reusing it on a later runtime
         // surface recreation would inject stale restored output into a live shell.
@@ -3175,6 +3375,8 @@ final class TerminalSurface: Identifiable, ObservableObject {
             lastXScale = scaleFactors.x
             lastYScale = scaleFactors.y
         }
+
+        flushPendingRuntimeWritesIfPossible()
 
         // Some GhosttyKit builds can drop inherited font_size during post-create
         // config/scale reconciliation. If runtime points don't match the inherited
@@ -3447,6 +3649,58 @@ final class TerminalSurface: Identifiable, ObservableObject {
         #endif
     }
 
+    private func enqueuePendingRuntimeWrite(_ data: Data) {
+        let incomingBytes = data.count
+        while !pendingRuntimeWriteQueue.isEmpty && pendingRuntimeWriteBytes + incomingBytes > maxPendingRuntimeWriteBytes {
+            let dropped = pendingRuntimeWriteQueue.removeFirst()
+            pendingRuntimeWriteBytes -= dropped.count
+        }
+        pendingRuntimeWriteQueue.append(data)
+        pendingRuntimeWriteBytes += incomingBytes
+    }
+
+    private func flushPendingRuntimeWritesIfPossible() {
+        guard ZenbanTerminalRuntimeService.isEnabled else { return }
+        guard persistentRuntimeState == .ready else { return }
+        guard persistentRuntimeBridgeReady else { return }
+        guard !runtimeWriteFlushInFlight, !pendingRuntimeWriteQueue.isEmpty else { return }
+
+        let queuedWrites = pendingRuntimeWriteQueue
+        pendingRuntimeWriteQueue.removeAll(keepingCapacity: false)
+        pendingRuntimeWriteBytes = 0
+        runtimeWriteFlushInFlight = true
+
+        let sessionID = persistentSessionID
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var failedIndex: Int?
+
+            for (index, write) in queuedWrites.enumerated() {
+                do {
+                    try await ZenbanTerminalRuntimeService.shared.write(sessionID: sessionID, data: write)
+                } catch {
+                    failedIndex = index
+                    self.persistentRuntimeState = .failed
+                    NSLog("terminal.runtime.write failed for %@: %@", sessionID, String(describing: error))
+                    break
+                }
+            }
+
+            if let failedIndex, self.persistentSessionID == sessionID {
+                let remainingWrites = queuedWrites[failedIndex...]
+                for write in remainingWrites.reversed() {
+                    self.pendingRuntimeWriteQueue.insert(write, at: 0)
+                    self.pendingRuntimeWriteBytes += write.count
+                }
+            }
+
+            if self.persistentSessionID == sessionID {
+                self.runtimeWriteFlushInFlight = false
+            }
+            self.flushPendingRuntimeWritesIfPossible()
+        }
+    }
+
     func performBindingAction(_ action: String) -> Bool {
         guard let surface = surface else { return false }
         return action.withCString { cString in
@@ -3596,6 +3850,8 @@ struct ClaudePromptCaptureState {
 }
 
 class GhosttyNSView: NSView, NSUserInterfaceValidations {
+    private static let accessibilityLabelText = "text entry area"
+    private static let accessibilityIdentifierText = "GhosttyTerminalTextEntryArea"
     private static let focusDebugEnabled: Bool = {
         if ProcessInfo.processInfo.environment["CMUX_FOCUS_DEBUG"] == "1" {
             return true
@@ -3719,6 +3975,24 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
         visibleInUI = visible
         updateOcclusionState()
+    }
+
+    fileprivate func resetDetachedRuntimeState() {
+        pendingSurfaceSize = nil
+        deferredSurfaceSizeRetryQueued = false
+        lastDrawableSize = .zero
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if let layer {
+            layer.contents = nil
+            layer.backgroundColor = NSColor.clear.cgColor
+            layer.isOpaque = false
+        }
+        if let metalLayer = layer as? CAMetalLayer {
+            metalLayer.drawableSize = .zero
+        }
+        CATransaction.commit()
     }
 
     override init(frame frameRect: NSRect) {
@@ -4261,6 +4535,11 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         terminalSurface?.attachToView(self)
         updateSurfaceSize(size: bounds.size)
         applySurfaceColorScheme(force: true)
+        if let window,
+           let firstResponder = window.firstResponder as? NSView,
+           desiredFocus || firstResponder === self || firstResponder.isDescendant(of: self) {
+            terminalSurface?.setFocus(true)
+        }
         return surface
     }
 
@@ -4610,6 +4889,14 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     /// Voice input tools frequently target AX text areas for text insertion.
     override func isAccessibilityElement() -> Bool {
         true
+    }
+
+    override func accessibilityLabel() -> String? {
+        Self.accessibilityLabelText
+    }
+
+    override func accessibilityIdentifier() -> String {
+        Self.accessibilityIdentifierText
     }
 
     override func accessibilityRole() -> NSAccessibility.Role? {
@@ -7244,6 +7531,11 @@ final class GhosttySurfaceScrollView: NSView {
         }
     }
 
+    func resetDetachedRuntimeViewState() {
+        cancelFocusRequest()
+        surfaceView.resetDetachedRuntimeState()
+    }
+
     var debugPortalVisibleInUI: Bool {
         surfaceView.isVisibleInUI
     }
@@ -7503,7 +7795,16 @@ final class GhosttySurfaceScrollView: NSView {
         let isHiddenForFocus = isHiddenOrHasHiddenAncestor || surfaceView.isHiddenOrHasHiddenAncestor
 
         guard isActive else { return }
-        guard let window else { return }
+        guard let window else {
+#if DEBUG
+            dlog(
+                "focus.ensure.defer surface=\(surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+                "reason=no_window attempts=\(attemptsRemaining)"
+            )
+#endif
+            retry()
+            return
+        }
         guard surfaceView.isVisibleInUI else {
 #if DEBUG
             dlog(
@@ -8818,6 +9119,14 @@ struct GhosttyTerminalView: NSViewRepresentable {
 
         coordinator.attachGeneration += 1
         let generation = coordinator.attachGeneration
+        let focusWorkspaceId = terminalSurface.tabId
+        let focusSurfaceId = terminalSurface.id
+        let reapplyFocusIfNeeded: () -> Void = {
+            guard coordinator.desiredIsActive, coordinator.desiredIsVisibleInUI else { return }
+            DispatchQueue.main.async {
+                hostedView.ensureFocus(for: focusWorkspaceId, surfaceId: focusSurfaceId, attemptsRemaining: 5)
+            }
+        }
 
         if let host = hostContainer {
             host.onDidMoveToWindow = { [weak host, weak hostedView, weak coordinator] in
@@ -8843,6 +9152,11 @@ struct GhosttyTerminalView: NSViewRepresentable {
                 hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
                 hostedView.setActive(coordinator.desiredIsActive)
                 hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
+                if coordinator.desiredIsActive, coordinator.desiredIsVisibleInUI {
+                    DispatchQueue.main.async {
+                        hostedView.ensureFocus(for: focusWorkspaceId, surfaceId: focusSurfaceId, attemptsRemaining: 5)
+                    }
+                }
             }
             host.onGeometryChanged = { [weak host, weak hostedView, weak coordinator] in
                 guard let host, let hostedView, let coordinator else { return }
@@ -8876,6 +9190,11 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
                     hostedView.setActive(coordinator.desiredIsActive)
                     hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
+                    if coordinator.desiredIsActive, coordinator.desiredIsVisibleInUI {
+                        DispatchQueue.main.async {
+                            hostedView.ensureFocus(for: focusWorkspaceId, surfaceId: focusSurfaceId, attemptsRemaining: 5)
+                        }
+                    }
                 }
                 TerminalWindowPortalRegistry.synchronizeForAnchor(host)
                 coordinator.lastSynchronizedHostGeometryRevision = host.geometryRevision
@@ -8949,6 +9268,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
         if shouldApplyImmediateHostedState {
             hostedView.setVisibleInUI(isVisibleInUI)
             hostedView.setActive(isActive)
+            reapplyFocusIfNeeded()
         } else {
             // Preserve portal entry visibility while a stale host is still receiving SwiftUI updates.
             // The currently bound host remains authoritative for immediate visible/active state.

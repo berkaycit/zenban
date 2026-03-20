@@ -256,7 +256,7 @@ struct CmuxHostStoreLaunchTests {
     }
 
     @Test
-    func backgroundPrewarmIdleWorkspaceReclaimsAfterTimeoutWithoutChangingSelection() async throws {
+    func backgroundPrewarmIdleWorkspaceDoesNotReclaimAfterTimeoutWhenRuntimeIsPreserved() async throws {
         let tempDirectory = try makeTemporaryDirectory()
         let sourceCard = Card(title: "cc-42", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
         let cloneCard = Card(title: "cc-43", column: .todo, agent: .claude, worktreePath: tempDirectory.path)
@@ -294,7 +294,7 @@ struct CmuxHostStoreLaunchTests {
 
         hostStore.evaluateHiddenWorkspaceReclaimForTesting(now: evaluationTime)
 
-        #expect(reclaimedCardIDs == [cloneCard.id])
+        #expect(reclaimedCardIDs.isEmpty)
         #expect(boardStore.selectedCardID == sourceCard.id)
         #expect(hostStore.workspace(for: cloneCard.id) != nil)
     }
@@ -432,6 +432,57 @@ struct CmuxHostStoreLaunchTests {
         #expect(reclaimedCardIDs.isEmpty)
     }
 
+    @Test
+    func hiddenWorkspaceDetachFiresAfterDelayForInactiveWorkspace() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let (boardStore, board, firstCard, secondCard) = makeTwoCardBoardFixture(worktreePath: tempDirectory.path)
+        let hostStore = makeHostStore(boardStore: boardStore)
+        var detachedCardIDs: [UUID] = []
+        hostStore.configureHiddenWorkspaceDetachHookForTesting { cardID in
+            detachedCardIDs.append(cardID)
+        }
+        hostStore.setHiddenWorkspaceDetachDelayForTesting(.milliseconds(100))
+        defer {
+            hostStore.configureHiddenWorkspaceDetachHookForTesting(nil)
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: firstCard, boardID: board.id)
+        let firstWorkspace = try #require(hostStore.workspace(for: firstCard.id))
+
+        hostStore.syncSelection(card: secondCard, boardID: board.id)
+        hostStore.detachTerminalRuntimeForHiddenWorkspace(firstWorkspace)
+
+        try await waitUntil { detachedCardIDs == [firstCard.id] }
+    }
+
+    @Test
+    func hiddenWorkspaceDetachCancelsWhenWorkspaceBecomesSelectedAgain() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let (boardStore, board, firstCard, secondCard) = makeTwoCardBoardFixture(worktreePath: tempDirectory.path)
+        let hostStore = makeHostStore(boardStore: boardStore)
+        var detachedCardIDs: [UUID] = []
+        hostStore.configureHiddenWorkspaceDetachHookForTesting { cardID in
+            detachedCardIDs.append(cardID)
+        }
+        hostStore.setHiddenWorkspaceDetachDelayForTesting(.milliseconds(150))
+        defer {
+            hostStore.configureHiddenWorkspaceDetachHookForTesting(nil)
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: firstCard, boardID: board.id)
+        let firstWorkspace = try #require(hostStore.workspace(for: firstCard.id))
+
+        hostStore.syncSelection(card: secondCard, boardID: board.id)
+        hostStore.detachTerminalRuntimeForHiddenWorkspace(firstWorkspace)
+        try? await Task.sleep(for: .milliseconds(50))
+        hostStore.syncSelection(card: firstCard, boardID: board.id)
+        try? await Task.sleep(for: .milliseconds(200))
+
+        #expect(detachedCardIDs.isEmpty)
+    }
+
     private func makeBoardFixture(
         agent: Agent,
         worktreePath: String,
@@ -449,6 +500,22 @@ struct CmuxHostStoreLaunchTests {
         boardStore.selectedBoardID = board.id
         boardStore.selectedCardID = card.id
         return (boardStore, board, card)
+    }
+
+    private func makeTwoCardBoardFixture(worktreePath: String) -> (BoardStore, Board, Card, Card) {
+        let firstCard = Card(title: "cc-42", column: .todo, agent: .claude, worktreePath: worktreePath)
+        let secondCard = Card(title: "cc-43", column: .todo, orderIndex: 1, agent: .claude, worktreePath: worktreePath)
+        let board = Board(
+            name: "Workspace Detach",
+            cards: [firstCard, secondCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore()
+        boardStore.boards = [board]
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = firstCard.id
+        return (boardStore, board, firstCard, secondCard)
     }
 
     private func makeHostStore(boardStore: BoardStore) -> CmuxHostStore {

@@ -2307,6 +2307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         _ = saveSessionSnapshot(includeScrollback: true, removeWhenEmpty: false)
         stopSessionAutosaveTimer()
         stopSocketListenerHealthMonitor()
+        ZenbanTerminalRuntimeService.shutdownIfRunningBlocking(killSessions: true)
         TerminalController.shared.stop()
         VSCodeServeWebController.shared.stop()
         BrowserHistoryStore.shared.flushPendingSaves()

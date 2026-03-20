@@ -121,6 +121,33 @@ final class TerminalPanel: Panel, ObservableObject {
         surface.updateWorkspaceId(newWorkspaceId)
     }
 
+    func setPersistentSessionID(_ sessionID: String) {
+        surface.setPersistentSessionID(sessionID)
+    }
+
+    @discardableResult
+    func configurePersistentRuntimeLaunch(
+        sessionKind: ZenbanTerminalRuntimeSessionKind,
+        launchCommand: String?
+    ) -> Bool {
+        let changed = surface.configurePersistentRuntimeLaunch(
+            sessionKind: sessionKind,
+            launchCommand: launchCommand
+        )
+        if changed, hostedView.window != nil {
+            requestViewReattach()
+        }
+        return changed
+    }
+
+    func preparePersistentRuntimeIfNeeded() {
+        surface.preparePersistentRuntimeIfNeeded()
+    }
+
+    func isPersistentRuntimeReadyForLaunch() -> Bool {
+        surface.isPersistentRuntimeReadyForLaunch()
+    }
+
     func focus() {
         surface.setFocus(true)
         // `unfocus()` force-disables active state to stop stale retries from stealing focus.
@@ -171,6 +198,13 @@ final class TerminalPanel: Panel, ObservableObject {
     func releaseRuntimeSurfaceForBackgroundReclaim() {
         unfocus()
         hostedView.setVisibleInUI(false)
+        TerminalWindowPortalRegistry.detach(hostedView: hostedView)
+        surface.reclaimPersistentRuntime()
+    }
+
+    func detachRuntimeSurfaceForHiddenWorkspace() {
+        unfocus()
+        hostedView.setVisibleInUI(false)
         surface.releaseRuntimeSurfaceForReuse()
     }
 
@@ -186,6 +220,10 @@ final class TerminalPanel: Panel, ObservableObject {
 
     func sendShellCommand(_ command: String) {
         surface.sendShellCommand(command)
+    }
+
+    func sendPersistentRuntimeCommand(_ command: String) {
+        surface.sendPersistentRuntimeCommand(command)
     }
 
     func performBindingAction(_ action: String) -> Bool {

@@ -379,6 +379,7 @@ struct CardDetailView: View {
             isWorkspaceVisible: isVisible,
             isWorkspaceInputActive: isInputActive,
             workspacePortalPriority: portalPriority,
+            emptyPaneBehavior: .loadingTerminal,
             onThemeRefreshRequest: nil
         )
         .id(workspace.id)
@@ -480,7 +481,7 @@ struct CardDetailView: View {
            workspace.browserPanel(for: focusedPanelId) != nil {
             return true
         }
-        return workspace.hasLoadedTerminalSurface()
+        return workspace.hasLoadedTerminalSurface() || workspace.hasPreparedTerminalRuntime()
     }
 
     private func completeWorkspaceHandoff() {
@@ -510,6 +511,7 @@ struct CardDetailView: View {
             guard hiddenWorkspaceIds.insert(workspace.id).inserted else { continue }
             workspace.hideAllTerminalPortalViews()
             workspace.hideAllBrowserPortalViews()
+            cmuxHost.detachTerminalRuntimeForHiddenWorkspace(workspace)
         }
     }
 

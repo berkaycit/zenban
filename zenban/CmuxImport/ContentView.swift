@@ -1977,6 +1977,7 @@ struct ContentView: View {
                         isWorkspaceVisible: isVisible,
                         isWorkspaceInputActive: isInputActive,
                         workspacePortalPriority: portalPriority,
+                        emptyPaneBehavior: .autoCreateTerminal,
                         onThemeRefreshRequest: { reason, eventId, source, payloadHex in
                             scheduleTitlebarThemeRefreshFromWorkspace(
                                 workspaceId: tab.id,
@@ -2848,13 +2849,17 @@ struct ContentView: View {
             return .completed(reason: "workspace_removed")
         }
 
-        workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
-        guard workspace.hasLoadedTerminalSurface() else {
+        if ZenbanTerminalRuntimeService.isEnabled {
+            workspace.requestBackgroundTerminalRuntimeStartIfNeeded()
+        } else {
+            workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
+        }
+        guard workspace.hasLoadedTerminalSurface() || workspace.hasPreparedTerminalRuntime() else {
             return .pending
         }
 
         tabManager.completeBackgroundWorkspaceLoad(for: workspaceId)
-        return .completed(reason: "surface_ready")
+        return .completed(reason: "surface_or_runtime_ready")
     }
 
     private func addTab() {
@@ -2978,7 +2983,7 @@ struct ContentView: View {
            workspace.browserPanel(for: focusedPanelId) != nil {
             return true
         }
-        return workspace.hasLoadedTerminalSurface()
+        return workspace.hasLoadedTerminalSurface() || workspace.hasPreparedTerminalRuntime()
     }
 
     private func completeWorkspaceHandoff(reason: String) {

@@ -5,10 +5,17 @@ import Bonsplit
 
 /// View that renders a Workspace's content using BonsplitView
 struct WorkspaceContentView: View {
+    enum EmptyPaneBehavior {
+        case showChooser
+        case autoCreateTerminal
+        case loadingTerminal
+    }
+
     @ObservedObject var workspace: Workspace
     let isWorkspaceVisible: Bool
     let isWorkspaceInputActive: Bool
     let workspacePortalPriority: Int
+    let emptyPaneBehavior: EmptyPaneBehavior
     let onThemeRefreshRequest: ((
         _ reason: String,
         _ backgroundEventId: UInt64?,
@@ -28,6 +35,20 @@ struct WorkspaceContentView: View {
         // During pane/tab reparenting, Bonsplit can transiently report selected=false
         // for the currently focused panel. Keep focused content visible to avoid blank frames.
         return isSelectedInPane || isFocused
+    }
+
+    private static func emptyPanelMode(
+        for behavior: EmptyPaneBehavior,
+        isBrokenSelectedTab: Bool
+    ) -> EmptyPanelView.Mode {
+        switch behavior {
+        case .showChooser:
+            return .chooser
+        case .autoCreateTerminal:
+            return isBrokenSelectedTab ? .loadingTerminal : .autoCreateTerminal
+        case .loadingTerminal:
+            return .loadingTerminal
+        }
     }
 
     var body: some View {
@@ -96,12 +117,33 @@ struct WorkspaceContentView: View {
                     workspace.bonsplitController.focusPane(paneId)
                 }
             } else {
-                // Fallback for tabs without panels (shouldn't happen normally)
-                EmptyPanelView(workspace: workspace, paneId: paneId)
+                let isSelectedBrokenTab = workspace.bonsplitController.selectedTab(inPane: paneId)?.id == tab.id
+                if isSelectedBrokenTab {
+                    // Only the active broken tab should attempt auto-repair.
+                    // Bonsplit keeps tab views alive, so mounting repair views for hidden tabs can
+                    // burn their single onAppear attempt offscreen and leave the visible tab stuck.
+                    EmptyPanelView(
+                        workspace: workspace,
+                        paneId: paneId,
+                        mode: Self.emptyPanelMode(
+                            for: emptyPaneBehavior,
+                            isBrokenSelectedTab: true
+                        )
+                    )
+                } else {
+                    Color(nsColor: GhosttyBackgroundTheme.currentColor())
+                }
             }
         } emptyPane: { paneId in
             // Empty pane content
-            EmptyPanelView(workspace: workspace, paneId: paneId)
+            EmptyPanelView(
+                workspace: workspace,
+                paneId: paneId,
+                mode: Self.emptyPanelMode(
+                    for: emptyPaneBehavior,
+                    isBrokenSelectedTab: false
+                )
+            )
                 .onTapGesture {
                     workspace.bonsplitController.focusPane(paneId)
                 }
@@ -307,10 +349,18 @@ extension WorkspaceContentView {
 
 /// View shown for empty panes
 struct EmptyPanelView: View {
+    enum Mode {
+        case chooser
+        case autoCreateTerminal
+        case loadingTerminal
+    }
+
     @ObservedObject var workspace: Workspace
     let paneId: PaneID
+    let mode: Mode
     @AppStorage(KeyboardShortcutSettings.Action.newSurface.defaultsKey) private var newSurfaceShortcutData = Data()
     @AppStorage(KeyboardShortcutSettings.Action.openBrowser.defaultsKey) private var openBrowserShortcutData = Data()
+    @State private var didRequestAutomaticTerminal = false
 
     private struct ShortcutHint: View {
         let text: String
@@ -343,6 +393,18 @@ struct EmptyPanelView: View {
         #endif
         focusPane()
         _ = workspace.newBrowserSurface(inPane: paneId)
+    }
+
+    private func requestAutomaticTerminalIfNeeded() {
+        guard mode != .chooser else { return }
+        guard !didRequestAutomaticTerminal else { return }
+
+        didRequestAutomaticTerminal = true
+        DispatchQueue.main.async {
+            if workspace.repairOrCreateTerminalSurface(inPane: paneId, focus: true) == nil {
+                createTerminal()
+            }
+        }
     }
 
     private var newSurfaceShortcut: StoredShortcut {
@@ -394,28 +456,33 @@ struct EmptyPanelView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.tertiary)
 
-            Text("Empty Panel")
+            Text(mode == .chooser ? "Empty Panel" : "Opening Terminal")
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 12) {
-                emptyPaneActionButton(
-                    title: "Terminal",
-                    systemImage: "terminal.fill",
-                    shortcut: newSurfaceShortcut,
-                    action: createTerminal
-                )
+            if mode == .chooser {
+                HStack(spacing: 12) {
+                    emptyPaneActionButton(
+                        title: "Terminal",
+                        systemImage: "terminal.fill",
+                        shortcut: newSurfaceShortcut,
+                        action: createTerminal
+                    )
 
-                emptyPaneActionButton(
-                    title: "Browser",
-                    systemImage: "globe",
-                    shortcut: openBrowserShortcut,
-                    action: createBrowser
-                )
+                    emptyPaneActionButton(
+                        title: "Browser",
+                        systemImage: "globe",
+                        shortcut: openBrowserShortcut,
+                        action: createBrowser
+                    )
+                }
+            } else {
+                ProgressView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: GhosttyBackgroundTheme.currentColor()))
+        .onAppear(perform: requestAutomaticTerminalIfNeeded)
 #if DEBUG
         .onAppear {
             DebugUIEventCounters.emptyPanelAppearCount += 1

@@ -86,10 +86,15 @@ echo "Sparkle keys injected"
 
 # --- Codesign ---
 echo "Codesigning..."
-CLI_PATH="$APP_PATH/Contents/Resources/bin/cmux"
-if [ -f "$CLI_PATH" ]; then
-  /usr/bin/codesign --force --options runtime --timestamp --sign "$SIGN_HASH" --entitlements "$ENTITLEMENTS" "$CLI_PATH"
-fi
+RESOURCE_BIN_DIR="$APP_PATH/Contents/Resources/bin"
+for BINARY_NAME in cmux zenban-terminal-daemon zenban-terminal-bridge; do
+  BINARY_PATH="$RESOURCE_BIN_DIR/$BINARY_NAME"
+  if [ ! -x "$BINARY_PATH" ]; then
+    echo "MISSING: $BINARY_PATH" >&2
+    exit 1
+  fi
+  /usr/bin/codesign --force --options runtime --timestamp --sign "$SIGN_HASH" --entitlements "$ENTITLEMENTS" "$BINARY_PATH"
+done
 /usr/bin/codesign --force --options runtime --timestamp --sign "$SIGN_HASH" --entitlements "$ENTITLEMENTS" --deep "$APP_PATH"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 echo "Codesign verified"

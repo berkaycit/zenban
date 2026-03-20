@@ -5,12 +5,21 @@
 //  Created by Berkay Çit on 25.12.2025.
 //
 
+import AppKit
 import XCTest
 import CoreGraphics
+import Darwin
 import ImageIO
 import UniformTypeIdentifiers
 
 final class zenbanUITests: XCTestCase {
+    private enum TerminalRuntimeMode {
+        case inheritDefault
+        case forceEnabled
+        case forceDisabled
+    }
+
+    private let testedAppBundleIdentifier = "com.berkaycit.zenban"
     private var temporaryDirectoryURL: URL!
     private var boardStorageDirectoryURL: URL!
 
@@ -89,7 +98,303 @@ final class zenbanUITests: XCTestCase {
         }
     }
 
-    private func launchApp() -> XCUIApplication {
+    @MainActor
+    func testResidentMemoryAfterOpeningFiveCards() throws {
+        let app = launchApp()
+        performStep("01-board-loaded", in: app) {
+            XCTAssertTrue(
+                app.staticTexts["UI Test Board"].waitForExistence(timeout: 5),
+                "Expected the seeded UI Test Board to load"
+            )
+        }
+
+        var snapshots: [MemorySnapshot] = []
+        let launchSnapshot = performStep("02-memory-after-launch", in: app) {
+            recordResidentMemorySnapshot(named: "after-launch", in: app)
+        }
+        snapshots.append(launchSnapshot)
+
+        var stepNumber = 3
+        for cardIndex in 1...5 {
+            let title = "cc-\(cardIndex)"
+
+            performStep(String(format: "%02d-create-%@", stepNumber, title), in: app) {
+                createCard(named: title, in: app)
+            }
+            stepNumber += 1
+
+            let waitDuration = cardIndex == 5 ? 10.0 : 3.0
+            performStep(String(format: "%02d-wait-%@", stepNumber, title), in: app) {
+                RunLoop.current.run(until: Date().addingTimeInterval(waitDuration))
+            }
+            stepNumber += 1
+
+            let snapshot = performStep(String(format: "%02d-memory-%@", stepNumber, title), in: app) {
+                recordResidentMemorySnapshot(named: "after-opening-\(title)", in: app)
+            }
+            snapshots.append(snapshot)
+            stepNumber += 1
+        }
+
+        attachResidentMemorySummary(snapshots)
+        XCTAssertEqual(snapshots.count, 6, "Expected a launch measurement plus five card measurements")
+        XCTAssertTrue(snapshots.allSatisfy { $0.bytes > 0 }, "Expected all resident memory samples to succeed")
+    }
+
+    @MainActor
+    func testTerminalAcceptsCommandsInFreshCard() throws {
+        let app = launchApp(terminalRuntime: .forceEnabled)
+        performStep("01-board-loaded", in: app) {
+            XCTAssertTrue(
+                app.staticTexts["UI Test Board"].waitForExistence(timeout: 5),
+                "Expected the seeded UI Test Board to load"
+            )
+        }
+
+        performStep("02-create-cc-1", in: app) {
+            createCard(named: "cc-1", in: app)
+        }
+
+        let outputURL = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("ztmp-\(UUID().uuidString).txt", isDirectory: false)
+        let command = "!echo -n ok > '\(outputURL.path)'"
+        performStep("03-send-command", in: app) {
+            sendPrompt(command, in: app)
+        }
+
+        performStep("04-command-produced-output", in: app) {
+            XCTAssertTrue(
+                waitForCondition(timeout: 10) {
+                    FileManager.default.fileExists(atPath: outputURL.path)
+                },
+                "Expected terminal command to create \(outputURL.path)"
+            )
+        }
+
+        let output = try String(contentsOf: outputURL, encoding: .utf8)
+        XCTAssertEqual(output, "ok")
+    }
+
+    @MainActor
+    func testFreshCardOpensTerminalWithoutSurfaceChooser() throws {
+        let app = launchApp(terminalRuntime: .forceEnabled)
+        performStep("01-board-loaded", in: app) {
+            XCTAssertTrue(
+                app.staticTexts["UI Test Board"].waitForExistence(timeout: 5),
+                "Expected the seeded UI Test Board to load"
+            )
+        }
+
+        performStep("02-create-cc-1", in: app) {
+            createCard(named: "cc-1", in: app)
+        }
+
+        performStep("03-terminal-visible-without-chooser", in: app) {
+            let terminalField = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@", "text entry area"))
+                .firstMatch
+            XCTAssertTrue(
+                terminalField.waitForExistence(timeout: 10),
+                "Expected terminal input to appear without needing an empty-pane choice"
+            )
+            XCTAssertFalse(app.buttons["Terminal"].exists, "Did not expect the empty-pane Terminal chooser button")
+            XCTAssertFalse(app.buttons["Browser"].exists, "Did not expect the empty-pane Browser chooser button")
+        }
+    }
+
+    @MainActor
+    func testTerminalAcceptsCommandsAfterSwitchingCards() throws {
+        let app = launchApp(terminalRuntime: .forceEnabled)
+        performStep("01-board-loaded", in: app) {
+            XCTAssertTrue(
+                app.staticTexts["UI Test Board"].waitForExistence(timeout: 5),
+                "Expected the seeded UI Test Board to load"
+            )
+        }
+
+        performStep("02-create-cc-1", in: app) {
+            createCard(named: "cc-1", in: app)
+        }
+
+        performStep("03-create-cc-2", in: app) {
+            createCard(named: "cc-2", in: app)
+        }
+
+        performStep("04-return-to-cc-1", in: app) {
+            selectCard(named: "cc-1", in: app)
+        }
+
+        let outputURL = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("ztmp-\(UUID().uuidString).txt", isDirectory: false)
+        let command = "!echo -n ok > '\(outputURL.path)'"
+        performStep("05-send-command", in: app) {
+            sendPrompt(command, in: app)
+        }
+
+        performStep("06-command-produced-output", in: app) {
+            XCTAssertTrue(
+                waitForCondition(timeout: 10) {
+                    FileManager.default.fileExists(atPath: outputURL.path)
+                },
+                "Expected terminal command to create \(outputURL.path)"
+            )
+        }
+
+        let output = try String(contentsOf: outputURL, encoding: .utf8)
+        XCTAssertEqual(output, "ok")
+    }
+
+    @MainActor
+    func testDaemonTerminalAcceptsCommandsAfterHideShow() throws {
+        let app = launchApp(terminalRuntime: .forceEnabled)
+        performStep("01-board-loaded", in: app) {
+            XCTAssertTrue(
+                app.staticTexts["UI Test Board"].waitForExistence(timeout: 5),
+                "Expected the seeded UI Test Board to load"
+            )
+        }
+
+        let firstOutputURL = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("ztmp-\(UUID().uuidString).txt", isDirectory: false)
+        let secondOutputURL = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("ztmp-\(UUID().uuidString).txt", isDirectory: false)
+
+        performStep("02-create-cc-1", in: app) {
+            createCard(named: "cc-1", in: app)
+        }
+
+        let firstCommand = "!printf 1 > '\(firstOutputURL.path)'"
+        performStep("03-send-first-command", in: app) {
+            sendPrompt(firstCommand, in: app)
+        }
+
+        performStep("04-first-command-produced-output", in: app) {
+            XCTAssertTrue(
+                waitForCondition(timeout: 10) {
+                    FileManager.default.fileExists(atPath: firstOutputURL.path)
+                },
+                "Expected terminal command to create \(firstOutputURL.path)"
+            )
+        }
+
+        performStep("05-create-cc-2", in: app) {
+            createCard(named: "cc-2", in: app)
+        }
+
+        performStep("06-return-to-cc-1", in: app) {
+            selectCard(named: "cc-1", in: app)
+        }
+
+        let secondCommand = "!printf 2 > '\(secondOutputURL.path)'"
+        performStep("07-send-second-command", in: app) {
+            sendPrompt(secondCommand, in: app)
+        }
+
+        performStep("08-second-command-produced-output", in: app) {
+            XCTAssertTrue(
+                waitForCondition(timeout: 10) {
+                    FileManager.default.fileExists(atPath: secondOutputURL.path)
+                },
+                "Expected terminal command to create \(secondOutputURL.path)"
+            )
+        }
+
+    }
+
+    @MainActor
+    func testDaemonTerminalLongRunningCommandContinuesAcrossCardSwitch() throws {
+        let app = launchApp(terminalRuntime: .forceEnabled)
+        performStep("01-board-loaded", in: app) {
+            XCTAssertTrue(
+                app.staticTexts["UI Test Board"].waitForExistence(timeout: 5),
+                "Expected the seeded UI Test Board to load"
+            )
+        }
+
+        let delayedOutputURL = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("ztmp-\(UUID().uuidString).txt", isDirectory: false)
+        let followUpOutputURL = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("ztmp-\(UUID().uuidString).txt", isDirectory: false)
+
+        performStep("02-create-cc-1", in: app) {
+            createCard(named: "cc-1", in: app)
+        }
+
+        let delayedCommand = "!sleep 2; echo -n delayed > '\(delayedOutputURL.path)'"
+        performStep("03-send-delayed-command", in: app) {
+            sendPrompt(delayedCommand, in: app)
+        }
+
+        performStep("04-create-cc-2", in: app) {
+            createCard(named: "cc-2", in: app)
+        }
+
+        performStep("05-delayed-command-finishes-while-hidden", in: app) {
+            XCTAssertTrue(
+                waitForCondition(timeout: 10) {
+                    FileManager.default.fileExists(atPath: delayedOutputURL.path)
+                },
+                "Expected delayed terminal command to finish while cc-1 is hidden"
+            )
+        }
+
+        performStep("06-return-to-cc-1", in: app) {
+            selectCard(named: "cc-1", in: app)
+        }
+
+        let followUpCommand = "!echo -n followup > '\(followUpOutputURL.path)'"
+        performStep("07-send-followup-command", in: app) {
+            sendPrompt(followUpCommand, in: app)
+        }
+
+        performStep("08-followup-command-produced-output", in: app) {
+            XCTAssertTrue(
+                waitForCondition(timeout: 10) {
+                    FileManager.default.fileExists(atPath: followUpOutputURL.path)
+                },
+                "Expected follow-up terminal command to create \(followUpOutputURL.path)"
+            )
+        }
+
+        XCTAssertEqual(try String(contentsOf: delayedOutputURL, encoding: .utf8), "delayed")
+        XCTAssertEqual(try String(contentsOf: followUpOutputURL, encoding: .utf8), "followup")
+    }
+
+    @MainActor
+    func testTerminalAcceptsCommandsInFreshCardWithLegacyOptOut() throws {
+        let app = launchApp(terminalRuntime: .forceDisabled)
+        performStep("01-board-loaded", in: app) {
+            XCTAssertTrue(
+                app.staticTexts["UI Test Board"].waitForExistence(timeout: 5),
+                "Expected the seeded UI Test Board to load"
+            )
+        }
+
+        performStep("02-create-cc-1", in: app) {
+            createCard(named: "cc-1", in: app)
+        }
+
+        let outputURL = URL(fileURLWithPath: "/tmp")
+            .appendingPathComponent("ztmp-\(UUID().uuidString).txt", isDirectory: false)
+        let command = "!echo -n legacy > '\(outputURL.path)'"
+        performStep("03-send-command", in: app) {
+            sendPrompt(command, in: app)
+        }
+
+        performStep("04-command-produced-output", in: app) {
+            XCTAssertTrue(
+                waitForCondition(timeout: 10) {
+                    FileManager.default.fileExists(atPath: outputURL.path)
+                },
+                "Expected terminal command to create \(outputURL.path)"
+            )
+        }
+
+        let output = try String(contentsOf: outputURL, encoding: .utf8)
+        XCTAssertEqual(output, "legacy")
+    }
+
+    private func launchApp(terminalRuntime: TerminalRuntimeMode = .inheritDefault) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_BOARD_STORAGE_DIRECTORY"] = boardStorageDirectoryURL.path
@@ -102,6 +407,14 @@ final class zenbanUITests: XCTestCase {
             "-ApplePersistenceIgnoreState", "YES",
             "-notificationPaneRingEnabled", "YES",
         ]
+        switch terminalRuntime {
+        case .inheritDefault:
+            break
+        case .forceEnabled:
+            app.launchEnvironment["ZENBAN_TERMINAL_RUNTIME_ENABLED"] = "1"
+        case .forceDisabled:
+            app.launchEnvironment["ZENBAN_TERMINAL_RUNTIME_ENABLED"] = "0"
+        }
         app.launch()
         app.activate()
         return app
@@ -161,12 +474,16 @@ final class zenbanUITests: XCTestCase {
             .matching(NSPredicate(format: "label == %@", "text entry area"))
             .firstMatch
 
-        if terminalField.waitForExistence(timeout: 5) {
+        if terminalField.waitForExistence(timeout: 10) {
             terminalField.click()
+            RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+            terminalField.typeText(prompt + "\n")
+            return
         } else {
             let window = app.windows.firstMatch
             XCTAssertTrue(window.waitForExistence(timeout: 5), "Expected app window to exist")
             window.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: 0.78)).click()
+            RunLoop.current.run(until: Date().addingTimeInterval(1.0))
         }
 
         app.typeText(prompt + "\n")
@@ -198,6 +515,126 @@ final class zenbanUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func recordResidentMemorySnapshot(named name: String, in app: XCUIApplication) -> MemorySnapshot {
+        let snapshot = settledResidentMemorySnapshot(named: name, in: app)
+        let attachment = XCTAttachment(
+            string: """
+            label: \(snapshot.label)
+            residentMemoryMB: \(formattedMegabytes(snapshot.bytes))
+            residentMemoryBytes: \(snapshot.bytes)
+            sampleCount: \(snapshot.sampleCount)
+            settlingDurationSeconds: \(String(format: "%.2f", snapshot.settlingDuration))
+            """
+        )
+        attachment.name = "Memory.\(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        return snapshot
+    }
+
+    private func settledResidentMemorySnapshot(named name: String, in app: XCUIApplication) -> MemorySnapshot {
+        let startedAt = Date()
+        let timeout: TimeInterval = 10
+        let sampleInterval: TimeInterval = 0.25
+        let stableSampleThreshold = 3
+        let stabilityToleranceBytes: UInt64 = 2 * 1_048_576
+        var sampleCount = 0
+        var stableSamples = 0
+        var previousSample: UInt64?
+        var latestSample = residentMemoryInBytes(for: app)
+        let deadline = startedAt.addingTimeInterval(timeout)
+
+        repeat {
+            latestSample = residentMemoryInBytes(for: app)
+            sampleCount += 1
+
+            if let previousSample,
+               memoryDeltaBetween(latestSample, previousSample) <= stabilityToleranceBytes {
+                stableSamples += 1
+                if stableSamples >= stableSampleThreshold {
+                    break
+                }
+            } else {
+                stableSamples = 0
+            }
+
+            previousSample = latestSample
+            RunLoop.current.run(until: Date().addingTimeInterval(sampleInterval))
+        } while Date() < deadline
+
+        return MemorySnapshot(
+            label: name,
+            bytes: latestSample,
+            sampleCount: sampleCount,
+            settlingDuration: Date().timeIntervalSince(startedAt)
+        )
+    }
+
+    private func residentMemoryInBytes(for app: XCUIApplication) -> UInt64 {
+        let processID = launchedApplicationProcessID(for: app)
+        XCTAssertGreaterThan(processID, 0, "Expected the launched app to expose a valid process id")
+
+        var info = proc_taskinfo()
+        let expectedSize = Int32(MemoryLayout.size(ofValue: info))
+        let copiedBytes = proc_pidinfo(processID, PROC_PIDTASKINFO, 0, &info, expectedSize)
+        XCTAssertEqual(
+            copiedBytes,
+            expectedSize,
+            "Expected proc_pidinfo to return a full proc_taskinfo payload for pid \(processID)"
+        )
+
+        return UInt64(info.pti_resident_size)
+    }
+
+    private func launchedApplicationProcessID(for app: XCUIApplication) -> pid_t {
+        let runningApps = NSRunningApplication
+            .runningApplications(withBundleIdentifier: testedAppBundleIdentifier)
+            .filter { !$0.isTerminated }
+
+        if let activeApp = runningApps.first(where: \.isActive) {
+            return activeApp.processIdentifier
+        }
+
+        if let launchedApp = runningApps.first {
+            return launchedApp.processIdentifier
+        }
+
+        XCTFail("Expected \(testedAppBundleIdentifier) to be running after launch")
+        return 0
+    }
+
+    private func attachResidentMemorySummary(_ snapshots: [MemorySnapshot]) {
+        guard let baseline = snapshots.first else { return }
+
+        var lines = ["Resident memory summary:"]
+        for snapshot in snapshots {
+            let deltaFromLaunch = Int64(snapshot.bytes) - Int64(baseline.bytes)
+            lines.append(
+                "\(snapshot.label): \(formattedMegabytes(snapshot.bytes)) MB (\(snapshot.bytes) bytes), " +
+                "deltaFromLaunch: \(formattedMegabyteDelta(deltaFromLaunch)), " +
+                "sampleCount: \(snapshot.sampleCount), " +
+                "settlingDurationSeconds: \(String(format: "%.2f", snapshot.settlingDuration))"
+            )
+        }
+
+        let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
+        attachment.name = "Memory.summary"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func memoryDeltaBetween(_ lhs: UInt64, _ rhs: UInt64) -> UInt64 {
+        lhs > rhs ? lhs - rhs : rhs - lhs
+    }
+
+    private func formattedMegabytes(_ bytes: UInt64) -> String {
+        String(format: "%.2f", Double(bytes) / 1_048_576)
+    }
+
+    private func formattedMegabyteDelta(_ bytes: Int64) -> String {
+        String(format: "%+.2f", Double(bytes) / 1_048_576)
     }
 
     private func screenshotHasOrangeOutline(for card: XCUIElement, fallback label: XCUIElement, in app: XCUIApplication) -> Bool {
@@ -336,6 +773,13 @@ final class zenbanUITests: XCTestCase {
             options: .atomic
         )
     }
+}
+
+private struct MemorySnapshot {
+    let label: String
+    let bytes: UInt64
+    let sampleCount: Int
+    let settlingDuration: TimeInterval
 }
 
 private struct SeedBoard: Encodable {

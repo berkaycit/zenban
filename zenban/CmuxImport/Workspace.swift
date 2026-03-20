@@ -1242,7 +1242,7 @@ final class Workspace: Identifiable, ObservableObject {
     // MARK: - Surface ID to Panel ID Mapping
 
     /// Mapping from bonsplit TabID (surface ID) to panel UUID
-    private var surfaceIdToPanelId: [TabID: UUID] = [:]
+    @Published private var surfaceIdToPanelId: [TabID: UUID] = [:]
 
     /// Tab IDs that are allowed to close even if they would normally require confirmation.
     /// This is used by app-level confirmation prompts (e.g., Cmd+W "Close Tab?") so the
@@ -1532,6 +1532,12 @@ final class Workspace: Identifiable, ObservableObject {
         }
     }
 
+    func requestBackgroundTerminalRuntimeStartIfNeeded() {
+        for terminalPanel in panels.values.compactMap({ $0 as? TerminalPanel }) {
+            terminalPanel.preparePersistentRuntimeIfNeeded()
+        }
+    }
+
     @discardableResult
     func preloadTerminalPanelForDebugStress(
         tabId: TabID,
@@ -1566,6 +1572,12 @@ final class Workspace: Identifiable, ObservableObject {
         let terminalPanels = panels.values.compactMap { $0 as? TerminalPanel }
         guard !terminalPanels.isEmpty else { return true }
         return terminalPanels.contains { $0.surface.surface != nil }
+    }
+
+    func hasPreparedTerminalRuntime() -> Bool {
+        let terminalPanels = panels.values.compactMap { $0 as? TerminalPanel }
+        guard !terminalPanels.isEmpty else { return true }
+        return terminalPanels.contains { $0.isPersistentRuntimeReadyForLaunch() }
     }
 
     func panelTitle(panelId: UUID) -> String? {
@@ -2263,6 +2275,91 @@ final class Workspace: Identifiable, ObservableObject {
             applyTabSelection(tabId: newTabId, inPane: paneId)
         }
         return newPanel
+    }
+
+    @discardableResult
+    func repairOrCreateTerminalSurface(
+        inPane paneId: PaneID,
+        focus: Bool? = nil
+    ) -> TerminalPanel? {
+        let shouldFocusTerminal = focus ?? (bonsplitController.focusedPaneId == paneId)
+        let tabs = bonsplitController.tabs(inPane: paneId)
+        let brokenTabs = tabs.filter { panel(for: $0.id) == nil }
+        let selectedBrokenTab = bonsplitController.selectedTab(inPane: paneId).flatMap { selected in
+            brokenTabs.first(where: { $0.id == selected.id })
+        }
+        let brokenTab = selectedBrokenTab ?? brokenTabs.first
+
+        if let brokenTab {
+            for tab in brokenTabs {
+                guard let mappedPanelId = panelIdFromSurfaceId(tab.id), panels[mappedPanelId] == nil else { continue }
+                surfaceIdToPanelId.removeValue(forKey: tab.id)
+            }
+
+            let unmappedTerminalPanels = panels.values
+                .compactMap { $0 as? TerminalPanel }
+                .filter { surfaceIdFromPanelId($0.id) == nil }
+                .sorted { $0.id.uuidString < $1.id.uuidString }
+
+            let repairedPanel: TerminalPanel
+            if let existingPanel = unmappedTerminalPanels.first {
+                repairedPanel = existingPanel
+            } else {
+                let inheritedConfig = inheritedTerminalConfig(inPane: paneId)
+                let replacementPanel = TerminalPanel(
+                    workspaceId: id,
+                    context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+                    configTemplate: inheritedConfig,
+                    portOrdinal: portOrdinal
+                )
+                panels[replacementPanel.id] = replacementPanel
+                panelTitles[replacementPanel.id] = replacementPanel.displayTitle
+                seedTerminalInheritanceFontPoints(panelId: replacementPanel.id, configTemplate: inheritedConfig)
+                repairedPanel = replacementPanel
+            }
+
+            surfaceIdToPanelId[brokenTab.id] = repairedPanel.id
+            bonsplitController.updateTab(
+                brokenTab.id,
+                title: resolvedPanelTitle(
+                    panelId: repairedPanel.id,
+                    fallback: panelTitles[repairedPanel.id] ?? repairedPanel.displayTitle
+                ),
+                icon: .some(repairedPanel.displayIcon),
+                iconImageData: .some(nil),
+                kind: .some(SurfaceKind.terminal),
+                hasCustomTitle: panelCustomTitles[repairedPanel.id] != nil,
+                isDirty: repairedPanel.isDirty,
+                showsNotificationBadge: false,
+                isLoading: false,
+                isPinned: pinnedPanelIds.contains(repairedPanel.id)
+            )
+
+            for extraBrokenTab in brokenTabs where extraBrokenTab.id != brokenTab.id {
+                bonsplitController.closeTab(extraBrokenTab.id)
+            }
+
+            if shouldFocusTerminal {
+                bonsplitController.focusPane(paneId)
+                bonsplitController.selectTab(brokenTab.id)
+                repairedPanel.focus()
+                applyTabSelection(tabId: brokenTab.id, inPane: paneId)
+            }
+            normalizePinnedTabs(in: paneId)
+
+#if DEBUG
+            dlog(
+                "surface.placeholderRepair pane=\(paneId.id.uuidString.prefix(5)) " +
+                "tab=\(brokenTab.id.uuid.uuidString.prefix(5)) " +
+                "panel=\(repairedPanel.id.uuidString.prefix(5)) " +
+                "reusedExistingPanel=\(unmappedTerminalPanels.isEmpty ? 0 : 1)"
+            )
+#endif
+            return repairedPanel
+        }
+
+        guard tabs.isEmpty else { return nil }
+        return newTerminalSurface(inPane: paneId, focus: shouldFocusTerminal)
     }
 
     /// Create a new browser panel split

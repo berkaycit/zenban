@@ -8,7 +8,7 @@
 - `zenban/Views`: sidebar, board, card, git, dev server, settings, shared components
 - `zenban/Services`: git, AI, dev server, dependency, and process helpers
 - `zenban/CmuxImport`: copied cmux Swift host layer, panels, browser, notifications, and AppleScript support
-- `zenban/CmuxHostStore.swift`: Zenban adapter that maps cards 1:1 onto cmux workspaces
+- `zenban/CmuxHostStore.swift`: Zenban adapter that maps cards 1:1 onto cmux workspaces and terminal lifecycles
 - `cmux-import/`: copied cmux CLI, Ghostty runtime, bonsplit package, and bundled assets
 - `zenban/Utilities`, `Commands`, `Extensions`: shared helpers and app commands
 
@@ -24,6 +24,8 @@
 - `BoardStore`: Central state manager for boards, cards, overlays, worktrees, and dev server configuration.
 - `BoardStorage`: JSON persistence under Application Support.
 - `CmuxHostStore`: Card-scoped workspace registry, agent auto-launch bridge, browser surface management, and notification-to-card routing.
+- `ZenbanTerminalRuntimeService`: app-scoped Ghostty daemon launcher/client that prepares, attaches, writes to, and tears down terminal sessions.
+- `GhosttyTerminalView`: embedded Ghostty renderer that attaches to daemon-backed sessions when runtime mode is enabled and keeps the legacy direct-launch path as an opt-out fallback.
 - `GitService`: libgit2-backed repository, worktree, diff, commit, push, merge, and PR helpers.
 - `DevServerManager`: Runs setup and dev commands, buffers output, detects ready URLs, and owns process lifecycle.
 - `DependencyCheckService`: Checks and installs optional developer tools.
@@ -49,7 +51,7 @@ Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup
 
 ## Notifications And Scripting
 
-`zenbanApp` bootstraps copied cmux app delegate state, Ghostty resources, and socket defaults before SwiftUI renders. `TerminalNotificationStore` provides the desktop notification flow, `cmux.sdef` exposes AppleScript support, and Finder Services call back into the copied `openTab` and `openWindow` handlers.
+`zenbanApp` bootstraps copied cmux app delegate state, Ghostty resources, and socket defaults before SwiftUI renders. The terminal runtime now launches an app-scoped daemon plus a Ghostty bridge helper so visible terminals can detach while the shell keeps running inside the same app session. `TerminalNotificationStore` provides the desktop notification flow, `cmux.sdef` exposes AppleScript support, and Finder Services call back into the copied `openTab` and `openWindow` handlers.
 
 ## Keyboard Shortcuts
 
