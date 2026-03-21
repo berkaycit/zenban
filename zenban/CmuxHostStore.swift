@@ -28,6 +28,15 @@ final class CmuxHostStore {
         var lastObservedAgentActivityAt: Date?
     }
 
+    private struct PendingLaunchRequest {
+        let token: String
+        let command: String
+        let targetSignature: String
+        let shouldConsumePendingPrompt: Bool
+        var didSendVisibleNudge: Bool
+        var needsRequeue: Bool
+    }
+
     let tabManager: TabManager
     let notificationStore: TerminalNotificationStore
     let sidebarState = SidebarState()
@@ -40,18 +49,23 @@ final class CmuxHostStore {
     private var cardToBrowserWorkspaceID: [UUID: UUID] = [:]
     private var cardToBrowserPanelID: [UUID: UUID] = [:]
     private var launchSignatureByCardID: [UUID: String] = [:]
+    private var pendingLaunchByCardID: [UUID: PendingLaunchRequest] = [:]
     private var cachedClaudeSummaryByCardID: [UUID: String] = [:]
     private var workspaceRuntimeStateByID: [UUID: WorkspaceRuntimeState] = [:]
     private var workspaceStatusObservationGeneration: UInt64 = 0
+    private let zellijSessionManager = ZellijSessionManager.shared
 
     @ObservationIgnored private weak var boardStore: BoardStore?
     @ObservationIgnored private weak var registeredWindow: NSWindow?
     @ObservationIgnored private var launchTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var hiddenWorkspaceReclaimTask: Task<Void, Never>?
+    @ObservationIgnored private var hiddenWorkspaceDetachTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var workspaceStatusSubscriptions: [UUID: AnyCancellable] = [:]
     @ObservationIgnored private var didConfigureAppDelegate = false
     @ObservationIgnored private var hiddenWorkspaceReclaimTimeout: TimeInterval = 5 * 60
     @ObservationIgnored private var hiddenWorkspaceReclaimPollingInterval: Duration = .seconds(30)
+    @ObservationIgnored private var hiddenWorkspaceDetachDelay: Duration = .seconds(3)
+    @ObservationIgnored private var applicationWillTerminateObserver: NSObjectProtocol?
 #if DEBUG
     @ObservationIgnored private var launchCommandHandlerForTesting: ((UUID, String) -> Void)?
     @ObservationIgnored private var backgroundReclaimHandlerForTesting: ((UUID) -> Void)?
@@ -69,10 +83,23 @@ final class CmuxHostStore {
         notificationStore = TerminalNotificationStore.shared
         tabManager = TabManager()
         startHiddenWorkspaceReclaimLoop()
+        applicationWillTerminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleApplicationWillTerminate()
+            }
+        }
     }
 
     deinit {
         hiddenWorkspaceReclaimTask?.cancel()
+        hiddenWorkspaceDetachTasks.values.forEach { $0.cancel() }
+        if let applicationWillTerminateObserver {
+            NotificationCenter.default.removeObserver(applicationWillTerminateObserver)
+        }
     }
 
     func attach(boardStore: BoardStore) {
@@ -160,6 +187,7 @@ final class CmuxHostStore {
     func updateAgentLaunch(for card: Card, boardID: UUID) {
         guard let workspace = workspace(for: card.id) else {
             launchSignatureByCardID.removeValue(forKey: card.id)
+            pendingLaunchByCardID.removeValue(forKey: card.id)
             launchTasks[card.id]?.cancel()
             launchTasks.removeValue(forKey: card.id)
             return
@@ -167,10 +195,23 @@ final class CmuxHostStore {
 
         let agent = resolvedAgent(for: card, boardID: boardID)
         let signature = launchSignature(for: card, boardID: boardID, agent: agent)
-        guard launchSignatureByCardID[card.id] != signature else { return }
+        if launchSignatureByCardID[card.id] == signature {
+            if let pendingLaunch = pendingLaunchByCardID[card.id] {
+                if pendingLaunch.needsRequeue {
+                    queuePendingLaunchRequest(
+                        pendingLaunch,
+                        cardID: card.id,
+                        workspaceID: workspace.id
+                    )
+                }
+                resumePendingLaunchIfNeeded(cardID: card.id, workspaceID: workspace.id)
+            }
+            return
+        }
 
         launchSignatureByCardID[card.id] = signature
         launchTasks[card.id]?.cancel()
+        launchTasks.removeValue(forKey: card.id)
 
         let cardID = card.id
         let workspaceID = workspace.id
@@ -183,11 +224,33 @@ final class CmuxHostStore {
             pendingPrompt: nil
         )
 
+        if zellijSessionManager.isManagedWorkspace(workspaceID) {
+            let pendingLaunch = PendingLaunchRequest(
+                token: UUID().uuidString.lowercased(),
+                command: command,
+                targetSignature: postLaunchSignature,
+                shouldConsumePendingPrompt: normalizedPrompt != nil,
+                didSendVisibleNudge: false,
+                needsRequeue: true
+            )
+            pendingLaunchByCardID[cardID] = pendingLaunch
+            queuePendingLaunchRequest(
+                pendingLaunch,
+                cardID: cardID,
+                workspaceID: workspaceID
+            )
+            resumePendingLaunchIfNeeded(cardID: cardID, workspaceID: workspaceID)
+            return
+        }
+
         launchTasks[cardID] = Task { [weak self] in
             var consecutivePromptIdleObservations = 0
             var unknownShellStateSinceSurfaceReadyAt: Date?
             defer {
                 self?.launchTasks.removeValue(forKey: cardID)
+                if let workspaceID = self?.cardToWorkspaceID[cardID] {
+                    self?.updateHiddenWorkspaceDetachScheduling(for: workspaceID)
+                }
             }
 
             for _ in 0..<120 {
@@ -306,34 +369,58 @@ final class CmuxHostStore {
     }
 
     func removeWorkspace(for cardID: UUID) {
+#if DEBUG
+        debugLogWorkspaceMemory(
+            event: "zenban.workspace.remove.begin",
+            cardID: cardID,
+            workspaceID: cardToWorkspaceID[cardID],
+            extra: "reason=card_cleanup"
+        )
+#endif
         launchTasks[cardID]?.cancel()
         launchTasks.removeValue(forKey: cardID)
-        launchSignatureByCardID.removeValue(forKey: cardID)
+        if var pendingLaunch = pendingLaunchByCardID[cardID] {
+            pendingLaunch.needsRequeue = true
+            pendingLaunch.didSendVisibleNudge = false
+            pendingLaunchByCardID[cardID] = pendingLaunch
+        } else {
+            launchSignatureByCardID.removeValue(forKey: cardID)
+        }
         removeBrowserWorkspace(for: cardID)
 
-        let workspaceIDs = workspaceToCardID
+        let workspaceIDs = Set(workspaceToCardID
             .filter { $0.value == cardID }
-            .map(\.key)
+            .map(\.key))
 
         let activeWorkspaceID = cardToWorkspaceID.removeValue(forKey: cardID)
+        let allWorkspaceIDs = activeWorkspaceID.map { workspaceIDs.union([$0]) } ?? workspaceIDs
 
-        for workspaceID in workspaceIDs {
+        for workspaceID in allWorkspaceIDs {
+            cancelHiddenWorkspaceDetach(for: workspaceID)
+            zellijSessionManager.killSession(for: workspaceID)
             workspaceStatusSubscriptions.removeValue(forKey: workspaceID)
             workspaceToCardID.removeValue(forKey: workspaceID)
             workspaceToBoardID.removeValue(forKey: workspaceID)
             workspaceRuntimeStateByID.removeValue(forKey: workspaceID)
         }
 
-        guard let activeWorkspaceID else {
-            return
+        for workspaceID in allWorkspaceIDs {
+            guard let workspace = workspace(forID: workspaceID) else { continue }
+            if let owningManager = workspace.owningTabManager
+                ?? AppDelegate.shared?.tabManagerFor(tabId: workspace.id) {
+                owningManager.closeWorkspace(workspace)
+            } else {
+                workspace.teardownAllPanels()
+            }
         }
-        guard let workspace = workspace(forID: activeWorkspaceID) else { return }
-        if let owningManager = workspace.owningTabManager
-            ?? AppDelegate.shared?.tabManagerFor(tabId: workspace.id) {
-            owningManager.closeWorkspace(workspace)
-        } else {
-            workspace.teardownAllPanels()
-        }
+#if DEBUG
+        debugLogWorkspaceMemory(
+            event: "zenban.workspace.remove.end",
+            cardID: cardID,
+            workspaceID: nil,
+            extra: "removedCount=\(allWorkspaceIDs.count)"
+        )
+#endif
     }
 
     func forgetCardRuntimeState(for cardID: UUID) {
@@ -372,6 +459,15 @@ final class CmuxHostStore {
                 )
             }
         }
+        appDelegate.zenbanLaunchRequestStartedHandler = { [weak self] workspaceID, panelID, token in
+            Task { @MainActor [weak self] in
+                self?.handleLaunchRequestStarted(
+                    workspaceID: workspaceID,
+                    panelID: panelID,
+                    token: token
+                )
+            }
+        }
         didConfigureAppDelegate = true
     }
 
@@ -400,10 +496,187 @@ final class CmuxHostStore {
         boardStore.updateCardLastSubmittedPrompt(cardID, prompt: prompt, in: boardID)
     }
 
+    private func handleLaunchRequestStarted(workspaceID: UUID, panelID: UUID, token: String) {
+        guard let cardID = workspaceToCardID[workspaceID],
+              let pendingLaunch = pendingLaunchByCardID[cardID],
+              pendingLaunch.token == token else {
+            return
+        }
+
+        guard let expectedPanelID = zellijSessionManager.sessionPanelId(for: workspaceID),
+              expectedPanelID == panelID else {
+            return
+        }
+
+        pendingLaunchByCardID.removeValue(forKey: cardID)
+        recordWorkspaceAgentActivity(workspaceID)
+        launchSignatureByCardID[cardID] = pendingLaunch.targetSignature
+        if pendingLaunch.shouldConsumePendingPrompt,
+           let boardID = workspaceToBoardID[workspaceID] {
+            boardStore?.consumePendingLaunchPrompt(cardID, in: boardID)
+        }
+#if DEBUG
+        debugLogLaunchRequest(
+            event: "launch.request.acked",
+            cardID: cardID,
+            workspaceID: workspaceID,
+            token: pendingLaunch.token,
+            extra: "panel=\(String(panelID.uuidString.prefix(5)))"
+        )
+#endif
+    }
+
+    private func queuePendingLaunchRequest(
+        _ pendingLaunch: PendingLaunchRequest,
+        cardID: UUID,
+        workspaceID: UUID
+    ) {
+        do {
+            try zellijSessionManager.queueLaunchRequest(
+                for: workspaceID,
+                token: pendingLaunch.token,
+                command: pendingLaunch.command
+            )
+#if DEBUG
+            debugLogLaunchRequest(
+                event: "launch.request.enqueued",
+                cardID: cardID,
+                workspaceID: workspaceID,
+                token: pendingLaunch.token,
+                extra: "command=\(resolvedAgent(forCardID: cardID)?.runtimeID ?? "unknown")"
+            )
+#endif
+            if var storedPendingLaunch = pendingLaunchByCardID[cardID],
+               storedPendingLaunch.token == pendingLaunch.token {
+                storedPendingLaunch.needsRequeue = false
+                pendingLaunchByCardID[cardID] = storedPendingLaunch
+            }
+#if DEBUG
+            launchCommandHandlerForTesting?(cardID, pendingLaunch.command)
+#endif
+        } catch {
+            pendingLaunchByCardID.removeValue(forKey: cardID)
+            launchSignatureByCardID.removeValue(forKey: cardID)
+            NSLog(
+                "Failed to queue zellij launch request for workspace %@: %@",
+                workspaceID.uuidString,
+                String(describing: error)
+            )
+        }
+    }
+
+    private func resumePendingLaunchIfNeeded(cardID: UUID, workspaceID: UUID) {
+        guard pendingLaunchByCardID[cardID] != nil else { return }
+        guard launchTasks[cardID] == nil else { return }
+
+        launchTasks[cardID] = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.launchTasks.removeValue(forKey: cardID)
+                self.updateHiddenWorkspaceDetachScheduling(for: workspaceID)
+            }
+
+#if DEBUG
+            if self.launchCommandHandlerForTesting != nil {
+                return
+            }
+#endif
+
+            let shouldRecreateBackgroundSession =
+                self.workspaceRuntimeStateByID[workspaceID]?.residency == .backgroundPrewarmOnly
+                && !(self.workspace(forID: workspaceID)?.hasLoadedTerminalSurface() ?? false)
+            if shouldRecreateBackgroundSession {
+                self.zellijSessionManager.killRuntime(for: workspaceID)
+            }
+
+            if shouldRecreateBackgroundSession || !(self.workspace(forID: workspaceID)?.hasLoadedTerminalSurface() ?? false) {
+                do {
+                    try await self.zellijSessionManager.prepareBackgroundSession(workspaceId: workspaceID)
+                } catch {
+                    NSLog(
+                        "Failed to prepare zellij background session for workspace %@: %@",
+                        workspaceID.uuidString,
+                        String(describing: error)
+                    )
+                    self.pendingLaunchByCardID.removeValue(forKey: cardID)
+                    self.launchSignatureByCardID.removeValue(forKey: cardID)
+                    return
+                }
+            }
+
+            for _ in 0..<120 {
+                guard !Task.isCancelled else { return }
+                guard let pendingLaunch = self.pendingLaunchByCardID[cardID],
+                      let workspace = self.workspace(for: cardID),
+                      workspace.id == workspaceID else {
+                    return
+                }
+
+                if workspaceRuntimeStateByID[workspaceID]?.residency == .backgroundPrewarmOnly,
+                   !workspace.hasLoadedTerminalSurface() {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    continue
+                }
+
+                self.requestBackgroundWorkspaceLoad(for: workspace)
+
+                guard let terminalPanel = self.launchTerminalPanel(in: workspace),
+                      self.isTerminalReadyForLaunch(terminalPanel) else {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    continue
+                }
+
+                let shellActivityState = workspace.panelShellActivityState(panelId: terminalPanel.id)
+                if shellActivityState == .promptIdle, !pendingLaunch.didSendVisibleNudge {
+                    var updatedLaunch = pendingLaunch
+                    updatedLaunch.didSendVisibleNudge = true
+                    self.pendingLaunchByCardID[cardID] = updatedLaunch
+                    terminalPanel.sendText("\n")
+#if DEBUG
+                    self.debugLogLaunchRequest(
+                        event: "launch.request.nudged",
+                        cardID: cardID,
+                        workspaceID: workspaceID,
+                        token: pendingLaunch.token,
+                        extra: "shellState=promptIdle"
+                    )
+#endif
+                }
+
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+
+            guard let pendingLaunch = self.pendingLaunchByCardID[cardID] else { return }
+#if DEBUG
+            self.debugLogLaunchRequest(
+                event: "launch.request.still_pending",
+                cardID: cardID,
+                workspaceID: workspaceID,
+                token: pendingLaunch.token,
+                extra: "nudged=\(pendingLaunch.didSendVisibleNudge ? 1 : 0)"
+            )
+#endif
+        }
+    }
+
     private func updateSelectedCardContext(card: Card?, boardID: UUID?) {
         let nextContext = card.flatMap { card in
             boardID.map { SelectedCardContext(cardID: card.id, boardID: $0) }
         }
+
+#if DEBUG
+        debugLogWorkspaceMemory(
+            event: "zenban.card.transition",
+            cardID: nextContext?.cardID,
+            workspaceID: nextContext.flatMap { cardToWorkspaceID[$0.cardID] },
+            extra: [
+                "fromCard=\(debugShortCardId(selectedCardContext?.cardID))",
+                "fromWorkspace=\(debugShortWorkspaceId(selectedCardContext?.cardID))",
+                "toCard=\(debugShortCardId(nextContext?.cardID))",
+                "toWorkspace=\(debugShortWorkspaceId(nextContext?.cardID))",
+            ].joined(separator: " ")
+        )
+#endif
 
         if let previousContext = selectedCardContext,
            previousContext != nextContext,
@@ -427,7 +700,18 @@ final class CmuxHostStore {
         guard canCreateWorkspace(for: card, boardID: boardID) else { return }
 
         let workspace = ensureWorkspace(for: card, boardID: boardID)
-        requestBackgroundWorkspaceLoad(for: workspace)
+#if DEBUG
+        debugLogWorkspaceMemory(
+            event: "zenban.workspace.launch",
+            cardID: card.id,
+            workspaceID: workspace.id,
+            extra: "mode=\(debugLaunchModeName(mode)) column=\(card.column.rawValue)"
+        )
+#endif
+        requestBackgroundWorkspaceLoad(
+            for: workspace,
+            allowTerminalSurfaceCreation: mode != .backgroundPrewarm
+        )
         if mode != .backgroundPrewarm {
             selectWorkspace(workspace)
         }
@@ -451,6 +735,7 @@ final class CmuxHostStore {
                 )
             }
             workspace.setCustomTitle(card.title)
+            configureWorkspaceTerminalSession(workspace, card: card, boardID: boardID)
             observeWorkspaceStatus(in: workspace)
             return workspace
         }
@@ -458,7 +743,7 @@ final class CmuxHostStore {
         let workspace = tabManager.addWorkspace(
             workingDirectory: workingDirectory(for: card, boardID: boardID),
             select: false,
-            eagerLoadTerminal: true,
+            eagerLoadTerminal: false,
             autoWelcomeIfNeeded: false
         )
         workspace.setCustomTitle(card.title)
@@ -471,6 +756,7 @@ final class CmuxHostStore {
             hiddenSince: nil,
             lastObservedAgentActivityAt: nil
         )
+        configureWorkspaceTerminalSession(workspace, card: card, boardID: boardID)
         observeWorkspaceStatus(in: workspace)
 
         return workspace
@@ -617,6 +903,11 @@ final class CmuxHostStore {
     }
 
     private func launchTerminalPanel(in workspace: Workspace) -> TerminalPanel? {
+        if let sessionPanelID = zellijSessionManager.sessionPanelId(for: workspace.id),
+           let terminalPanel = workspace.panels[sessionPanelID] as? TerminalPanel {
+            return terminalPanel
+        }
+
         if let focusedTerminalPanel = workspace.focusedTerminalPanel {
             return focusedTerminalPanel
         }
@@ -627,13 +918,18 @@ final class CmuxHostStore {
             .first
     }
 
-    private func requestBackgroundWorkspaceLoad(for workspace: Workspace) {
+    private func requestBackgroundWorkspaceLoad(
+        for workspace: Workspace,
+        allowTerminalSurfaceCreation: Bool = true
+    ) {
 #if DEBUG
         if launchCommandHandlerForTesting != nil {
             return
         }
 #endif
-        workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
+        if allowTerminalSurfaceCreation {
+            workspace.requestBackgroundTerminalSurfaceStartIfNeeded()
+        }
         owningTabManager(for: workspace).requestBackgroundWorkspaceLoad(for: workspace.id)
     }
 
@@ -768,10 +1064,19 @@ final class CmuxHostStore {
 
     private func selectWorkspace(_ workspace: Workspace) {
         owningTabManager(for: workspace).selectedTabId = workspace.id
+        cancelHiddenWorkspaceDetach(for: workspace.id)
         if workspaceToCardID[workspace.id] != nil {
             setWorkspaceResidency(.interactive, for: workspace.id)
         }
         refreshWorkspaceHiddenState()
+#if DEBUG
+        debugLogWorkspaceMemory(
+            event: "zenban.workspace.select",
+            cardID: workspaceToCardID[workspace.id],
+            workspaceID: workspace.id,
+            extra: "selected=1"
+        )
+#endif
     }
 
     private func startHiddenWorkspaceReclaimLoop() {
@@ -799,6 +1104,21 @@ final class CmuxHostStore {
             runtimeState.hiddenSince = now
         }
         workspaceRuntimeStateByID[workspaceID] = runtimeState
+#if DEBUG
+        let hiddenForMs: String
+        if let hiddenSince = runtimeState.hiddenSince {
+            hiddenForMs = String(format: "%.0f", max(0, now.timeIntervalSince(hiddenSince) * 1000))
+        } else {
+            hiddenForMs = "0"
+        }
+        debugLogWorkspaceMemory(
+            event: "zenban.workspace.residency",
+            cardID: workspaceToCardID[workspaceID],
+            workspaceID: workspaceID,
+            extra: "state=\(debugResidencyName(residency)) hiddenForMs=\(hiddenForMs)"
+        )
+#endif
+        updateHiddenWorkspaceDetachScheduling(for: workspaceID)
     }
 
     private func recordWorkspaceAgentActivity(_ workspaceID: UUID, at date: Date = Date()) {
@@ -824,6 +1144,7 @@ final class CmuxHostStore {
                 runtimeState.hiddenSince = now
             }
             workspaceRuntimeStateByID[workspaceID] = runtimeState
+            updateHiddenWorkspaceDetachScheduling(for: workspaceID)
         }
     }
 
@@ -865,24 +1186,168 @@ final class CmuxHostStore {
             }
 #endif
 
-            guard workspace.hasLoadedTerminalSurface() else { continue }
+            if !zellijSessionManager.isManagedWorkspace(workspaceID),
+               !workspace.hasLoadedTerminalSurface() {
+                continue
+            }
             reclaimWorkspaceRuntime(workspace, cardID: cardID)
         }
     }
 
     private func reclaimWorkspaceRuntime(_ workspace: Workspace, cardID: UUID) {
+#if DEBUG
+        debugLogWorkspaceMemory(
+            event: "zenban.workspace.reclaim.begin",
+            cardID: cardID,
+            workspaceID: workspace.id,
+            extra: "reason=background_reclaim"
+        )
+#endif
         launchTasks[cardID]?.cancel()
         launchTasks.removeValue(forKey: cardID)
         launchSignatureByCardID.removeValue(forKey: cardID)
+        cancelHiddenWorkspaceDetach(for: workspace.id)
 #if DEBUG
         if let backgroundReclaimHandlerForTesting {
             backgroundReclaimHandlerForTesting(cardID)
             return
         }
 #endif
+        if zellijSessionManager.isManagedWorkspace(workspace.id) {
+            zellijSessionManager.killRuntime(for: workspace.id)
+        }
+        detachWorkspaceRuntime(workspace, reason: "background_reclaim")
+    }
+
+    private func configureWorkspaceTerminalSession(_ workspace: Workspace, card: Card, boardID: UUID) {
+        guard let terminalPanel = launchTerminalPanel(in: workspace) else {
+            fatalError("Workspace \(workspace.id) is missing a terminal panel for card \(card.id).")
+        }
+
+        zellijSessionManager.registerWorkspace(
+            workspaceId: workspace.id,
+            panelId: terminalPanel.id,
+            portOrdinal: terminalPanel.surface.portOrdinal,
+            workingDirectory: workingDirectory(for: card, boardID: boardID)
+        )
+
+        do {
+            workspace.configureTerminalStartup(
+                command: try zellijSessionManager.attachCommand(for: workspace.id),
+                environment: try zellijSessionManager.startupEnvironment(for: workspace.id)
+            )
+        } catch {
+            fatalError(error.localizedDescription)
+        }
+    }
+
+    private func cancelHiddenWorkspaceDetach(for workspaceID: UUID) {
+        let hadTask = hiddenWorkspaceDetachTasks[workspaceID] != nil
+        hiddenWorkspaceDetachTasks[workspaceID]?.cancel()
+        hiddenWorkspaceDetachTasks.removeValue(forKey: workspaceID)
+#if DEBUG
+        if hadTask {
+            debugLogWorkspaceMemory(
+                event: "zenban.workspace.detach.canceled",
+                cardID: workspaceToCardID[workspaceID],
+                workspaceID: workspaceID,
+                extra: "reason=visibility_or_cleanup"
+            )
+        }
+#endif
+    }
+
+    private func updateHiddenWorkspaceDetachScheduling(for workspaceID: UUID) {
+        guard zellijSessionManager.isManagedWorkspace(workspaceID),
+              let runtimeState = workspaceRuntimeStateByID[workspaceID],
+              runtimeState.hiddenSince != nil,
+              !isWorkspaceSelected(workspaceID),
+              let workspace = workspace(forID: workspaceID),
+              workspace.hasLoadedTerminalSurface() else {
+            cancelHiddenWorkspaceDetach(for: workspaceID)
+            return
+        }
+
+        if hiddenWorkspaceDetachTasks[workspaceID] == nil {
+            scheduleHiddenWorkspaceDetach(for: workspaceID)
+        }
+    }
+
+    private func scheduleHiddenWorkspaceDetach(for workspaceID: UUID) {
+        cancelHiddenWorkspaceDetach(for: workspaceID)
+#if DEBUG
+        let hiddenForMs: String = {
+            guard let hiddenSince = workspaceRuntimeStateByID[workspaceID]?.hiddenSince else { return "0" }
+            return String(format: "%.0f", max(0, Date().timeIntervalSince(hiddenSince) * 1000))
+        }()
+        debugLogWorkspaceMemory(
+            event: "zenban.workspace.detach.scheduled",
+            cardID: workspaceToCardID[workspaceID],
+            workspaceID: workspaceID,
+            extra: "delayMs=3000 hiddenForMs=\(hiddenForMs)"
+        )
+#endif
+        hiddenWorkspaceDetachTasks[workspaceID] = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: self.hiddenWorkspaceDetachDelay)
+            guard !Task.isCancelled else { return }
+
+            self.hiddenWorkspaceDetachTasks.removeValue(forKey: workspaceID)
+
+            guard self.zellijSessionManager.isManagedWorkspace(workspaceID),
+                  let runtimeState = self.workspaceRuntimeStateByID[workspaceID],
+                  runtimeState.hiddenSince != nil,
+                  !self.isWorkspaceSelected(workspaceID),
+                  let workspace = self.workspace(forID: workspaceID),
+                  workspace.hasLoadedTerminalSurface() else {
+                return
+            }
+
+            if let cardID = self.workspaceToCardID[workspaceID],
+               self.launchTasks[cardID] != nil {
+                self.scheduleHiddenWorkspaceDetach(for: workspaceID)
+                return
+            }
+
+            self.detachWorkspaceRuntime(workspace, reason: "hidden_switch")
+        }
+    }
+
+    private func detachWorkspaceRuntime(_ workspace: Workspace, reason: String) {
+#if DEBUG
+        let hiddenForMs: String = {
+            guard let hiddenSince = workspaceRuntimeStateByID[workspace.id]?.hiddenSince else { return "0" }
+            return String(format: "%.0f", max(0, Date().timeIntervalSince(hiddenSince) * 1000))
+        }()
+        debugLogWorkspaceMemory(
+            event: "zenban.workspace.detach.begin",
+            cardID: workspaceToCardID[workspace.id],
+            workspaceID: workspace.id,
+            extra: "reason=\(reason) hiddenForMs=\(hiddenForMs)"
+        )
+#endif
         for terminalPanel in workspace.panels.values.compactMap({ $0 as? TerminalPanel }) {
             terminalPanel.releaseRuntimeSurfaceForBackgroundReclaim()
         }
+#if DEBUG
+        debugLogWorkspaceMemory(
+            event: "zenban.workspace.detach.end",
+            cardID: workspaceToCardID[workspace.id],
+            workspaceID: workspace.id,
+            extra: "reason=\(reason)"
+        )
+#endif
+    }
+
+    private func handleApplicationWillTerminate() {
+        launchTasks.values.forEach { $0.cancel() }
+        launchTasks.removeAll(keepingCapacity: false)
+        hiddenWorkspaceDetachTasks.values.forEach { $0.cancel() }
+        hiddenWorkspaceDetachTasks.removeAll(keepingCapacity: false)
+        hiddenWorkspaceReclaimTask?.cancel()
+        pendingLaunchByCardID.removeAll(keepingCapacity: false)
+        launchSignatureByCardID.removeAll(keepingCapacity: false)
+        zellijSessionManager.killAllSessions()
     }
 }
 
@@ -939,12 +1404,114 @@ extension CmuxHostStore {
         launchTasks.removeValue(forKey: cardID)
     }
 
+    @discardableResult
+    func acknowledgePendingLaunchForTesting(cardID: UUID) -> Bool {
+        guard let workspaceID = cardToWorkspaceID[cardID],
+              let panelID = zellijSessionManager.sessionPanelId(for: workspaceID),
+              let pendingLaunch = pendingLaunchByCardID[cardID] else {
+            return false
+        }
+        handleLaunchRequestStarted(
+            workspaceID: workspaceID,
+            panelID: panelID,
+            token: pendingLaunch.token
+        )
+        return pendingLaunchByCardID[cardID] == nil
+    }
+
     func setHiddenWorkspaceReclaimTimeoutForTesting(_ timeout: TimeInterval) {
         hiddenWorkspaceReclaimTimeout = timeout
     }
 
     func evaluateHiddenWorkspaceReclaimForTesting(now: Date = Date()) {
         evaluateHiddenWorkspaceReclaim(now: now)
+    }
+
+    private func debugLogWorkspaceMemory(
+        event: String,
+        cardID: UUID?,
+        workspaceID: UUID?,
+        extra: String
+    ) {
+        let loadedSurfaceCount = workspaceToCardID.keys.reduce(into: 0) { count, candidateWorkspaceID in
+            guard let workspace = workspace(forID: candidateWorkspaceID),
+                  workspace.hasLoadedTerminalSurface() else { return }
+            count += 1
+        }
+        let managedSessionCount = workspaceToCardID.keys.reduce(into: 0) { count, candidateWorkspaceID in
+            if zellijSessionManager.isManagedWorkspace(candidateWorkspaceID) {
+                count += 1
+            }
+        }
+        var suffix = [
+            "card=\(debugShortCardId(cardID))",
+            "loadedSurfaces=\(loadedSurfaceCount)",
+            "managedSessions=\(managedSessionCount)",
+        ]
+        if !extra.isEmpty {
+            suffix.append(extra)
+        }
+        DebugProcessMemory.log(
+            event,
+            workspaceId: workspaceID,
+            panelId: workspaceID.flatMap { zellijSessionManager.sessionPanelId(for: $0) },
+            extra: suffix.joined(separator: " ")
+        )
+    }
+
+    private func debugLogLaunchRequest(
+        event: String,
+        cardID: UUID,
+        workspaceID: UUID,
+        token: String,
+        extra: String
+    ) {
+        var suffix = [
+            "card=\(debugShortCardId(cardID))",
+            "token=\(String(token.prefix(8)))",
+        ]
+        if !extra.isEmpty {
+            suffix.append(extra)
+        }
+        debugLogWorkspaceMemory(
+            event: event,
+            cardID: cardID,
+            workspaceID: workspaceID,
+            extra: suffix.joined(separator: " ")
+        )
+    }
+
+    private func debugShortCardId(_ cardID: UUID?) -> String {
+        guard let cardID else { return "nil" }
+        return String(cardID.uuidString.prefix(5))
+    }
+
+    private func debugShortWorkspaceId(_ cardID: UUID?) -> String {
+        guard let cardID,
+              let workspaceID = cardToWorkspaceID[cardID] else {
+            return "nil"
+        }
+        return String(workspaceID.uuidString.prefix(5))
+    }
+
+    private func debugResidencyName(_ residency: WorkspaceResidency) -> String {
+        switch residency {
+        case .interactive:
+            return "interactive"
+        case .backgroundPrewarmOnly:
+            return "backgroundPrewarmOnly"
+        }
+    }
+
+    private func debugLaunchModeName(_ mode: WorkspaceLaunchMode) -> String {
+        switch mode {
+        case .selectionSync:
+            return "selectionSync"
+        case .interactiveOpen:
+            return "interactiveOpen"
+        case .backgroundPrewarm:
+            return "backgroundPrewarm"
+        }
     }
 }
 #endif

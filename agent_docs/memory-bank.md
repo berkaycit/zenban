@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Queue Claude launch until shell ack
+- **Description**: Claude launch delivery now writes a tokenized Zellij request file and waits for a shell-side `launch_request_started` acknowledgement before Zenban finalizes launch state. Visible cards nudge the prompt with a newline instead of injecting the full Claude command through Ghostty, and pending launches survive workspace recreation until they are acknowledged. Shell integration, host-store state, and launch regression tests were updated together so the post-Zellij race no longer drops Claude starts silently.
+
+- **Summary**: Back card terminals with bundled Zellij sessions
+- **Description**: Card workspaces now launch their shell inside a bundled Zellij session while Ghostty acts as the visible renderer. Hidden cards release their Ghostty runtime surface after a short delay but keep shells, agents, and targeted notifications alive through the preserved session. `Done` cards still stay closed by default, reopen on demand, and tear their session back down when the user leaves the card.
+
 - **Summary**: Simplify preview shortcuts and dev server cleanup
 - **Description**: Preview shortcut routing now stays in one Zenban override that reuses the copied cmux browser APIs and treats `Cmd+Shift+C` as a focused-preview toggle instead of a one-way console opener. `DevServerManager` dropped the root-PID tree cleanup model in favor of persisted app-owned process groups, which makes quit-time cleanup and next-launch orphan reaping smaller and easier to reason about. Shortcut copy and dev server docs were updated to match the new behavior.
 

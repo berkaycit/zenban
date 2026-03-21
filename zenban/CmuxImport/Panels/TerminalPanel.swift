@@ -89,6 +89,8 @@ final class TerminalPanel: Panel, ObservableObject {
         configTemplate: ghostty_surface_config_s? = nil,
         workingDirectory: String? = nil,
         additionalEnvironment: [String: String] = [:],
+        startupEnvironment: [String: String] = [:],
+        startupCommand: String? = nil,
         portOrdinal: Int = 0
     ) {
         let surface = TerminalSurface(
@@ -96,7 +98,9 @@ final class TerminalPanel: Panel, ObservableObject {
             context: context,
             configTemplate: configTemplate,
             workingDirectory: workingDirectory,
-            additionalEnvironment: additionalEnvironment
+            additionalEnvironment: additionalEnvironment,
+            startupEnvironment: startupEnvironment,
+            startupCommand: startupCommand
         )
         surface.portOrdinal = portOrdinal
         self.init(workspaceId: workspaceId, surface: surface)
@@ -119,6 +123,14 @@ final class TerminalPanel: Panel, ObservableObject {
     func updateWorkspaceId(_ newWorkspaceId: UUID) {
         workspaceId = newWorkspaceId
         surface.updateWorkspaceId(newWorkspaceId)
+    }
+
+    func updateStartupCommand(_ command: String?) {
+        surface.updateStartupCommand(command)
+    }
+
+    func updateStartupEnvironment(_ environment: [String: String]) {
+        surface.updateStartupEnvironment(environment)
     }
 
     func focus() {

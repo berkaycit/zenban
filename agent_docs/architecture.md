@@ -6,7 +6,7 @@
 - `zenban/Storage`: JSON persistence
 - `zenban/ViewModels`: `@Observable` app state
 - `zenban/Views`: sidebar, board, card, git, dev server, settings, shared components
-- `zenban/Services`: git, AI, dev server, dependency, and process helpers
+- `zenban/Services`: git, AI, dev server, dependency, process helpers, and Zellij session management
 - `zenban/CmuxImport`: copied cmux Swift host layer, panels, browser, notifications, and AppleScript support
 - `zenban/CmuxHostStore.swift`: Zenban adapter that maps cards 1:1 onto cmux workspaces
 - `cmux-import/`: copied cmux CLI, Ghostty runtime, bonsplit package, and bundled assets
@@ -23,7 +23,8 @@
 
 - `BoardStore`: Central state manager for boards, cards, overlays, worktrees, and dev server configuration.
 - `BoardStorage`: JSON persistence under Application Support.
-- `CmuxHostStore`: Card-scoped workspace registry, agent auto-launch bridge, browser surface management, and notification-to-card routing.
+- `CmuxHostStore`: Card-scoped workspace registry, Ghostty/Zellij residency control, agent auto-launch bridge, browser surface management, and notification-to-card routing.
+- `ZellijSessionManager`: Bundles and owns per-workspace Zellij sessions, attach scripts, config isolation, and quit-time cleanup.
 - `GitService`: libgit2-backed repository, worktree, diff, commit, push, merge, and PR helpers.
 - `DevServerManager`: Runs setup and dev commands, buffers output, detects ready URLs, and owns process lifecycle.
 - `DependencyCheckService`: Checks and installs optional developer tools.
@@ -41,7 +42,7 @@ For git-backed boards, each card gets its own worktree at `../repo-worktrees/` o
 
 ## Card Detail
 
-The detail pane shows card metadata, column controls, agent selection, and worktree status above an embedded cmux `WorkspaceContentView`. `To Do` and `In Review` cards still lazily create a workspace from the card worktree or board repository path, while `Done` cards keep that workspace closed until the user explicitly reopens it from the detail CTA.
+The detail pane shows card metadata, column controls, agent selection, and worktree status above an embedded cmux `WorkspaceContentView`. `To Do` and `In Review` cards lazily create a workspace from the card worktree or board repository path, but the live shell now runs inside a bundled Zellij session while Ghostty stays a visible renderer only when the card is mounted. Agent auto-launch is now a workspace-scoped launch-request queue owned by `CmuxHostStore` and `ZellijSessionManager`: the app writes a tokenized request file, shell prompt hooks inside the Zellij pane claim it, acknowledge `launch_request_started`, and only then does Zenban finalize launch state or consume any pending Claude prompt. Hidden interactive cards drop their Ghostty runtime surface after a short delay without killing the Zellij session, and `Done` cards keep that workspace closed until the user explicitly reopens it from the detail CTA.
 
 ## Dev Server
 
@@ -49,7 +50,7 @@ Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup
 
 ## Notifications And Scripting
 
-`zenbanApp` bootstraps copied cmux app delegate state, Ghostty resources, and socket defaults before SwiftUI renders. `TerminalNotificationStore` provides the desktop notification flow, `cmux.sdef` exposes AppleScript support, and Finder Services call back into the copied `openTab` and `openWindow` handlers.
+`zenbanApp` bootstraps copied cmux app delegate state, Ghostty resources, bundled Zellij resources, and socket defaults before SwiftUI renders. `TerminalNotificationStore` still owns the desktop notification flow, and card routing continues to work even when a card terminal is detached because cmux-targeted notifications and Claude hooks do not depend on a mounted Ghostty surface. `cmux.sdef` exposes AppleScript support, and Finder Services call back into the copied `openTab` and `openWindow` handlers.
 
 ## Keyboard Shortcuts
 

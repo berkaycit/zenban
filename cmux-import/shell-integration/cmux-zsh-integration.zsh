@@ -58,6 +58,8 @@ typeset -g _CMUX_CMD_START=0
 typeset -g _CMUX_SHELL_ACTIVITY_LAST=""
 typeset -g _CMUX_TTY_NAME=""
 typeset -g _CMUX_TTY_REPORTED=0
+typeset -g _CMUX_ZELLIJ_LAUNCH_TOKEN=""
+typeset -g _CMUX_ZELLIJ_LAUNCH_COMMAND=""
 
 _cmux_git_resolve_head_path() {
     # Resolve the HEAD file path without invoking git (fast; works for worktrees).
@@ -122,6 +124,51 @@ _cmux_report_shell_activity_state() {
     {
         _cmux_send "report_shell_state $state --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
     } >/dev/null 2>&1 &!
+}
+
+_cmux_consume_zellij_launch_request() {
+    local launch_file="${CMUX_ZELLIJ_LAUNCH_FILE:-}"
+    [[ -n "$launch_file" ]] || return 1
+    [[ -r "$launch_file" ]] || return 1
+
+    local claimed_file="${launch_file}.claimed.$$"
+    mv "$launch_file" "$claimed_file" >/dev/null 2>&1 || return 1
+
+    local token=""
+    local launch_command=""
+    if IFS= read -r token < "$claimed_file"; then
+        launch_command="$(sed -n '2p' "$claimed_file" 2>/dev/null || true)"
+    fi
+
+    rm -f "$claimed_file" >/dev/null 2>&1 || true
+
+    if [[ -z "$launch_command" ]]; then
+        launch_command="$token"
+        token=""
+    fi
+    [[ -n "$launch_command" ]] || return 1
+
+    if [[ -z "$token" ]]; then
+        token="legacy-$$-${EPOCHSECONDS:-0}"
+    fi
+
+    _CMUX_ZELLIJ_LAUNCH_TOKEN="$token"
+    _CMUX_ZELLIJ_LAUNCH_COMMAND="$launch_command"
+
+    if [[ -S "$CMUX_SOCKET_PATH" ]] && [[ -n "$CMUX_TAB_ID" ]] && [[ -n "$CMUX_PANEL_ID" ]]; then
+        _cmux_send "launch_request_started $token --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+    fi
+
+    _CMUX_CMD_START=$EPOCHSECONDS
+    _cmux_report_shell_activity_state running
+    _cmux_report_tty_once
+    _cmux_ports_kick
+    _cmux_stop_git_head_watch
+    _cmux_stop_pr_poll_loop
+    _cmux_start_git_head_watch
+
+    eval "$launch_command"
+    return 0
 }
 
 _cmux_ports_kick() {
@@ -393,6 +440,10 @@ _cmux_preexec() {
 }
 
 _cmux_precmd() {
+    if _cmux_consume_zellij_launch_request; then
+        return 0
+    fi
+
     _cmux_stop_git_head_watch
 
     # Skip if socket doesn't exist yet

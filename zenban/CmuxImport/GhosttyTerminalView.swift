@@ -1720,7 +1720,7 @@ class GhosttyApp {
         return enabled
     }
 
-    fileprivate func shellIntegrationMode() -> String {
+    func shellIntegrationMode() -> String {
         guard let config else { return "detect" }
         var value: UnsafePointer<Int8>?
         let key = "shell-integration"
@@ -2522,20 +2522,15 @@ final class TerminalSurface: Identifiable, ObservableObject {
     private(set) var tabId: UUID
     /// Port ordinal for CMUX_PORT range assignment
     var portOrdinal: Int = 0
-    /// Snapshotted once per app session so all workspaces use consistent values
-    private static let sessionPortBase: Int = {
-        let val = UserDefaults.standard.integer(forKey: "cmuxPortBase")
-        return val > 0 ? val : 9100
-    }()
-    private static let sessionPortRangeSize: Int = {
-        let val = UserDefaults.standard.integer(forKey: "cmuxPortRange")
-        return val > 0 ? val : 10
-    }()
     private let surfaceContext: ghostty_surface_context_e
     private let configTemplate: ghostty_surface_config_s?
     private let workingDirectory: String?
     var requestedWorkingDirectory: String? { workingDirectory }
     private var additionalEnvironment: [String: String]
+    private var startupEnvironment: [String: String]
+    private var startupCommand: String?
+    private var startupCommandStorage: UnsafeMutablePointer<CChar>?
+    private var workingDirectoryStorage: UnsafeMutablePointer<CChar>?
     let hostedView: GhosttySurfaceScrollView
     private let surfaceView: GhosttyNSView
     private var lastPixelWidth: UInt32 = 0
@@ -2606,7 +2601,9 @@ final class TerminalSurface: Identifiable, ObservableObject {
         context: ghostty_surface_context_e,
         configTemplate: ghostty_surface_config_s?,
         workingDirectory: String? = nil,
-        additionalEnvironment: [String: String] = [:]
+        additionalEnvironment: [String: String] = [:],
+        startupEnvironment: [String: String] = [:],
+        startupCommand: String? = nil
     ) {
         self.id = UUID()
         self.tabId = tabId
@@ -2614,6 +2611,8 @@ final class TerminalSurface: Identifiable, ObservableObject {
         self.configTemplate = configTemplate
         self.workingDirectory = workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.additionalEnvironment = additionalEnvironment
+        self.startupEnvironment = startupEnvironment
+        self.startupCommand = startupCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
         // Match Ghostty's own SurfaceView: ensure a non-zero initial frame so the backing layer
         // has non-zero bounds and the renderer can initialize without presenting a blank/stretched
         // intermediate frame on the first real resize.
@@ -2629,6 +2628,31 @@ final class TerminalSurface: Identifiable, ObservableObject {
         tabId = newTabId
         attachedView?.tabId = newTabId
         surfaceView.tabId = newTabId
+    }
+
+    func updateStartupCommand(_ command: String?) {
+        startupCommand = command?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func updateStartupEnvironment(_ environment: [String: String]) {
+        startupEnvironment = environment
+    }
+
+    private func replaceConfigStringStorage(
+        _ storage: inout UnsafeMutablePointer<CChar>?,
+        with value: String?
+    ) {
+        if let existingStorage = storage {
+            free(existingStorage)
+            storage = nil
+        }
+        guard let value, !value.isEmpty else { return }
+        storage = strdup(value)
+    }
+
+    private func releaseSurfaceConfigStorage() {
+        replaceConfigStringStorage(&startupCommandStorage, with: nil)
+        replaceConfigStringStorage(&workingDirectoryStorage, with: nil)
     }
 
     func isAttached(to view: GhosttyNSView) -> Bool {
@@ -2786,6 +2810,14 @@ final class TerminalSurface: Identifiable, ObservableObject {
         let surfaceToFree = surface
         surface = nil
 
+#if DEBUG
+        DebugProcessMemory.log(
+            "zenban.surface.release.begin",
+            workspaceId: tabId,
+            panelId: id,
+            extra: "hadSurface=\(surfaceToFree != nil ? 1 : 0)"
+        )
+#endif
         guard let surfaceToFree else {
             callbackContext?.release()
             return
@@ -2796,6 +2828,30 @@ final class TerminalSurface: Identifiable, ObservableObject {
             // the next main-actor turn so SIGHUP delivery is deterministic but non-reentrant.
             ghostty_surface_free(surfaceToFree)
             callbackContext?.release()
+#if DEBUG
+            DebugProcessMemory.log(
+                "zenban.surface.release.end",
+                workspaceId: tabId,
+                panelId: id,
+                extra: "hadSurface=1"
+            )
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                DebugProcessMemory.log(
+                    "zenban.surface.release.post250ms",
+                    workspaceId: tabId,
+                    panelId: id,
+                    extra: "hadSurface=0"
+                )
+                try? await Task.sleep(for: .milliseconds(750))
+                DebugProcessMemory.log(
+                    "zenban.surface.release.post1000ms",
+                    workspaceId: tabId,
+                    panelId: id,
+                    extra: "hadSurface=0"
+                )
+            }
+#endif
         }
     }
 
@@ -2978,120 +3034,20 @@ final class TerminalSurface: Identifiable, ObservableObject {
             }
         }
 
-        var env: [String: String] = [:]
-        if surfaceConfig.env_var_count > 0, let existingEnv = surfaceConfig.env_vars {
-            let count = Int(surfaceConfig.env_var_count)
-            if count > 0 {
-                for i in 0..<count {
-                    let item = existingEnv[i]
-                    if let key = String(cString: item.key, encoding: .utf8),
-                       let value = String(cString: item.value, encoding: .utf8) {
-                        env[key] = value
-                    }
-                }
-            }
-        }
-
-        env["CMUX_SURFACE_ID"] = id.uuidString
-        env["CMUX_WORKSPACE_ID"] = tabId.uuidString
-        // Backward-compatible shell integration keys used by existing scripts/tests.
-        env["CMUX_PANEL_ID"] = id.uuidString
-        env["CMUX_TAB_ID"] = tabId.uuidString
-        env["CMUX_SOCKET_PATH"] = SocketControlSettings.socketPath()
-        if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
-            env["CMUX_BUNDLE_ID"] = bundleId
-        }
-
-        // Port range for this workspace (base/range snapshotted once per app session)
-        do {
-            let startPort = Self.sessionPortBase + portOrdinal * Self.sessionPortRangeSize
-            env["CMUX_PORT"] = String(startPort)
-            env["CMUX_PORT_END"] = String(startPort + Self.sessionPortRangeSize - 1)
-            env["CMUX_PORT_RANGE"] = String(Self.sessionPortRangeSize)
-        }
-
-        let claudeHooksEnabled = ClaudeCodeIntegrationSettings.hooksEnabled()
-        if !claudeHooksEnabled {
-            env["CMUX_CLAUDE_HOOKS_DISABLED"] = "1"
-        }
-
-        if let cliBinPath = Bundle.main.resourceURL?.appendingPathComponent("bin").path {
-            let currentPath = env["PATH"]
-                ?? getenv("PATH").map { String(cString: $0) }
-                ?? ProcessInfo.processInfo.environment["PATH"]
-                ?? ""
-            if !currentPath.split(separator: ":").contains(Substring(cliBinPath)) {
-                let separator = currentPath.isEmpty ? "" : ":"
-                env["PATH"] = "\(cliBinPath)\(separator)\(currentPath)"
-            }
-        }
-
-        // Shell integration: inject ZDOTDIR wrapper for zsh shells.
-        let shellIntegrationEnabled = UserDefaults.standard.object(forKey: "sidebarShellIntegration") as? Bool ?? true
-        if shellIntegrationEnabled,
-           let integrationDir = Bundle.main.resourceURL?.appendingPathComponent("shell-integration").path {
-            env["CMUX_SHELL_INTEGRATION"] = "1"
-            env["CMUX_SHELL_INTEGRATION_DIR"] = integrationDir
-
-            let shell = (env["SHELL"]?.isEmpty == false ? env["SHELL"] : nil)
-                ?? getenv("SHELL").map { String(cString: $0) }
-                ?? ProcessInfo.processInfo.environment["SHELL"]
-                ?? "/bin/zsh"
-            let shellName = URL(fileURLWithPath: shell).lastPathComponent
-            if shellName == "zsh" {
-                if GhosttyApp.shared.shellIntegrationMode() != "none" {
-                    env["CMUX_LOAD_GHOSTTY_ZSH_INTEGRATION"] = "1"
-                }
-                let candidateZdotdir = (env["ZDOTDIR"]?.isEmpty == false ? env["ZDOTDIR"] : nil)
-                    ?? getenv("ZDOTDIR").map { String(cString: $0) }
-                    ?? (ProcessInfo.processInfo.environment["ZDOTDIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["ZDOTDIR"] : nil)
-
-                if let candidateZdotdir, !candidateZdotdir.isEmpty {
-                    var isGhosttyInjected = false
-                    let ghosttyResources = (env["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? env["GHOSTTY_RESOURCES_DIR"] : nil)
-                        ?? getenv("GHOSTTY_RESOURCES_DIR").map { String(cString: $0) }
-                        ?? (ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"]?.isEmpty == false ? ProcessInfo.processInfo.environment["GHOSTTY_RESOURCES_DIR"] : nil)
-                    if let ghosttyResources {
-                        let ghosttyZdotdir = URL(fileURLWithPath: ghosttyResources)
-                            .appendingPathComponent("shell-integration/zsh").path
-                        isGhosttyInjected = (candidateZdotdir == ghosttyZdotdir)
-                    }
-                    if !isGhosttyInjected {
-                        env["CMUX_ZSH_ZDOTDIR"] = candidateZdotdir
-                    }
-                }
-
-                env["ZDOTDIR"] = integrationDir
-            } else if shellName == "bash" {
-                if GhosttyApp.shared.shellIntegrationMode() != "none" {
-                    env["CMUX_LOAD_GHOSTTY_BASH_INTEGRATION"] = "1"
-                }
-                // macOS ships /bin/bash 3.2, where Ghostty's automatic bash
-                // integration is unsupported and HOME-based wrapper startup is
-                // not reliable. Bootstrap cmux bash integration on the first
-                // interactive prompt instead.
-                env["PROMPT_COMMAND"] = """
-                unset PROMPT_COMMAND; \
-                if [[ "${CMUX_LOAD_GHOSTTY_BASH_INTEGRATION:-0}" == "1" && -n "${GHOSTTY_RESOURCES_DIR:-}" ]]; then \
-                _cmux_ghostty_bash="$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"; \
-                [[ -r "$_cmux_ghostty_bash" ]] && source "$_cmux_ghostty_bash"; \
-                fi; \
-                if [[ "${CMUX_SHELL_INTEGRATION:-1}" != "0" && -n "${CMUX_SHELL_INTEGRATION_DIR:-}" ]]; then \
-                _cmux_bash_integration="$CMUX_SHELL_INTEGRATION_DIR/cmux-bash-integration.bash"; \
-                [[ -r "$_cmux_bash_integration" ]] && source "$_cmux_bash_integration"; \
-                fi; \
-                unset _cmux_ghostty_bash _cmux_bash_integration; \
-                if declare -F _cmux_prompt_command >/dev/null 2>&1; then _cmux_prompt_command; fi
-                """
-            }
-        }
-
-        let startupEnvironment = additionalEnvironment
+        var resolvedAdditionalEnvironment = additionalEnvironment
         if !startupEnvironment.isEmpty {
-            for (key, value) in startupEnvironment where !key.isEmpty && !value.isEmpty {
-                env[key] = value
-            }
+            resolvedAdditionalEnvironment.merge(startupEnvironment) { _, newValue in newValue }
         }
+
+        let env = TerminalProcessEnvironment.resolvedEnvironment(
+            panelId: id,
+            workspaceId: tabId,
+            portOrdinal: portOrdinal,
+            inheritedEnvironment: TerminalProcessEnvironment.inheritedEnvironment(from: surfaceConfig),
+            additionalEnvironment: resolvedAdditionalEnvironment
+        )
+        replaceConfigStringStorage(&workingDirectoryStorage, with: workingDirectory)
+        replaceConfigStringStorage(&startupCommandStorage, with: startupCommand)
 
         if !env.isEmpty {
             envVars.reserveCapacity(env.count)
@@ -3104,26 +3060,26 @@ final class TerminalSurface: Identifiable, ObservableObject {
         }
 
         let createSurface = { [self] in
-            if !envVars.isEmpty {
-                let envVarsCount = envVars.count
-                envVars.withUnsafeMutableBufferPointer { buffer in
-                    surfaceConfig.env_vars = buffer.baseAddress
-                    surfaceConfig.env_var_count = envVarsCount
+            let createWithEnvironment = {
+                surfaceConfig.working_directory = self.workingDirectoryStorage.map { UnsafePointer($0) }
+                surfaceConfig.command = self.startupCommandStorage.map { UnsafePointer($0) }
+                surfaceConfig.initial_input = nil
+                if !envVars.isEmpty {
+                    let envVarsCount = envVars.count
+                    envVars.withUnsafeMutableBufferPointer { buffer in
+                        surfaceConfig.env_vars = buffer.baseAddress
+                        surfaceConfig.env_var_count = envVarsCount
+                        self.surface = ghostty_surface_new(app, &surfaceConfig)
+                    }
+                } else {
                     self.surface = ghostty_surface_new(app, &surfaceConfig)
                 }
-            } else {
-                self.surface = ghostty_surface_new(app, &surfaceConfig)
             }
+
+            createWithEnvironment()
         }
 
-        if let workingDirectory, !workingDirectory.isEmpty {
-            workingDirectory.withCString { cWorkingDir in
-                surfaceConfig.working_directory = cWorkingDir
-                createSurface()
-            }
-        } else {
-            createSurface()
-        }
+        createSurface()
 
         if surface == nil {
             surfaceCallbackContext?.release()
@@ -3507,6 +3463,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
     deinit {
         markPortalLifecycleClosed(reason: "deinit")
+        releaseSurfaceConfigStorage()
 
         let callbackContext = surfaceCallbackContext
         surfaceCallbackContext = nil

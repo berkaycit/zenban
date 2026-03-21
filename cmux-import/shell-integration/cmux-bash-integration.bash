@@ -54,6 +54,8 @@ _CMUX_PORTS_LAST_RUN="${_CMUX_PORTS_LAST_RUN:-0}"
 _CMUX_SHELL_ACTIVITY_LAST="${_CMUX_SHELL_ACTIVITY_LAST:-}"
 _CMUX_TTY_NAME="${_CMUX_TTY_NAME:-}"
 _CMUX_TTY_REPORTED="${_CMUX_TTY_REPORTED:-0}"
+_CMUX_ZELLIJ_LAUNCH_TOKEN="${_CMUX_ZELLIJ_LAUNCH_TOKEN:-}"
+_CMUX_ZELLIJ_LAUNCH_COMMAND="${_CMUX_ZELLIJ_LAUNCH_COMMAND:-}"
 
 _cmux_git_resolve_head_path() {
     # Resolve the HEAD file path without invoking git (fast; works for worktrees).
@@ -327,7 +329,54 @@ _cmux_bash_preexec_hook() {
     _cmux_preexec_command
 }
 
+_cmux_consume_zellij_launch_request() {
+    local launch_file="${CMUX_ZELLIJ_LAUNCH_FILE:-}"
+    [[ -n "$launch_file" ]] || return 1
+    [[ -r "$launch_file" ]] || return 1
+
+    local claimed_file="${launch_file}.claimed.$$"
+    mv "$launch_file" "$claimed_file" >/dev/null 2>&1 || return 1
+
+    local token=""
+    local launch_command=""
+    if IFS= read -r token < "$claimed_file"; then
+        launch_command="$(sed -n '2p' "$claimed_file" 2>/dev/null || true)"
+    fi
+
+    rm -f "$claimed_file" >/dev/null 2>&1 || true
+
+    if [[ -z "$launch_command" ]]; then
+        launch_command="$token"
+        token=""
+    fi
+    [[ -n "$launch_command" ]] || return 1
+
+    if [[ -z "$token" ]]; then
+        token="legacy-$$-${SECONDS}"
+    fi
+
+    _CMUX_ZELLIJ_LAUNCH_TOKEN="$token"
+    _CMUX_ZELLIJ_LAUNCH_COMMAND="$launch_command"
+
+    if [[ -S "$CMUX_SOCKET_PATH" ]] && [[ -n "$CMUX_TAB_ID" ]] && [[ -n "$CMUX_PANEL_ID" ]]; then
+        _cmux_send "launch_request_started $token --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+    fi
+
+    _CMUX_CMD_START=$SECONDS
+    _cmux_report_shell_activity_state running
+    _cmux_report_tty_once
+    _cmux_ports_kick
+    _cmux_stop_pr_poll_loop
+
+    eval "$launch_command"
+    return 0
+}
+
 _cmux_prompt_command() {
+    if _cmux_consume_zellij_launch_request; then
+        return 0
+    fi
+
     [[ -S "$CMUX_SOCKET_PATH" ]] || return 0
     [[ -n "$CMUX_TAB_ID" ]] || return 0
     [[ -n "$CMUX_PANEL_ID" ]] || return 0

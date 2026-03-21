@@ -1917,6 +1917,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var zenbanWorkspaceOpenHandler: ((UUID) -> Void)?
     var zenbanClaudePromptCaptureEnabledHandler: ((UUID) -> Bool)?
     var zenbanPromptSubmittedHandler: ((UUID, UUID, String) -> Void)?
+    var zenbanLaunchRequestStartedHandler: ((UUID, UUID, String) -> Void)?
     var zenbanShortcutOverrideHandler: ((NSEvent) -> Bool)?
     var shortcutLayoutCharacterProvider: (UInt16, NSEvent.ModifierFlags) -> String? = KeyboardLayout.character(forKeyCode:modifierFlags:)
     private var workspaceObserver: NSObjectProtocol?

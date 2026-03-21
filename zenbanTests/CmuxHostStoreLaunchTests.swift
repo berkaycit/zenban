@@ -8,34 +8,14 @@ struct CmuxHostStoreLaunchTests {
         case timedOut
     }
 
-    @Test
-    func claudeLaunchSendsFlagOnlyCommandOnlyOncePerWorkspace() async throws {
-        let tempDirectory = try makeTemporaryDirectory()
-        let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path)
-        let hostStore = makeHostStore(boardStore: boardStore)
-        var commands: [String] = []
-        hostStore.configureClaudeLaunchHooksForTesting(launchCommandHandler: { _, command in
-            commands.append(command)
-        })
-        defer {
-            hostStore.resetClaudeLaunchHooksForTesting()
-            try? FileManager.default.removeItem(at: tempDirectory)
-        }
-
-        hostStore.syncSelection(card: card, boardID: board.id)
-        try markWorkspacePromptIdle(hostStore: hostStore, cardID: card.id)
-        try await waitUntil { commands.count == 1 }
-
-        #expect(commands == [expectedClaudeLaunchCommand()])
-        #expect(!FileManager.default.fileExists(atPath: promptFileURL(in: tempDirectory).path))
-
-        hostStore.syncSelection(card: card, boardID: board.id)
-        try await Task.sleep(for: .milliseconds(500))
-        #expect(commands.count == 1)
+    private struct LaunchRequestRecord: Equatable {
+        let url: URL
+        let token: String
+        let command: String
     }
 
     @Test
-    func claudeLaunchAppendsPendingPromptOnlyOnFirstLaunch() async throws {
+    func claudeLaunchRemainsQueuedUntilAcknowledged() async throws {
         let tempDirectory = try makeTemporaryDirectory()
         let prompt = "Investigate the failing login tests"
         let seededCard = Card(
@@ -57,10 +37,7 @@ struct CmuxHostStoreLaunchTests {
         boardStore.selectedBoardID = board.id
         boardStore.selectedCardID = seededCard.id
         let hostStore = makeHostStore(boardStore: boardStore)
-        var commands: [String] = []
-        hostStore.configureClaudeLaunchHooksForTesting(launchCommandHandler: { _, command in
-            commands.append(command)
-        })
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
         defer {
             hostStore.resetClaudeLaunchHooksForTesting()
             try? FileManager.default.removeItem(at: tempDirectory)
@@ -68,16 +45,117 @@ struct CmuxHostStoreLaunchTests {
 
         hostStore.syncSelection(card: seededCard, boardID: board.id)
         try markWorkspacePromptIdle(hostStore: hostStore, cardID: seededCard.id)
-        try await waitUntil { commands.count == 1 }
 
-        #expect(commands == [expectedClaudeLaunchCommand(prompt: prompt)])
-        #expect(boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == nil)
+        try await waitUntil {
+            launchRequestRecord(hostStore: hostStore, cardID: seededCard.id) != nil
+        }
 
-        let updatedCard = try #require(boardStore.card(id: seededCard.id))
-        hostStore.updateAgentLaunch(for: updatedCard, boardID: board.id)
-        try await Task.sleep(for: .milliseconds(500))
+        let request = try #require(launchRequestRecord(hostStore: hostStore, cardID: seededCard.id))
+        #expect(boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == prompt)
+        #expect(request.command == expectedClaudeLaunchCommand(prompt: prompt))
 
-        #expect(commands.count == 1)
+        #expect(
+            hostStore.acknowledgePendingLaunchForTesting(cardID: seededCard.id)
+        )
+
+        try await waitUntil {
+            boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == nil
+        }
+    }
+
+    @Test
+    func claudePendingPromptIsConsumedOnlyAfterAcknowledgement() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let prompt = "Investigate the failing login tests"
+        let seededCard = Card(
+            title: "cc-42",
+            lastSubmittedPrompt: prompt,
+            pendingLaunchPrompt: prompt,
+            column: .todo,
+            orderIndex: 0,
+            agent: .claude,
+            worktreePath: tempDirectory.path
+        )
+        let board = Board(
+            name: "Workspace Ownership",
+            cards: [seededCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = seededCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
+        defer {
+            hostStore.resetClaudeLaunchHooksForTesting()
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: seededCard, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: seededCard.id)
+
+        try await waitUntil { launchRequestRecord(hostStore: hostStore, cardID: seededCard.id) != nil }
+        let request = try #require(launchRequestRecord(hostStore: hostStore, cardID: seededCard.id))
+        #expect(request.command == expectedClaudeLaunchCommand(prompt: prompt))
+        #expect(boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == prompt)
+
+        #expect(
+            hostStore.acknowledgePendingLaunchForTesting(cardID: seededCard.id)
+        )
+
+        try await waitUntil { boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == nil }
+    }
+
+    @Test
+    func claudeRepeatedSelectionSyncDoesNotDuplicatePendingLaunch() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let prompt = "Investigate the failing login tests"
+        let seededCard = Card(
+            title: "cc-42",
+            lastSubmittedPrompt: prompt,
+            pendingLaunchPrompt: prompt,
+            column: .todo,
+            orderIndex: 0,
+            agent: .claude,
+            worktreePath: tempDirectory.path
+        )
+        let board = Board(
+            name: "Workspace Ownership",
+            cards: [seededCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = seededCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
+        defer {
+            hostStore.resetClaudeLaunchHooksForTesting()
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: seededCard, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: seededCard.id)
+
+        try await waitUntil {
+            launchRequestRecord(hostStore: hostStore, cardID: seededCard.id) != nil
+        }
+
+        let initialRequests = launchRequestRecords(hostStore: hostStore, cardIDs: [seededCard.id])
+        let initialToken = try #require(initialRequests.first).token
+        #expect(initialRequests.count == 1)
+
+        hostStore.syncSelection(card: seededCard, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: seededCard.id)
+        try await Task.sleep(for: .milliseconds(300))
+
+        let repeatedRequests = launchRequestRecords(hostStore: hostStore, cardIDs: [seededCard.id])
+        #expect(repeatedRequests.count == 1)
+        #expect(repeatedRequests.first?.token == initialToken)
+        #expect(repeatedRequests.first?.command == expectedClaudeLaunchCommand(prompt: prompt))
+        #expect(boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == prompt)
     }
 
     @Test
@@ -117,10 +195,7 @@ struct CmuxHostStoreLaunchTests {
         boardStore.selectedBoardID = board.id
         boardStore.selectedCardID = sourceCard.id
         let hostStore = makeHostStore(boardStore: boardStore)
-        var commands: [(UUID, String)] = []
-        hostStore.configureClaudeLaunchHooksForTesting(launchCommandHandler: { cardID, command in
-            commands.append((cardID, command))
-        })
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
         defer {
             hostStore.resetClaudeLaunchHooksForTesting()
             try? FileManager.default.removeItem(at: tempDirectory)
@@ -134,28 +209,20 @@ struct CmuxHostStoreLaunchTests {
         #expect(boardStore.selectedCardID == sourceCard.id)
 
         try await waitUntil {
-            cloneCards.allSatisfy { hostStore.workspace(for: $0.id) != nil }
+            launchRequestRecords(hostStore: hostStore, cardIDs: cloneCards.map(\.id)).count == 2
         }
-        for cloneCard in cloneCards {
-            try markWorkspacePromptIdle(hostStore: hostStore, cardID: cloneCard.id)
-        }
-        try await waitUntil { commands.count == cloneCards.count }
 
-        let launchedCardIDs = commands.map(\.0).sorted { $0.uuidString < $1.uuidString }
-        let cloneCardIDs = cloneCards.map(\.id).sorted { $0.uuidString < $1.uuidString }
-        #expect(launchedCardIDs == cloneCardIDs)
-        #expect(commands.allSatisfy { $0.1 == expectedClaudeLaunchCommand(prompt: prompt) })
+        let requests = launchRequestRecords(hostStore: hostStore, cardIDs: cloneCards.map(\.id))
+        #expect(requests.count == 2)
+        #expect(requests.allSatisfy { $0.command == expectedClaudeLaunchCommand(prompt: prompt) })
     }
 
     @Test
-    func claudeLaunchRelaunchesWhenWorkspaceIsRecreated() async throws {
+    func claudePendingLaunchSurvivesWorkspaceRecreationUntilAcknowledgement() async throws {
         let tempDirectory = try makeTemporaryDirectory()
         let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path)
         let hostStore = makeHostStore(boardStore: boardStore)
-        var commands: [String] = []
-        hostStore.configureClaudeLaunchHooksForTesting(launchCommandHandler: { _, command in
-            commands.append(command)
-        })
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
         defer {
             hostStore.resetClaudeLaunchHooksForTesting()
             try? FileManager.default.removeItem(at: tempDirectory)
@@ -163,18 +230,28 @@ struct CmuxHostStoreLaunchTests {
 
         hostStore.syncSelection(card: card, boardID: board.id)
         try markWorkspacePromptIdle(hostStore: hostStore, cardID: card.id)
-        try await waitUntil { commands.count == 1 }
+        try await waitUntil { launchRequestRecord(hostStore: hostStore, cardID: card.id) != nil }
+        let initialRequest = try #require(launchRequestRecord(hostStore: hostStore, cardID: card.id))
 
         hostStore.removeWorkspace(for: card.id)
 
-        var renamedCard = card
-        renamedCard.title = "cc-84"
-        hostStore.syncSelection(card: renamedCard, boardID: board.id)
-        try markWorkspacePromptIdle(hostStore: hostStore, cardID: card.id)
-        try await waitUntil { commands.count == 2 }
+        let recreatedCard = card
+        hostStore.syncSelection(card: recreatedCard, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: recreatedCard.id)
+        try await waitUntil {
+            launchRequestRecords(hostStore: hostStore, cardIDs: [recreatedCard.id]).contains { $0.token == initialRequest.token }
+        }
 
-        #expect(commands == [expectedClaudeLaunchCommand(), expectedClaudeLaunchCommand()])
-        #expect(!FileManager.default.fileExists(atPath: promptFileURL(in: tempDirectory).path))
+        let recreatedRequest = try #require(
+            launchRequestRecords(hostStore: hostStore, cardIDs: [recreatedCard.id]).first { $0.token == initialRequest.token }
+        )
+        #expect(recreatedRequest.token == initialRequest.token)
+        #expect(recreatedRequest.command == initialRequest.command)
+
+        #expect(
+            hostStore.acknowledgePendingLaunchForTesting(cardID: recreatedCard.id)
+        )
+        try await waitUntil { boardStore.card(id: recreatedCard.id)?.pendingLaunchPrompt == nil }
     }
 
     @Test
@@ -182,10 +259,7 @@ struct CmuxHostStoreLaunchTests {
         let tempDirectory = try makeTemporaryDirectory()
         let (boardStore, board, card) = makeBoardFixture(agent: .codex, worktreePath: tempDirectory.path)
         let hostStore = makeHostStore(boardStore: boardStore)
-        var commands: [String] = []
-        hostStore.configureClaudeLaunchHooksForTesting(launchCommandHandler: { _, command in
-            commands.append(command)
-        })
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
         defer {
             hostStore.resetClaudeLaunchHooksForTesting()
             try? FileManager.default.removeItem(at: tempDirectory)
@@ -193,18 +267,26 @@ struct CmuxHostStoreLaunchTests {
 
         hostStore.syncSelection(card: card, boardID: board.id)
         try markWorkspacePromptIdle(hostStore: hostStore, cardID: card.id)
-        try await waitUntil { commands.count == 1 }
-        #expect(commands[0] == "codex")
-        #expect(!FileManager.default.fileExists(atPath: promptFileURL(in: tempDirectory).path))
+        try await waitUntil {
+            launchRequestRecords(hostStore: hostStore, cardIDs: [card.id]).contains { $0.command == "codex" }
+        }
+        let codexRequest = try #require(
+            launchRequestRecords(hostStore: hostStore, cardIDs: [card.id]).first { $0.command == "codex" }
+        )
+        #expect(codexRequest.command == "codex")
 
         var claudeCard = card
         claudeCard.agent = .claude
         hostStore.updateAgentLaunch(for: claudeCard, boardID: board.id)
         try markWorkspacePromptIdle(hostStore: hostStore, cardID: card.id)
-        try await waitUntil { commands.count == 2 }
+        try await waitUntil {
+            launchRequestRecords(hostStore: hostStore, cardIDs: [card.id]).contains { $0.command == expectedClaudeLaunchCommand() }
+        }
+        let claudeRequest = try #require(
+            launchRequestRecords(hostStore: hostStore, cardIDs: [card.id]).first { $0.command == expectedClaudeLaunchCommand() }
+        )
 
-        #expect(commands[1] == expectedClaudeLaunchCommand())
-        #expect(!FileManager.default.fileExists(atPath: promptFileURL(in: tempDirectory).path))
+        #expect(claudeRequest.command == expectedClaudeLaunchCommand())
     }
 
     @Test
@@ -234,10 +316,7 @@ struct CmuxHostStoreLaunchTests {
         let tempDirectory = try makeTemporaryDirectory()
         let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path, column: .done)
         let hostStore = makeHostStore(boardStore: boardStore)
-        var commands: [String] = []
-        hostStore.configureClaudeLaunchHooksForTesting(launchCommandHandler: { _, command in
-            commands.append(command)
-        })
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
         defer {
             hostStore.resetClaudeLaunchHooksForTesting()
             try? FileManager.default.removeItem(at: tempDirectory)
@@ -246,13 +325,16 @@ struct CmuxHostStoreLaunchTests {
         hostStore.syncSelection(card: card, boardID: board.id)
         try await Task.sleep(for: .milliseconds(500))
         #expect(hostStore.workspace(for: card.id) == nil)
-        #expect(commands.isEmpty)
+        #expect(launchRequestRecords(hostStore: hostStore, cardIDs: [card.id]).isEmpty)
 
         hostStore.openTerminal(for: card, boardID: board.id)
         try markWorkspacePromptIdle(hostStore: hostStore, cardID: card.id)
-        try await waitUntil { commands.count == 1 }
-
-        #expect(commands == [expectedClaudeLaunchCommand()])
+        try await waitUntil { launchRequestRecord(hostStore: hostStore, cardID: card.id) != nil }
+        _ = try #require(launchRequestRecord(hostStore: hostStore, cardID: card.id))
+        #expect(
+            hostStore.acknowledgePendingLaunchForTesting(cardID: card.id)
+        )
+        try await waitUntil { boardStore.card(id: card.id)?.pendingLaunchPrompt == nil }
     }
 
     @Test
@@ -492,6 +574,37 @@ struct CmuxHostStoreLaunchTests {
             try? await Task.sleep(for: .milliseconds(20))
         }
         throw WaitError.timedOut
+    }
+
+    private func launchRequestRecords(hostStore: CmuxHostStore, cardIDs: [UUID]) -> [LaunchRequestRecord] {
+        cardIDs.compactMap { launchRequestRecord(hostStore: hostStore, cardID: $0) }
+            .sorted { lhs, rhs in lhs.url.path < rhs.url.path }
+    }
+
+    private func launchRequestRecord(hostStore: CmuxHostStore, cardID: UUID) -> LaunchRequestRecord? {
+        guard let workspace = hostStore.workspace(for: cardID),
+              let startupEnvironment = try? ZellijSessionManager.shared.startupEnvironment(for: workspace.id),
+              let launchFilePath = startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"],
+              let contents = try? String(contentsOfFile: launchFilePath, encoding: .utf8) else {
+            return nil
+        }
+
+        let lines = contents
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard lines.count >= 2 else { return nil }
+
+        let command = lines[1]
+        guard command.contains("--dangerously-skip-permissions") || command == "codex" || command == "gemini" else {
+            return nil
+        }
+
+        return LaunchRequestRecord(
+            url: URL(fileURLWithPath: launchFilePath),
+            token: lines[0],
+            command: command
+        )
     }
 
     private func promptFileURL(in directory: URL) -> URL {

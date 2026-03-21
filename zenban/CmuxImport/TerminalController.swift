@@ -1631,6 +1631,9 @@ class TerminalController {
         case "report_pwd":
             return reportPwd(args)
 
+        case "launch_request_started":
+            return launchRequestStarted(args)
+
         case "sidebar_state":
             return sidebarState(args)
 
@@ -13906,6 +13909,25 @@ class TerminalController {
             tabManager.updateSurfaceShellActivity(tabId: tab.id, surfaceId: surfaceId, state: state)
         }
         return result
+    }
+
+    private func launchRequestStarted(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        guard let token = parsed.positional.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            return "ERROR: Missing launch token — usage: launch_request_started <token> [--tab=X] [--panel=Y]"
+        }
+        guard let scope = Self.explicitSocketScope(options: parsed.options) else {
+            return "ERROR: Missing tab/panel — usage: launch_request_started <token> [--tab=X] [--panel=Y]"
+        }
+        DispatchQueue.main.async {
+            AppDelegate.shared?.zenbanLaunchRequestStartedHandler?(
+                scope.workspaceId,
+                scope.panelId,
+                token
+            )
+        }
+        return "OK"
     }
 
     private func clearPorts(_ args: String) -> String {

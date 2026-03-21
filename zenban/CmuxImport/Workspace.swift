@@ -941,6 +941,8 @@ final class Workspace: Identifiable, ObservableObject {
     /// Per-panel inherited zoom lineage. Descendants reuse this root value unless
     /// a panel is explicitly re-zoomed by the user.
     private var terminalInheritanceFontPointsByPanelId: [UUID: Float] = [:]
+    private var terminalStartupCommand: String?
+    private var terminalStartupEnvironment: [String: String] = [:]
 
     /// Callback used by TabManager to capture recently closed browser panels for Cmd+Shift+T restore.
     var onClosedBrowserPanel: ((ClosedBrowserPanelRestoreSnapshot) -> Void)?
@@ -1128,6 +1130,22 @@ final class Workspace: Identifiable, ObservableObject {
         )
     }
 
+    func configureTerminalStartupCommand(_ command: String?) {
+        configureTerminalStartup(command: command, environment: terminalStartupEnvironment)
+    }
+
+    func configureTerminalStartup(
+        command: String?,
+        environment: [String: String] = [:]
+    ) {
+        terminalStartupCommand = command?.trimmingCharacters(in: .whitespacesAndNewlines)
+        terminalStartupEnvironment = environment
+        for terminalPanel in panels.values.compactMap({ $0 as? TerminalPanel }) {
+            terminalPanel.updateStartupCommand(terminalStartupCommand)
+            terminalPanel.updateStartupEnvironment(terminalStartupEnvironment)
+        }
+    }
+
     init(
         title: String = "Terminal",
         workingDirectory: String? = nil,
@@ -1177,6 +1195,8 @@ final class Workspace: Identifiable, ObservableObject {
             context: GHOSTTY_SURFACE_CONTEXT_TAB,
             configTemplate: configTemplate,
             workingDirectory: hasWorkingDirectory ? trimmedWorkingDirectory : nil,
+            startupEnvironment: terminalStartupEnvironment,
+            startupCommand: terminalStartupCommand,
             portOrdinal: portOrdinal
         )
         panels[terminalPanel.id] = terminalPanel
@@ -2150,6 +2170,8 @@ final class Workspace: Identifiable, ObservableObject {
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
             configTemplate: inheritedConfig,
             workingDirectory: splitWorkingDirectory,
+            startupEnvironment: terminalStartupEnvironment,
+            startupCommand: terminalStartupCommand,
             portOrdinal: portOrdinal
         )
         panels[newPanel.id] = newPanel
@@ -2229,6 +2251,8 @@ final class Workspace: Identifiable, ObservableObject {
             configTemplate: inheritedConfig,
             workingDirectory: workingDirectory,
             additionalEnvironment: startupEnvironment,
+            startupEnvironment: terminalStartupEnvironment,
+            startupCommand: terminalStartupCommand,
             portOrdinal: portOrdinal
         )
         panels[newPanel.id] = newPanel
