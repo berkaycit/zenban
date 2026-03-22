@@ -51,8 +51,12 @@ struct CmuxHostStoreLaunchTests {
         }
 
         let request = try #require(launchRequestRecord(hostStore: hostStore, cardID: seededCard.id))
+        let workspace = try #require(hostStore.workspace(for: seededCard.id))
+        let startupEnvironment = try ZellijSessionManager.shared.startupEnvironment(for: workspace.id)
         #expect(boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == prompt)
         #expect(request.command == expectedClaudeLaunchCommand(prompt: prompt))
+        #expect(startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"] == request.url.path)
+        #expect(startupEnvironment["CMUX_ZELLIJ_SHELL"] == (ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"))
 
         #expect(
             hostStore.acknowledgePendingLaunchForTesting(cardID: seededCard.id)
@@ -104,6 +108,60 @@ struct CmuxHostStoreLaunchTests {
             hostStore.acknowledgePendingLaunchForTesting(cardID: seededCard.id)
         )
 
+        try await waitUntil { boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == nil }
+    }
+
+    @Test
+    func claudeLaunchAcknowledgementIgnoresWrongPanelOrToken() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let prompt = "Investigate the failing login tests"
+        let seededCard = Card(
+            title: "cc-42",
+            lastSubmittedPrompt: prompt,
+            pendingLaunchPrompt: prompt,
+            column: .todo,
+            orderIndex: 0,
+            agent: .claude,
+            worktreePath: tempDirectory.path
+        )
+        let board = Board(
+            name: "Workspace Ownership",
+            cards: [seededCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = seededCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        let appDelegate = AppDelegate()
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
+        defer {
+            hostStore.resetClaudeLaunchHooksForTesting()
+            try? FileManager.default.removeItem(at: tempDirectory)
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: seededCard, boardID: board.id)
+
+        try await waitUntil {
+            launchRequestRecord(hostStore: hostStore, cardID: seededCard.id) != nil
+        }
+
+        let request = try #require(launchRequestRecord(hostStore: hostStore, cardID: seededCard.id))
+        let workspace = try #require(hostStore.workspace(for: seededCard.id))
+        let handler = try #require(AppDelegate.shared?.zenbanLaunchRequestStartedHandler)
+        let correctPanelID = try #require(ZellijSessionManager.shared.sessionPanelId(for: workspace.id))
+
+        handler(workspace.id, UUID(), request.token)
+        #expect(boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == prompt)
+        #expect(launchRequestRecord(hostStore: hostStore, cardID: seededCard.id)?.token == request.token)
+
+        handler(workspace.id, correctPanelID, UUID().uuidString.lowercased())
+        #expect(boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == prompt)
+        #expect(launchRequestRecord(hostStore: hostStore, cardID: seededCard.id)?.token == request.token)
+
+        handler(workspace.id, correctPanelID, request.token)
         try await waitUntil { boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == nil }
     }
 

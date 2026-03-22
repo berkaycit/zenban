@@ -20,6 +20,9 @@ struct CmuxHostStoreLifecycleTests {
 
         primaryStore.syncSelection(card: card, boardID: board.id)
         let originalWorkspace = try #require(primaryStore.workspace(for: card.id))
+        let startupEnvironment = try ZellijSessionManager.shared.startupEnvironment(for: originalWorkspace.id)
+        let attachCommand = try ZellijSessionManager.shared.attachCommand(for: originalWorkspace.id)
+        let launchFilePath = try #require(startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
 
         #expect(
             appDelegate.moveWorkspaceToWindow(
@@ -259,12 +262,14 @@ struct CmuxHostStoreLifecycleTests {
         }
 
         hostStore.openTerminal(for: doneCard, boardID: board.id)
-        #expect(hostStore.workspace(for: doneCard.id) != nil)
+        let doneWorkspace = try #require(hostStore.workspace(for: doneCard.id))
+        #expect(ZellijSessionManager.shared.isManagedWorkspace(doneWorkspace.id))
 
         hostStore.syncSelection(card: todoCard, boardID: board.id)
 
         #expect(hostStore.workspace(for: doneCard.id) == nil)
         #expect(hostStore.workspace(for: todoCard.id) != nil)
+        #expect(!ZellijSessionManager.shared.isManagedWorkspace(doneWorkspace.id))
 
         hostStore.syncSelection(card: doneCard, boardID: board.id)
 
@@ -458,6 +463,11 @@ struct CmuxHostStoreLifecycleTests {
         #expect(primaryStore.workspace(for: card.id) == nil)
         #expect(!secondaryStore.tabManager.tabs.contains(where: { $0.id == originalWorkspace.id }))
         #expect(appDelegate.tabManagerFor(tabId: originalWorkspace.id) == nil)
+        #expect(!ZellijSessionManager.shared.isManagedWorkspace(originalWorkspace.id))
+        #expect(!FileManager.default.fileExists(atPath: launchFilePath))
+        #expect(!FileManager.default.fileExists(atPath: attachCommand))
+        #expect((try? ZellijSessionManager.shared.startupEnvironment(for: originalWorkspace.id)) == nil)
+        #expect((try? ZellijSessionManager.shared.attachCommand(for: originalWorkspace.id)) == nil)
     }
 
     @Test
@@ -471,12 +481,14 @@ struct CmuxHostStoreLifecycleTests {
         }
 
         hostStore.syncSelection(card: card, boardID: board.id)
-        #expect(hostStore.workspace(for: card.id) != nil)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        #expect(ZellijSessionManager.shared.isManagedWorkspace(workspace.id))
 
         #expect(boardStore.moveCard(card.id, to: .done, in: board.id))
 
         #expect(boardStore.card(id: card.id)?.column == .done)
         #expect(hostStore.workspace(for: card.id) == nil)
+        #expect(!ZellijSessionManager.shared.isManagedWorkspace(workspace.id))
     }
 
     @Test
