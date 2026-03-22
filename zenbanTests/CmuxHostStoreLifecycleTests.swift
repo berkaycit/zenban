@@ -6,6 +6,10 @@ import Testing
 
 @MainActor
 struct CmuxHostStoreLifecycleTests {
+    private enum WaitError: Error {
+        case timedOut
+    }
+
     @Test
     func syncSelectionReusesWorkspaceOwnedByAnotherTabManager() throws {
         let appDelegate = AppDelegate()
@@ -419,6 +423,9 @@ struct CmuxHostStoreLifecycleTests {
 
         primaryStore.syncSelection(card: card, boardID: board.id)
         let originalWorkspace = try #require(primaryStore.workspace(for: card.id))
+        let startupEnvironment = try ZellijSessionManager.shared.startupEnvironment(for: originalWorkspace.id)
+        let attachCommand = try ZellijSessionManager.shared.attachCommand(for: originalWorkspace.id)
+        let launchFilePath = try #require(startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
 
         #expect(
             appDelegate.moveWorkspaceToWindow(
@@ -433,6 +440,42 @@ struct CmuxHostStoreLifecycleTests {
 
         #expect(secondaryStore.tabManager.selectedTabId == originalWorkspace.id)
         #expect(!primaryStore.tabManager.tabs.contains(where: { $0.id == originalWorkspace.id }))
+    }
+
+    @Test
+    func hiddenWorkspaceDetachCancelsWhenReselectedAndDetachesWhenStillHidden() async throws {
+        let appDelegate = AppDelegate()
+        let sourceCard = Card(title: "cc-42", column: .todo, orderIndex: 0, agent: .claude, worktreePath: "/tmp/cc-42")
+        let siblingCard = Card(title: "cc-43", column: .todo, orderIndex: 1, agent: .claude, worktreePath: "/tmp/cc-43")
+        let board = Board(
+            name: "Hidden Detach",
+            cards: [sourceCard, siblingCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = makeBoardStore(board: board, selectedCardID: sourceCard.id)
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        hostStore.setHiddenWorkspaceDetachDelayForTesting(.milliseconds(150))
+        defer {
+            hostStore.setHiddenWorkspaceDetachDelayForTesting(.seconds(3))
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: sourceCard, boardID: board.id)
+        let sourceWorkspace = try #require(hostStore.workspace(for: sourceCard.id))
+        try await waitUntil { sourceWorkspace.hasLoadedTerminalSurface() }
+
+        hostStore.syncSelection(card: siblingCard, boardID: board.id)
+        hostStore.cancelLaunchTaskForTesting(cardID: sourceCard.id)
+
+        hostStore.syncSelection(card: sourceCard, boardID: board.id)
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(sourceWorkspace.hasLoadedTerminalSurface())
+
+        hostStore.syncSelection(card: siblingCard, boardID: board.id)
+        hostStore.cancelLaunchTaskForTesting(cardID: sourceCard.id)
+        try await waitUntil { !sourceWorkspace.hasLoadedTerminalSurface() }
     }
 
     @Test
@@ -468,6 +511,41 @@ struct CmuxHostStoreLifecycleTests {
         #expect(!FileManager.default.fileExists(atPath: attachCommand))
         #expect((try? ZellijSessionManager.shared.startupEnvironment(for: originalWorkspace.id)) == nil)
         #expect((try? ZellijSessionManager.shared.attachCommand(for: originalWorkspace.id)) == nil)
+    }
+
+    @Test
+    func applicationTerminationCleansUpManagedSessionArtifacts() async throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let startupEnvironment = try ZellijSessionManager.shared.startupEnvironment(for: workspace.id)
+        let attachCommand = try ZellijSessionManager.shared.attachCommand(for: workspace.id)
+        let launchFilePath = try #require(startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
+
+        try await waitUntil {
+            FileManager.default.fileExists(atPath: launchFilePath) &&
+            FileManager.default.fileExists(atPath: attachCommand)
+        }
+
+        hostStore.simulateApplicationWillTerminateForTesting()
+
+        try await waitUntil {
+            !ZellijSessionManager.shared.isManagedWorkspace(workspace.id) &&
+            !FileManager.default.fileExists(atPath: launchFilePath) &&
+            !FileManager.default.fileExists(atPath: attachCommand)
+        }
+
+        #expect(hostStore.pendingLaunchSnapshotForTesting(cardID: card.id) == nil)
+        #expect((try? ZellijSessionManager.shared.startupEnvironment(for: workspace.id)) == nil)
+        #expect((try? ZellijSessionManager.shared.attachCommand(for: workspace.id)) == nil)
     }
 
     @Test
@@ -537,5 +615,20 @@ struct CmuxHostStoreLifecycleTests {
         )
         hostStore.registerMainWindow(window)
         return (hostStore, window)
+    }
+
+    private func waitUntil(
+        timeout: Duration = .seconds(3),
+        condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        while clock.now < deadline {
+            if condition() {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        throw WaitError.timedOut
     }
 }

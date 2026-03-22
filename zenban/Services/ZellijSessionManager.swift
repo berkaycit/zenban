@@ -12,6 +12,23 @@ final class ZellijSessionManager {
         let sessionName: String
     }
 
+    struct RegistrationResult {
+        let attachCommand: String
+        let startupEnvironment: [String: String]
+        let didChangeStartup: Bool
+    }
+
+    private struct TerminalSessionDescriptor: Equatable {
+        let attachCommand: String
+        let startupEnvironment: [String: String]
+        let workingDirectory: String?
+    }
+
+    private struct BackgroundCreationTaskRecord {
+        let id: UUID
+        let task: Task<Void, Error>
+    }
+
     enum SessionError: Error, LocalizedError {
         case missingSessionSpec
         case missingBundledBinary
@@ -38,11 +55,19 @@ final class ZellijSessionManager {
     static let shared = ZellijSessionManager()
 
     private let fileManager = FileManager.default
+    private let runner = ZellijProcessRunner()
     private var sessionSpecByWorkspaceId: [UUID: SessionSpec] = [:]
-    private var backgroundCreationTasks: [UUID: Task<Void, Error>] = [:]
+    private var descriptorByWorkspaceId: [UUID: TerminalSessionDescriptor] = [:]
+    private var backgroundCreationTasks: [UUID: BackgroundCreationTaskRecord] = [:]
+    private var startupCleanupTask: Task<Void, Never>?
+#if DEBUG
+    private var prepareBackgroundSessionHookForTesting: ((SessionSpec) async throws -> Void)?
+    private var deleteSessionHookForTesting: ((String) async throws -> Void)?
+    private var cleanupSessionsHookForTesting: ((Set<String>) async throws -> Void)?
+#endif
 
     private init() {
-        try? cleanupStaleSessionsSynchronously()
+        startStartupCleanup()
     }
 
     func registerWorkspace(
@@ -50,13 +75,29 @@ final class ZellijSessionManager {
         panelId: UUID,
         portOrdinal: Int,
         workingDirectory: String?
-    ) {
-        sessionSpecByWorkspaceId[workspaceId] = SessionSpec(
+    ) throws -> RegistrationResult {
+        let spec = SessionSpec(
             workspaceId: workspaceId,
             panelId: panelId,
             portOrdinal: portOrdinal,
             workingDirectory: normalizedDirectory(workingDirectory),
             sessionName: Self.sessionName(for: workspaceId)
+        )
+        let descriptor = terminalSessionDescriptor(for: spec)
+        let needsStartupRefresh =
+            descriptorByWorkspaceId[workspaceId] != descriptor ||
+            !fileManager.fileExists(atPath: descriptor.attachCommand)
+
+        if needsStartupRefresh {
+            try writeAttachScript(for: spec, descriptor: descriptor)
+        }
+
+        sessionSpecByWorkspaceId[workspaceId] = spec
+        descriptorByWorkspaceId[workspaceId] = descriptor
+        return RegistrationResult(
+            attachCommand: descriptor.attachCommand,
+            startupEnvironment: descriptor.startupEnvironment,
+            didChangeStartup: needsStartupRefresh
         )
     }
 
@@ -69,17 +110,21 @@ final class ZellijSessionManager {
     }
 
     func attachCommand(for workspaceId: UUID) throws -> String {
-        guard let spec = sessionSpecByWorkspaceId[workspaceId] else {
+        guard let spec = sessionSpecByWorkspaceId[workspaceId],
+              let descriptor = descriptorByWorkspaceId[workspaceId] else {
             throw SessionError.missingSessionSpec
         }
-        return try writeAttachScript(for: spec).path
+        if !fileManager.fileExists(atPath: descriptor.attachCommand) {
+            try writeAttachScript(for: spec, descriptor: descriptor)
+        }
+        return descriptor.attachCommand
     }
 
     func startupEnvironment(for workspaceId: UUID) throws -> [String: String] {
-        guard let spec = sessionSpecByWorkspaceId[workspaceId] else {
+        guard let descriptor = descriptorByWorkspaceId[workspaceId] else {
             throw SessionError.missingSessionSpec
         }
-        return launchRequestEnvironment(for: spec)
+        return descriptor.startupEnvironment
     }
 
     func queueLaunchRequest(
@@ -108,53 +153,132 @@ final class ZellijSessionManager {
         workspaceId: UUID
     ) async throws {
         guard let spec = sessionSpecByWorkspaceId[workspaceId] else { return }
-        if let task = backgroundCreationTasks[workspaceId] {
+        await startupCleanupTask?.value
+        if let task = backgroundCreationTasks[workspaceId]?.task {
             return try await task.value
         }
 
-        let task = Task<Void, Error> { @MainActor in
-            defer { self.backgroundCreationTasks.removeValue(forKey: workspaceId) }
-            let environment = self.backgroundEnvironment(for: spec)
-            var args = try self.baseArguments()
-            args += ["attach", "-b", spec.sessionName, "options", "--default-shell", try self.wrapperPath()]
-            if let workingDirectory = spec.workingDirectory {
-                args += ["--default-cwd", workingDirectory]
+        let configuration = try runnerConfiguration()
+        let environment = backgroundEnvironment(for: spec)
+        let wrapperPath = try wrapperPath()
+        let taskID = UUID()
+        let task = Task<Void, Error> { [runner, configuration, environment, wrapperPath] in
+#if DEBUG
+            if let prepareBackgroundSessionHookForTesting {
+                try await prepareBackgroundSessionHookForTesting(spec)
+                return
             }
-            try self.runSynchronously(arguments: args, environment: environment, ignoredExitStatuses: [])
-            try self.waitForSessionAvailability(spec.sessionName)
+#endif
+            try await runner.prepareBackgroundSession(
+                configuration: configuration,
+                sessionName: spec.sessionName,
+                environment: environment,
+                wrapperPath: wrapperPath,
+                workingDirectory: spec.workingDirectory
+            )
         }
-        backgroundCreationTasks[workspaceId] = task
-        return try await task.value
+        backgroundCreationTasks[workspaceId] = BackgroundCreationTaskRecord(id: taskID, task: task)
+        do {
+            try await task.value
+        } catch {
+            if backgroundCreationTasks[workspaceId]?.id == taskID {
+                backgroundCreationTasks.removeValue(forKey: workspaceId)
+            }
+            throw error
+        }
+        if backgroundCreationTasks[workspaceId]?.id == taskID {
+            backgroundCreationTasks.removeValue(forKey: workspaceId)
+        }
     }
 
     func killSession(for workspaceId: UUID) {
-        guard let spec = sessionSpecByWorkspaceId[workspaceId] else { return }
-        try? removeLaunchRequestFile(for: spec)
-        try? removeAttachScript(for: spec)
-        try? deleteSessionSynchronously(spec.sessionName)
-        sessionSpecByWorkspaceId.removeValue(forKey: workspaceId)
+        let spec = sessionSpecByWorkspaceId[workspaceId]
+        cancelBackgroundCreationTask(for: workspaceId)
+        removeRegistration(for: workspaceId)
+        guard let spec else { return }
+        cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
+        scheduleSessionDeletion(sessionName: spec.sessionName)
     }
 
     func killRuntime(for workspaceId: UUID) {
         guard let spec = sessionSpecByWorkspaceId[workspaceId] else { return }
-        try? deleteSessionSynchronously(spec.sessionName)
+        cancelBackgroundCreationTask(for: workspaceId)
+        cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: false)
+        scheduleSessionDeletion(sessionName: spec.sessionName)
     }
 
     func killAllSessions() {
         let knownSessionNames = Set(sessionSpecByWorkspaceId.values.map(\.sessionName))
-        try? cleanupStaleSessionsSynchronously(additionalSessionNames: knownSessionNames)
+        startupCleanupTask?.cancel()
+        startupCleanupTask = nil
+        for workspaceId in Array(backgroundCreationTasks.keys) {
+            cancelBackgroundCreationTask(for: workspaceId)
+        }
+        for spec in sessionSpecByWorkspaceId.values {
+            cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
+        }
         sessionSpecByWorkspaceId.removeAll(keepingCapacity: false)
+        descriptorByWorkspaceId.removeAll(keepingCapacity: false)
+        Task { [runner] in
+            do {
+                let configuration = try self.runnerConfiguration()
+#if DEBUG
+                if let cleanupSessionsHookForTesting {
+                    try await cleanupSessionsHookForTesting(knownSessionNames)
+                    return
+                }
+#endif
+                try await runner.cleanupStaleSessions(
+                    configuration: configuration,
+                    sessionPrefix: Self.sessionPrefix,
+                    additionalSessionNames: knownSessionNames
+                )
+            } catch {
+                NSLog("Failed to clean up zellij sessions: %@", String(describing: error))
+            }
+        }
     }
 
-    private func writeAttachScript(for spec: SessionSpec) throws -> URL {
+    func forgetWorkspace(_ workspaceId: UUID) {
+        cancelBackgroundCreationTask(for: workspaceId)
+        removeRegistration(for: workspaceId)
+    }
+
+    private func startStartupCleanup() {
+        startupCleanupTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let configuration = try self.runnerConfiguration()
+                try await self.runner.cleanupStaleSessions(
+                    configuration: configuration,
+                    sessionPrefix: Self.sessionPrefix
+                )
+            } catch {
+                NSLog("Failed initial zellij cleanup: %@", String(describing: error))
+            }
+        }
+    }
+
+    private func terminalSessionDescriptor(for spec: SessionSpec) -> TerminalSessionDescriptor {
+        TerminalSessionDescriptor(
+            attachCommand: attachScriptURL(for: spec).path,
+            startupEnvironment: launchRequestEnvironment(for: spec),
+            workingDirectory: spec.workingDirectory
+        )
+    }
+
+    private func writeAttachScript(
+        for spec: SessionSpec,
+        descriptor: TerminalSessionDescriptor
+    ) throws {
         try ensureRuntimeDirectories()
         let scriptURL = attachScriptURL(for: spec)
         var components = try baseArguments().map(Self.shellQuoted)
         components += ["attach", "-c", Self.shellQuoted(spec.sessionName), "options", "--default-shell", Self.shellQuoted(try wrapperPath())]
-        if let workingDirectory = spec.workingDirectory {
+        if let workingDirectory = descriptor.workingDirectory {
             components += ["--default-cwd", Self.shellQuoted(workingDirectory)]
         }
-        let exports = launchRequestEnvironment(for: spec)
+        let exports = descriptor.startupEnvironment
             .sorted { $0.key < $1.key }
             .map { "export \($0.key)=\(Self.shellQuoted($0.value))" }
             .joined(separator: "\n")
@@ -165,7 +289,6 @@ final class ZellijSessionManager {
         """
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
-        return scriptURL
     }
 
     private func backgroundEnvironment(for spec: SessionSpec) -> [String: String] {
@@ -184,6 +307,13 @@ final class ZellijSessionManager {
             "CMUX_ZELLIJ_LAUNCH_FILE": launchRequestFileURL(for: spec).path,
             "CMUX_ZELLIJ_SHELL": shellPath,
         ]
+    }
+
+    private func runnerConfiguration() throws -> ZellijProcessConfiguration {
+        ZellijProcessConfiguration(
+            baseArguments: try baseArguments(),
+            environment: mergedEnvironment(overrides: nil)
+        )
     }
 
     private func baseArguments() throws -> [String] {
@@ -230,100 +360,46 @@ final class ZellijSessionManager {
         try fileManager.removeItem(at: scriptURL)
     }
 
-    private func deleteSessionSynchronously(_ sessionName: String) throws {
-        var args = try baseArguments()
-        args += ["delete-session", "-f", sessionName]
-        try runSynchronously(arguments: args, environment: nil, ignoredExitStatuses: [1])
+    private func removeRegistration(for workspaceId: UUID) {
+        sessionSpecByWorkspaceId.removeValue(forKey: workspaceId)
+        descriptorByWorkspaceId.removeValue(forKey: workspaceId)
     }
 
-    private func cleanupStaleSessionsSynchronously(
-        additionalSessionNames: Set<String> = []
-    ) throws {
-        let sessionNamesToDelete = try currentSessionNamesSynchronously()
-            .filter { $0.hasPrefix(Self.sessionPrefix) || additionalSessionNames.contains($0) }
-        for sessionName in sessionNamesToDelete {
-            try deleteSessionSynchronously(sessionName)
-        }
+    private func cleanupWorkspaceArtifacts(for spec: SessionSpec, removeAttachScriptFile: Bool) {
+        try? removeLaunchRequestFile(for: spec)
+        guard removeAttachScriptFile else { return }
+        try? removeAttachScript(for: spec)
     }
 
-    private func currentSessionNamesSynchronously() throws -> [String] {
-        var args = try baseArguments()
-        args += ["list-sessions", "--short"]
-        let result = try runAndCaptureSynchronously(arguments: args, environment: nil)
-        if result.status != 0,
-           result.output.localizedCaseInsensitiveContains("No active zellij sessions found") {
-            return []
-        }
-        if result.status != 0 && result.output.isEmpty {
-            return []
-        }
-        if result.status != 0 {
-            throw SessionError.processFailed(
-                command: args.joined(separator: " "),
-                status: result.status,
-                output: result.output
-            )
-        }
-        return result.output
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+    private func cancelBackgroundCreationTask(for workspaceId: UUID) {
+        backgroundCreationTasks[workspaceId]?.task.cancel()
+        backgroundCreationTasks.removeValue(forKey: workspaceId)
     }
 
-    private func waitForSessionAvailability(_ sessionName: String) throws {
-        for _ in 0..<40 {
-            if try currentSessionNamesSynchronously().contains(sessionName) {
-                return
+    private func scheduleSessionDeletion(sessionName: String) {
+        Task { [runner] in
+            do {
+                let configuration = try self.runnerConfiguration()
+#if DEBUG
+                if let deleteSessionHookForTesting {
+                    try await deleteSessionHookForTesting(sessionName)
+                    return
+                }
+#endif
+                try await runner.deleteSession(
+                    configuration: configuration,
+                    sessionName: sessionName,
+                    ignoredExitStatuses: [1]
+                )
+            } catch is CancellationError {
+            } catch {
+                NSLog(
+                    "Failed to delete zellij session %@: %@",
+                    sessionName,
+                    String(describing: error)
+                )
             }
-            Thread.sleep(forTimeInterval: 0.1)
         }
-        throw SessionError.processFailed(
-            command: "wait-for-session \(sessionName)",
-            status: 1,
-            output: "Timed out waiting for session metadata."
-        )
-    }
-
-    private func runSynchronously(
-        arguments: [String],
-        environment: [String: String]?,
-        ignoredExitStatuses: Set<Int32>
-    ) throws {
-        let result = try runAndCaptureSynchronously(arguments: arguments, environment: environment)
-        if result.status == 0 || ignoredExitStatuses.contains(result.status) {
-            return
-        }
-        throw SessionError.processFailed(
-            command: arguments.joined(separator: " "),
-            status: result.status,
-            output: result.output
-        )
-    }
-
-    private func runAndCaptureSynchronously(
-        arguments: [String],
-        environment: [String: String]?
-    ) throws -> (status: Int32, output: String) {
-        let process = Process()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: arguments[0])
-        process.arguments = Array(arguments.dropFirst())
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        process.environment = mergedEnvironment(overrides: environment)
-
-        try process.run()
-        process.waitUntilExit()
-
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        var combinedOutput = Data()
-        combinedOutput.append(stdoutData)
-        combinedOutput.append(stderrData)
-        let output = String(data: combinedOutput, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return (process.terminationStatus, output)
     }
 
     private func launchRequestFileURL(for spec: SessionSpec) -> URL {
@@ -397,3 +473,35 @@ final class ZellijSessionManager {
         return environment
     }
 }
+
+#if DEBUG
+extension ZellijSessionManager {
+    func configureBackgroundSessionHookForTesting(
+        _ hook: ((SessionSpec) async throws -> Void)? = nil
+    ) {
+        prepareBackgroundSessionHookForTesting = hook
+    }
+
+    func configureDeleteSessionHookForTesting(
+        _ hook: ((String) async throws -> Void)? = nil
+    ) {
+        deleteSessionHookForTesting = hook
+    }
+
+    func configureCleanupSessionsHookForTesting(
+        _ hook: ((Set<String>) async throws -> Void)? = nil
+    ) {
+        cleanupSessionsHookForTesting = hook
+    }
+
+    func resetTestingHooks() {
+        prepareBackgroundSessionHookForTesting = nil
+        deleteSessionHookForTesting = nil
+        cleanupSessionsHookForTesting = nil
+    }
+
+    func hasBackgroundCreationTaskForTesting(workspaceId: UUID) -> Bool {
+        backgroundCreationTasks[workspaceId] != nil
+    }
+}
+#endif

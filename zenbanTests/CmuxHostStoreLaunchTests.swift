@@ -217,6 +217,123 @@ struct CmuxHostStoreLaunchTests {
     }
 
     @Test
+    func claudeLaunchRetriesOnceAfterAckTimeoutThenWaitsForManualRetry() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let prompt = "Investigate the failing login tests"
+        let seededCard = Card(
+            title: "cc-42",
+            lastSubmittedPrompt: prompt,
+            pendingLaunchPrompt: prompt,
+            column: .todo,
+            orderIndex: 0,
+            agent: .claude,
+            worktreePath: tempDirectory.path
+        )
+        let board = Board(
+            name: "Workspace Ownership",
+            cards: [seededCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = seededCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
+        hostStore.setPendingLaunchAckTimeoutForTesting(0.05)
+        defer {
+            hostStore.resetClaudeLaunchHooksForTesting()
+            hostStore.setPendingLaunchAckTimeoutForTesting(5)
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: seededCard, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: seededCard.id)
+        try await waitUntil {
+            launchRequestRecord(hostStore: hostStore, cardID: seededCard.id) != nil
+        }
+
+        let initialRequest = try #require(
+            launchRequestRecord(hostStore: hostStore, cardID: seededCard.id)
+        )
+
+        try await waitUntil {
+            guard let retriedRequest = launchRequestRecord(hostStore: hostStore, cardID: seededCard.id) else {
+                return false
+            }
+            return retriedRequest.token != initialRequest.token
+        }
+
+        let retriedRequest = try #require(
+            launchRequestRecord(hostStore: hostStore, cardID: seededCard.id)
+        )
+        let retriedSnapshot = try #require(
+            hostStore.pendingLaunchSnapshotForTesting(cardID: seededCard.id)
+        )
+        #expect(retriedRequest.url == initialRequest.url)
+        #expect(retriedRequest.token != initialRequest.token)
+        #expect(retriedSnapshot.retryCount == 1)
+        #expect(!retriedSnapshot.needsRequeue)
+
+        try await waitUntil {
+            hostStore.pendingLaunchSnapshotForTesting(cardID: seededCard.id)?.needsRequeue == true
+        }
+
+        let manualRetrySnapshot = try #require(
+            hostStore.pendingLaunchSnapshotForTesting(cardID: seededCard.id)
+        )
+        #expect(manualRetrySnapshot.retryCount == 0)
+        #expect(manualRetrySnapshot.needsRequeue)
+        #expect(manualRetrySnapshot.token != retriedRequest.token)
+        #expect(boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == prompt)
+        #expect(!FileManager.default.fileExists(atPath: retriedRequest.url.path))
+
+        hostStore.syncSelection(card: seededCard, boardID: board.id)
+        try markWorkspacePromptIdle(hostStore: hostStore, cardID: seededCard.id)
+        try await waitUntil {
+            launchRequestRecord(hostStore: hostStore, cardID: seededCard.id)?.token == manualRetrySnapshot.token
+        }
+
+        #expect(hostStore.acknowledgePendingLaunchForTesting(cardID: seededCard.id))
+        try await waitUntil { boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == nil }
+    }
+
+    @Test
+    func syncSelectionReusesAttachScriptAndStartupEnvironmentWhenUnchanged() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path)
+        let hostStore = makeHostStore(boardStore: boardStore)
+        defer {
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let initialAttachCommand = try ZellijSessionManager.shared.attachCommand(for: workspace.id)
+        let initialEnvironment = try ZellijSessionManager.shared.startupEnvironment(for: workspace.id)
+        let initialModificationDate = try #require(
+            try FileManager.default
+                .attributesOfItem(atPath: initialAttachCommand)[.modificationDate] as? Date
+        )
+
+        try await Task.sleep(for: .milliseconds(1200))
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let updatedAttachCommand = try ZellijSessionManager.shared.attachCommand(for: workspace.id)
+        let updatedEnvironment = try ZellijSessionManager.shared.startupEnvironment(for: workspace.id)
+        let updatedModificationDate = try #require(
+            try FileManager.default
+                .attributesOfItem(atPath: updatedAttachCommand)[.modificationDate] as? Date
+        )
+
+        #expect(updatedAttachCommand == initialAttachCommand)
+        #expect(updatedEnvironment == initialEnvironment)
+        #expect(updatedModificationDate == initialModificationDate)
+    }
+
+    @Test
     func claudeWorkspaceEnablesPromptCaptureWithoutAgentPid() async throws {
         let tempDirectory = try makeTemporaryDirectory()
         let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path)

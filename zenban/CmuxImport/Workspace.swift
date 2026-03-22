@@ -1130,10 +1130,6 @@ final class Workspace: Identifiable, ObservableObject {
         )
     }
 
-    func configureTerminalStartupCommand(_ command: String?) {
-        configureTerminalStartup(command: command, environment: terminalStartupEnvironment)
-    }
-
     func configureTerminalStartup(
         command: String?,
         environment: [String: String] = [:]

@@ -58,8 +58,6 @@ typeset -g _CMUX_CMD_START=0
 typeset -g _CMUX_SHELL_ACTIVITY_LAST=""
 typeset -g _CMUX_TTY_NAME=""
 typeset -g _CMUX_TTY_REPORTED=0
-typeset -g _CMUX_ZELLIJ_LAUNCH_TOKEN=""
-typeset -g _CMUX_ZELLIJ_LAUNCH_COMMAND=""
 
 _cmux_git_resolve_head_path() {
     # Resolve the HEAD file path without invoking git (fast; works for worktrees).
@@ -151,9 +149,6 @@ _cmux_consume_zellij_launch_request() {
     if [[ -z "$token" ]]; then
         token="legacy-$$-${EPOCHSECONDS:-0}"
     fi
-
-    _CMUX_ZELLIJ_LAUNCH_TOKEN="$token"
-    _CMUX_ZELLIJ_LAUNCH_COMMAND="$launch_command"
 
     if [[ -S "$CMUX_SOCKET_PATH" ]] && [[ -n "$CMUX_TAB_ID" ]] && [[ -n "$CMUX_PANEL_ID" ]]; then
         _cmux_send "launch_request_started $token --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"

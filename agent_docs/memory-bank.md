@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Refine Zellij launch lifecycle handling
+- **Description**: Zellij-backed card sessions now move their blocking session prep and cleanup work into a dedicated process runner, while `CmuxHostStore` uses a single queue-and-ack launch path with timeout-based retry instead of the legacy direct-send branch. Startup attach scripts and launch env are cached per workspace so repeated selection syncs do not rewrite the same files, recoverable setup failures now log and preserve pending prompts instead of crashing, and dead launch-shell plumbing was removed. Added focused launch, lifecycle, environment, and session-manager regressions around retry, cleanup, hidden detach, and startup wiring.
+
 - **Summary**: Queue Claude launch until shell ack
 - **Description**: Claude launch delivery now writes a tokenized Zellij request file and waits for a shell-side `launch_request_started` acknowledgement before Zenban finalizes launch state. Visible cards nudge the prompt with a newline instead of injecting the full Claude command through Ghostty, and pending launches survive workspace recreation until they are acknowledged. Shell integration, host-store state, and launch regression tests were updated together so the post-Zellij race no longer drops Claude starts silently.
 
