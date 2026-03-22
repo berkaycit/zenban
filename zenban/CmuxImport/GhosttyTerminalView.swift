@@ -2068,6 +2068,49 @@ class GhosttyApp {
         }
 
         switch action.tag {
+        case GHOSTTY_ACTION_NEW_TAB:
+            guard let tabId = surfaceView.tabId else {
+                return false
+            }
+            return performOnMain {
+                guard let manager = AppDelegate.shared?.tabManagerFor(tabId: tabId)
+                        ?? AppDelegate.shared?.tabManager else {
+                    return false
+                }
+                if manager.selectedTabId != tabId {
+                    manager.selectedTabId = tabId
+                }
+                manager.selectedWorkspace?.clearSplitZoom()
+                manager.newSurface()
+                return true
+            }
+        case GHOSTTY_ACTION_GOTO_TAB:
+            guard let tabId = surfaceView.tabId else {
+                return false
+            }
+            let target = Int(action.action.goto_tab.rawValue)
+            return performOnMain {
+                guard let manager = AppDelegate.shared?.tabManagerFor(tabId: tabId)
+                        ?? AppDelegate.shared?.tabManager else {
+                    return false
+                }
+                if manager.selectedTabId != tabId {
+                    manager.selectedTabId = tabId
+                }
+                switch target {
+                case Int(GHOSTTY_GOTO_TAB_PREVIOUS.rawValue):
+                    manager.selectPreviousSurface()
+                case Int(GHOSTTY_GOTO_TAB_NEXT.rawValue):
+                    manager.selectNextSurface()
+                case Int(GHOSTTY_GOTO_TAB_LAST.rawValue):
+                    manager.selectLastSurface()
+                case let index where index >= 0:
+                    manager.selectSurface(at: index)
+                default:
+                    return false
+                }
+                return true
+            }
         case GHOSTTY_ACTION_NEW_SPLIT:
             guard let tabId = surfaceView.tabId,
                   let surfaceId = surfaceView.terminalSurface?.id,
@@ -4769,6 +4812,14 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     func clearIMEPointForTesting() {
         imePointOverrideForTesting = nil
     }
+
+    private static var bindingFlagsOverrideForTesting: ((NSEvent) -> ghostty_binding_flags_e?)?
+
+    static func setBindingFlagsOverrideForTesting(
+        _ override: ((NSEvent) -> ghostty_binding_flags_e?)? = nil
+    ) {
+        bindingFlagsOverrideForTesting = override
+    }
 #endif
 
 #if DEBUG
@@ -4819,6 +4870,38 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         insertText(insertString, replacementRange: NSRange(location: NSNotFound, length: 0))
     }
 
+    func bindingFlagsForKeyEquivalentEvent(
+        _ event: NSEvent,
+        requireCommandModifier: Bool = true
+    ) -> ghostty_binding_flags_e? {
+        guard event.type == .keyDown else { return nil }
+        guard let surface = ensureSurfaceReadyForInput() else { return nil }
+
+        if hasMarkedText(), !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
+            return nil
+        }
+
+#if DEBUG
+        if let override = Self.bindingFlagsOverrideForTesting {
+            return override(event)
+        }
+#endif
+
+        var keyEvent = ghosttyKeyEvent(for: event, surface: surface)
+        let text = event.characters ?? ""
+        var flags = ghostty_binding_flags_e(0)
+        let isBinding = text.withCString { ptr in
+            keyEvent.text = ptr
+            return ghostty_surface_key_is_binding(surface, keyEvent, &flags)
+        }
+        guard isBinding else { return nil }
+        if requireCommandModifier,
+           !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
+            return nil
+        }
+        return flags
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
 #if DEBUG
         let typingTimingStart = CmuxTypingTiming.start()
@@ -4833,7 +4916,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard event.type == .keyDown else { return false }
         guard let fr = window?.firstResponder as? NSView,
               fr === self || fr.isDescendant(of: self) else { return false }
-        guard let surface = ensureSurfaceReadyForInput() else { return false }
+        guard ensureSurfaceReadyForInput() != nil else { return false }
 
         // If the IME is composing (marked text present) and the key has no Cmd
         // modifier, don't intercept — let it flow through to keyDown so the input
@@ -4861,16 +4944,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 #endif
 
         // Check if this event matches a Ghostty keybinding.
-        let bindingFlags: ghostty_binding_flags_e? = {
-            var keyEvent = ghosttyKeyEvent(for: event, surface: surface)
-            let text = event.characters ?? ""
-            var flags = ghostty_binding_flags_e(0)
-            let isBinding = text.withCString { ptr in
-                keyEvent.text = ptr
-                return ghostty_surface_key_is_binding(surface, keyEvent, &flags)
-            }
-            return isBinding ? flags : nil
-        }()
+        let bindingFlags = bindingFlagsForKeyEquivalentEvent(
+            event,
+            requireCommandModifier: false
+        )
 
         if let bindingFlags {
             let isConsumed = (bindingFlags.rawValue & GHOSTTY_BINDING_FLAGS_CONSUMED.rawValue) != 0

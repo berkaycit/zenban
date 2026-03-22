@@ -910,6 +910,16 @@ struct ClosedBrowserPanelRestoreSnapshot {
 /// Each workspace contains one BonsplitController that manages split panes and nested surfaces.
 @MainActor
 final class Workspace: Identifiable, ObservableObject {
+    enum TerminalLaunchMode: String {
+        case workspaceRootManagedSession
+        case independentPersistent
+    }
+
+    struct TerminalStartupConfiguration {
+        let command: String?
+        let environment: [String: String]
+    }
+
     let id: UUID
     @Published var title: String
     @Published var customTitle: String?
@@ -941,11 +951,15 @@ final class Workspace: Identifiable, ObservableObject {
     /// Per-panel inherited zoom lineage. Descendants reuse this root value unless
     /// a panel is explicitly re-zoomed by the user.
     private var terminalInheritanceFontPointsByPanelId: [UUID: Float] = [:]
-    private var terminalStartupCommand: String?
-    private var terminalStartupEnvironment: [String: String] = [:]
+    private var defaultTerminalWorkingDirectory: String?
+    private var workspaceRootTerminalStartupCommand: String?
+    private var workspaceRootTerminalStartupEnvironment: [String: String] = [:]
+    private var terminalLaunchModeByPanelId: [UUID: TerminalLaunchMode] = [:]
 
     /// Callback used by TabManager to capture recently closed browser panels for Cmd+Shift+T restore.
     var onClosedBrowserPanel: ((ClosedBrowserPanelRestoreSnapshot) -> Void)?
+    var resolveTerminalStartupConfiguration: ((Workspace, TerminalPanel, TerminalLaunchMode) -> TerminalStartupConfiguration?)?
+    var onDidCloseTerminalPanel: ((Workspace, UUID, TerminalLaunchMode) -> Void)?
     weak var owningTabManager: TabManager?
 
 
@@ -1134,12 +1148,85 @@ final class Workspace: Identifiable, ObservableObject {
         command: String?,
         environment: [String: String] = [:]
     ) {
-        terminalStartupCommand = command?.trimmingCharacters(in: .whitespacesAndNewlines)
-        terminalStartupEnvironment = environment
-        for terminalPanel in panels.values.compactMap({ $0 as? TerminalPanel }) {
-            terminalPanel.updateStartupCommand(terminalStartupCommand)
-            terminalPanel.updateStartupEnvironment(terminalStartupEnvironment)
+        workspaceRootTerminalStartupCommand = command?.trimmingCharacters(in: .whitespacesAndNewlines)
+        workspaceRootTerminalStartupEnvironment = environment
+        if let rootTerminalPanel = workspaceRootTerminalPanel() {
+            applyTerminalStartupConfiguration(
+                .init(
+                    command: workspaceRootTerminalStartupCommand,
+                    environment: workspaceRootTerminalStartupEnvironment
+                ),
+                to: rootTerminalPanel
+            )
         }
+    }
+
+    func setDefaultTerminalWorkingDirectory(_ directory: String?) {
+        let trimmedDirectory = directory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        defaultTerminalWorkingDirectory = trimmedDirectory.isEmpty ? nil : trimmedDirectory
+    }
+
+    func workspaceRootTerminalPanel() -> TerminalPanel? {
+        guard let panelId = terminalLaunchModeByPanelId.first(where: { $0.value == .workspaceRootManagedSession })?.key else {
+            return nil
+        }
+        return terminalPanel(for: panelId)
+    }
+
+    @discardableResult
+    func ensureWorkspaceRootTerminalPanel(focus: Bool? = nil) -> TerminalPanel? {
+        if let existing = workspaceRootTerminalPanel() {
+            return existing
+        }
+
+        guard let paneId = bonsplitController.focusedPaneId ?? bonsplitController.allPaneIds.first else {
+            return nil
+        }
+        return newTerminalSurface(
+            inPane: paneId,
+            focus: focus,
+            launchMode: .workspaceRootManagedSession
+        )
+    }
+
+    private func applyTerminalStartupConfiguration(
+        _ configuration: TerminalStartupConfiguration,
+        to terminalPanel: TerminalPanel
+    ) {
+        terminalPanel.updateStartupCommand(configuration.command)
+        terminalPanel.updateStartupEnvironment(configuration.environment)
+    }
+
+    private func terminalStartupConfiguration(
+        for terminalPanel: TerminalPanel,
+        launchMode: TerminalLaunchMode
+    ) -> TerminalStartupConfiguration {
+        var configuration: TerminalStartupConfiguration
+        switch launchMode {
+        case .workspaceRootManagedSession:
+            configuration = TerminalStartupConfiguration(
+                command: workspaceRootTerminalStartupCommand,
+                environment: workspaceRootTerminalStartupEnvironment
+            )
+        case .independentPersistent:
+            configuration = TerminalStartupConfiguration(command: nil, environment: [:])
+        }
+
+        if let resolved = resolveTerminalStartupConfiguration?(self, terminalPanel, launchMode) {
+            configuration = resolved
+        }
+        return configuration
+    }
+
+    private func configureNewTerminalPanel(
+        _ terminalPanel: TerminalPanel,
+        launchMode: TerminalLaunchMode
+    ) {
+        terminalLaunchModeByPanelId[terminalPanel.id] = launchMode
+        applyTerminalStartupConfiguration(
+            terminalStartupConfiguration(for: terminalPanel, launchMode: launchMode),
+            to: terminalPanel
+        )
     }
 
     init(
@@ -1156,6 +1243,7 @@ final class Workspace: Identifiable, ObservableObject {
 
         let trimmedWorkingDirectory = workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let hasWorkingDirectory = !trimmedWorkingDirectory.isEmpty
+        self.defaultTerminalWorkingDirectory = hasWorkingDirectory ? trimmedWorkingDirectory : nil
         self.currentDirectory = hasWorkingDirectory
             ? trimmedWorkingDirectory
             : FileManager.default.homeDirectoryForCurrentUser.path
@@ -1190,11 +1278,10 @@ final class Workspace: Identifiable, ObservableObject {
             workspaceId: id,
             context: GHOSTTY_SURFACE_CONTEXT_TAB,
             configTemplate: configTemplate,
-            workingDirectory: hasWorkingDirectory ? trimmedWorkingDirectory : nil,
-            startupEnvironment: terminalStartupEnvironment,
-            startupCommand: terminalStartupCommand,
+            workingDirectory: defaultTerminalWorkingDirectory,
             portOrdinal: portOrdinal
         )
+        configureNewTerminalPanel(terminalPanel, launchMode: .workspaceRootManagedSession)
         panels[terminalPanel.id] = terminalPanel
         panelTitles[terminalPanel.id] = terminalPanel.displayTitle
         seedTerminalInheritanceFontPoints(panelId: terminalPanel.id, configTemplate: configTemplate)
@@ -1311,6 +1398,7 @@ final class Workspace: Identifiable, ObservableObject {
     struct DetachedSurfaceTransfer {
         let panelId: UUID
         let panel: any Panel
+        let terminalLaunchMode: TerminalLaunchMode?
         let title: String
         let icon: String?
         let iconImageData: Data?
@@ -2073,7 +2161,8 @@ final class Workspace: Identifiable, ObservableObject {
 
     private func inheritedTerminalConfig(
         preferredPanelId: UUID? = nil,
-        inPane preferredPaneId: PaneID? = nil
+        inPane preferredPaneId: PaneID? = nil,
+        context: ghostty_surface_context_e = GHOSTTY_SURFACE_CONTEXT_SPLIT
     ) -> ghostty_surface_config_s? {
         // Walk candidates in priority order and use the first panel with a live surface.
         // This avoids returning nil when the top candidate exists but is not attached yet.
@@ -2084,7 +2173,7 @@ final class Workspace: Identifiable, ObservableObject {
             guard let sourceSurface = terminalPanel.surface.surface else { continue }
             var config = cmuxInheritedSurfaceConfig(
                 sourceSurface: sourceSurface,
-                context: GHOSTTY_SURFACE_CONTEXT_SPLIT
+                context: context
             )
             if let rootedFontPoints = resolvedTerminalInheritanceFontPoints(
                 for: terminalPanel,
@@ -2106,7 +2195,7 @@ final class Workspace: Identifiable, ObservableObject {
             config.font_size = fallbackFontPoints
 #if DEBUG
             dlog(
-                "zoom.inherit fallback=lastKnownFont context=split font=\(String(format: "%.2f", fallbackFontPoints))"
+                "zoom.inherit fallback=lastKnownFont context=\(cmuxSurfaceContextName(context)) font=\(String(format: "%.2f", fallbackFontPoints))"
             )
 #endif
             return config
@@ -2135,28 +2224,16 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         guard let paneId = sourcePaneId else { return nil }
-        let inheritedConfig = inheritedTerminalConfig(preferredPanelId: panelId, inPane: paneId)
+        let inheritedConfig = inheritedTerminalConfig(
+            preferredPanelId: panelId,
+            inPane: paneId,
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT
+        )
 
-        // Inherit working directory: prefer the source panel's reported cwd,
-        // then its requested startup cwd if shell integration has not reported
-        // back yet, and finally fall back to the workspace's current directory.
-        let splitWorkingDirectory: String? = {
-            if let panelDirectory = panelDirectories[panelId]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !panelDirectory.isEmpty {
-                return panelDirectory
-            }
-            if let requestedWorkingDirectory = terminalPanel(for: panelId)?
-                .requestedWorkingDirectory?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-               !requestedWorkingDirectory.isEmpty {
-                return requestedWorkingDirectory
-            }
-            let workspaceDirectory = currentDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-            return workspaceDirectory.isEmpty ? nil : workspaceDirectory
-        }()
+        let splitWorkingDirectory = preferredNewTerminalWorkingDirectory()
 #if DEBUG
         dlog(
-            "split.cwd panelId=\(panelId.uuidString.prefix(5)) panelDir=\(panelDirectories[panelId] ?? "nil") requestedDir=\(terminalPanel(for: panelId)?.requestedWorkingDirectory ?? "nil") currentDir=\(currentDirectory) resolved=\(splitWorkingDirectory ?? "nil")"
+            "split.cwd panelId=\(panelId.uuidString.prefix(5)) defaultDir=\(defaultTerminalWorkingDirectory ?? "nil") panelDir=\(panelDirectories[panelId] ?? "nil") requestedDir=\(terminalPanel(for: panelId)?.requestedWorkingDirectory ?? "nil") currentDir=\(currentDirectory) resolved=\(splitWorkingDirectory ?? "nil")"
         )
 #endif
 
@@ -2166,10 +2243,9 @@ final class Workspace: Identifiable, ObservableObject {
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
             configTemplate: inheritedConfig,
             workingDirectory: splitWorkingDirectory,
-            startupEnvironment: terminalStartupEnvironment,
-            startupCommand: terminalStartupCommand,
             portOrdinal: portOrdinal
         )
+        configureNewTerminalPanel(newPanel, launchMode: .independentPersistent)
         panels[newPanel.id] = newPanel
         panelTitles[newPanel.id] = newPanel.displayTitle
         seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
@@ -2234,23 +2310,31 @@ final class Workspace: Identifiable, ObservableObject {
         inPane paneId: PaneID,
         focus: Bool? = nil,
         workingDirectory: String? = nil,
-        startupEnvironment: [String: String] = [:]
+        startupEnvironment: [String: String] = [:],
+        launchMode: TerminalLaunchMode = .independentPersistent
     ) -> TerminalPanel? {
         let shouldFocusNewTab = focus ?? (bonsplitController.focusedPaneId == paneId)
 
-        let inheritedConfig = inheritedTerminalConfig(inPane: paneId)
+        let surfaceContext: ghostty_surface_context_e = GHOSTTY_SURFACE_CONTEXT_TAB
+        let inheritedConfig = inheritedTerminalConfig(
+            inPane: paneId,
+            context: surfaceContext
+        )
+        let resolvedWorkingDirectory = {
+            let trimmedWorkingDirectory = workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmedWorkingDirectory.isEmpty ? preferredNewTerminalWorkingDirectory() : trimmedWorkingDirectory
+        }()
 
         // Create new terminal panel
         let newPanel = TerminalPanel(
             workspaceId: id,
-            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            context: surfaceContext,
             configTemplate: inheritedConfig,
-            workingDirectory: workingDirectory,
+            workingDirectory: resolvedWorkingDirectory,
             additionalEnvironment: startupEnvironment,
-            startupEnvironment: terminalStartupEnvironment,
-            startupCommand: terminalStartupCommand,
             portOrdinal: portOrdinal
         )
+        configureNewTerminalPanel(newPanel, launchMode: launchMode)
         panels[newPanel.id] = newPanel
         panelTitles[newPanel.id] = newPanel.displayTitle
         seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
@@ -2540,6 +2624,7 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         panels.removeAll(keepingCapacity: false)
+        terminalLaunchModeByPanelId.removeAll(keepingCapacity: false)
         surfaceIdToPanelId.removeAll(keepingCapacity: false)
         panelSubscriptions.removeAll(keepingCapacity: false)
         pruneSurfaceMetadata(validSurfaceIds: [])
@@ -3040,6 +3125,11 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         panels[detached.panelId] = detached.panel
+        if let terminalLaunchMode = detached.terminalLaunchMode {
+            terminalLaunchModeByPanelId[detached.panelId] = terminalLaunchMode
+        } else {
+            terminalLaunchModeByPanelId.removeValue(forKey: detached.panelId)
+        }
         if let terminalPanel = detached.panel as? TerminalPanel {
             terminalPanel.updateWorkspaceId(id)
         } else if let browserPanel = detached.panel as? BrowserPanel {
@@ -3081,6 +3171,7 @@ final class Workspace: Identifiable, ObservableObject {
             inPane: paneId
         ) else {
             panels.removeValue(forKey: detached.panelId)
+            terminalLaunchModeByPanelId.removeValue(forKey: detached.panelId)
             panelDirectories.removeValue(forKey: detached.panelId)
             panelTitles.removeValue(forKey: detached.panelId)
             panelCustomTitles.removeValue(forKey: detached.panelId)
@@ -3545,14 +3636,17 @@ final class Workspace: Identifiable, ObservableObject {
     func createReplacementTerminalPanel() -> TerminalPanel {
         let inheritedConfig = inheritedTerminalConfig(
             preferredPanelId: focusedPanelId,
-            inPane: bonsplitController.focusedPaneId
+            inPane: bonsplitController.focusedPaneId,
+            context: GHOSTTY_SURFACE_CONTEXT_TAB
         )
         let newPanel = TerminalPanel(
             workspaceId: id,
             context: GHOSTTY_SURFACE_CONTEXT_TAB,
             configTemplate: inheritedConfig,
+            workingDirectory: preferredNewTerminalWorkingDirectory(),
             portOrdinal: portOrdinal
         )
+        configureNewTerminalPanel(newPanel, launchMode: .workspaceRootManagedSession)
         panels[newPanel.id] = newPanel
         panelTitles[newPanel.id] = newPanel.displayTitle
         seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
@@ -3569,6 +3663,20 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         return newPanel
+    }
+
+    private func preferredNewTerminalWorkingDirectory() -> String? {
+        if let defaultTerminalWorkingDirectory {
+            return defaultTerminalWorkingDirectory
+        }
+        if let rootRequestedWorkingDirectory = workspaceRootTerminalPanel()?
+            .requestedWorkingDirectory?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !rootRequestedWorkingDirectory.isEmpty {
+            return rootRequestedWorkingDirectory
+        }
+        let workspaceDirectory = currentDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        return workspaceDirectory.isEmpty ? nil : workspaceDirectory
     }
 
     /// Check if any panel needs close confirmation
@@ -4741,6 +4849,7 @@ extension Workspace: BonsplitDelegate {
             pendingDetachedSurfaces[tabId] = DetachedSurfaceTransfer(
                 panelId: panelId,
                 panel: panel,
+                terminalLaunchMode: terminalLaunchModeByPanelId[panelId],
                 title: resolvedPanelTitle(panelId: panelId, fallback: transferFallbackTitle),
                 icon: panel.displayIcon,
                 iconImageData: browserPanel?.faviconPNGData,
@@ -4757,9 +4866,13 @@ extension Workspace: BonsplitDelegate {
                 onClosedBrowserPanel?(closedBrowserRestoreSnapshot)
             }
             panel?.close()
+            if let launchMode = terminalLaunchModeByPanelId[panelId] {
+                onDidCloseTerminalPanel?(self, panelId, launchMode)
+            }
         }
 
         panels.removeValue(forKey: panelId)
+        terminalLaunchModeByPanelId.removeValue(forKey: panelId)
         surfaceIdToPanelId.removeValue(forKey: tabId)
         panelDirectories.removeValue(forKey: panelId)
         panelGitBranches.removeValue(forKey: panelId)
@@ -4941,7 +5054,11 @@ extension Workspace: BonsplitDelegate {
                 )
 #endif
                 panels[panelId]?.close()
+                if let launchMode = terminalLaunchModeByPanelId[panelId] {
+                    onDidCloseTerminalPanel?(self, panelId, launchMode)
+                }
                 panels.removeValue(forKey: panelId)
+                terminalLaunchModeByPanelId.removeValue(forKey: panelId)
                 panelDirectories.removeValue(forKey: panelId)
                 panelGitBranches.removeValue(forKey: panelId)
                 panelPullRequests.removeValue(forKey: panelId)
@@ -5078,7 +5195,10 @@ extension Workspace: BonsplitDelegate {
                     // Keep the existing placeholder tab identity and replace only the panel mapping.
                     // This avoids an extra create+close tab churn that can transiently render an
                     // empty pane during drag-to-split of a single-tab pane.
-                    let inheritedConfig = inheritedTerminalConfig(inPane: originalPane)
+                    let inheritedConfig = inheritedTerminalConfig(
+                        inPane: originalPane,
+                        context: GHOSTTY_SURFACE_CONTEXT_SPLIT
+                    )
 
                     let replacementPanel = TerminalPanel(
                         workspaceId: id,
@@ -5086,6 +5206,7 @@ extension Workspace: BonsplitDelegate {
                         configTemplate: inheritedConfig,
                         portOrdinal: portOrdinal
                     )
+                    configureNewTerminalPanel(replacementPanel, launchMode: .independentPersistent)
                     panels[replacementPanel.id] = replacementPanel
                     panelTitles[replacementPanel.id] = replacementPanel.displayTitle
                     seedTerminalInheritanceFontPoints(panelId: replacementPanel.id, configTemplate: inheritedConfig)
@@ -5143,7 +5264,8 @@ extension Workspace: BonsplitDelegate {
 
         let inheritedConfig = inheritedTerminalConfig(
             preferredPanelId: sourcePanelId,
-            inPane: originalPane
+            inPane: originalPane,
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT
         )
 
         let newPanel = TerminalPanel(
@@ -5152,6 +5274,7 @@ extension Workspace: BonsplitDelegate {
             configTemplate: inheritedConfig,
             portOrdinal: portOrdinal
         )
+        configureNewTerminalPanel(newPanel, launchMode: .independentPersistent)
         panels[newPanel.id] = newPanel
         panelTitles[newPanel.id] = newPanel.displayTitle
         seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)

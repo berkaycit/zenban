@@ -127,6 +127,75 @@ struct ZellijSessionManagerTests {
     }
 
     @Test
+    func registerPanelSessionTracksPanelSpecificArtifacts() throws {
+        let manager = ZellijSessionManager.shared
+        manager.resetTestingHooks()
+        manager.killAllSessions()
+        defer {
+            manager.resetTestingHooks()
+            manager.killAllSessions()
+        }
+
+        let workspaceID = UUID()
+        let rootRegistration = try manager.registerWorkspace(
+            workspaceId: workspaceID,
+            panelId: UUID(),
+            portOrdinal: 5,
+            workingDirectory: "/tmp/panel-session-root"
+        )
+        let panelID = UUID()
+        let panelRegistration = try manager.registerPanelSession(
+            workspaceId: workspaceID,
+            panelId: panelID,
+            portOrdinal: 5,
+            workingDirectory: "/tmp/panel-session-extra"
+        )
+
+        #expect(manager.hasManagedPanelSession(panelID))
+        #expect(panelRegistration.attachCommand != rootRegistration.attachCommand)
+        #expect(try manager.attachCommand(forPanelId: panelID) == panelRegistration.attachCommand)
+        #expect(try manager.startupEnvironment(forPanelId: panelID) == panelRegistration.startupEnvironment)
+    }
+
+    @Test
+    func killWorkspaceSessionRemovesAssociatedPanelSessions() async throws {
+        let manager = ZellijSessionManager.shared
+        manager.resetTestingHooks()
+        manager.killAllSessions()
+        defer {
+            manager.resetTestingHooks()
+            manager.killAllSessions()
+        }
+
+        let workspaceID = UUID()
+        _ = try manager.registerWorkspace(
+            workspaceId: workspaceID,
+            panelId: UUID(),
+            portOrdinal: 6,
+            workingDirectory: "/tmp/panel-session-cleanup"
+        )
+        let panelID = UUID()
+        let panelRegistration = try manager.registerPanelSession(
+            workspaceId: workspaceID,
+            panelId: panelID,
+            portOrdinal: 6,
+            workingDirectory: "/tmp/panel-session-cleanup-extra"
+        )
+        manager.configureDeleteSessionHookForTesting { _ in }
+
+        manager.killSession(for: workspaceID)
+
+        try await waitUntil {
+            !manager.isManagedWorkspace(workspaceID) &&
+            !manager.hasManagedPanelSession(panelID) &&
+            !FileManager.default.fileExists(atPath: panelRegistration.attachCommand)
+        }
+
+        #expect((try? manager.attachCommand(forPanelId: panelID)) == nil)
+        #expect((try? manager.startupEnvironment(forPanelId: panelID)) == nil)
+    }
+
+    @Test
     func killAllSessionsCancelsInFlightPreparationAndRemovesArtifacts() async throws {
         let manager = ZellijSessionManager.shared
         manager.resetTestingHooks()

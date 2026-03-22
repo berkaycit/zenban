@@ -1,3 +1,5 @@
+import AppKit
+import Bonsplit
 import Foundation
 import Testing
 @testable import zenban
@@ -331,6 +333,153 @@ struct CmuxHostStoreLaunchTests {
         #expect(updatedAttachCommand == initialAttachCommand)
         #expect(updatedEnvironment == initialEnvironment)
         #expect(updatedModificationDate == initialModificationDate)
+    }
+
+    @Test
+    func additionalTerminalTabsAndSplitsUseIndependentPanelSessions() throws {
+        let appDelegate = AppDelegate()
+        let tempDirectory = try makeTemporaryDirectory()
+        let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path)
+        let hostStore = makeHostStore(boardStore: boardStore)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        hostStore.registerMainWindow(window)
+        defer {
+            window.close()
+            try? FileManager.default.removeItem(at: tempDirectory)
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let rootPanel = try #require(workspace.focusedTerminalPanel)
+        let rootAttachCommand = try ZellijSessionManager.shared.attachCommand(for: workspace.id)
+        _ = try attachTerminalPanel(rootPanel, to: window)
+
+        let terminalIDsBeforeNewTab = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+        #expect(rootPanel.performBindingAction("new_tab"))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        let extraTabIDs = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+            .subtracting(terminalIDsBeforeNewTab)
+        #expect(extraTabIDs.count == 1)
+        let extraTabID = try #require(extraTabIDs.first)
+        let extraTab = try #require(workspace.panels[extraTabID] as? TerminalPanel)
+
+        let terminalIDsBeforeSplit = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+        #expect(rootPanel.performBindingAction("new_split:right"))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        let splitPanelIDs = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+            .subtracting(terminalIDsBeforeSplit)
+        #expect(splitPanelIDs.count == 1)
+        let splitPanelID = try #require(splitPanelIDs.first)
+        let splitPanel = try #require(workspace.panels[splitPanelID] as? TerminalPanel)
+
+        let extraTabAttachCommand = try ZellijSessionManager.shared.attachCommand(forPanelId: extraTab.id)
+        let splitAttachCommand = try ZellijSessionManager.shared.attachCommand(forPanelId: splitPanel.id)
+        let extraTabLaunchRequest = try #require(launchRequestRecord(panelID: extraTab.id))
+        let splitLaunchRequest = try #require(launchRequestRecord(panelID: splitPanel.id))
+
+        #expect(extraTabAttachCommand != rootAttachCommand)
+        #expect(splitAttachCommand != rootAttachCommand)
+        #expect(extraTabAttachCommand != splitAttachCommand)
+        #expect(extraTabLaunchRequest.command == expectedClaudeLaunchCommand())
+        #expect(splitLaunchRequest.command == expectedClaudeLaunchCommand())
+        #expect(extraTabLaunchRequest.url != splitLaunchRequest.url)
+    }
+
+    @Test
+    func additionalTerminalPanelsLaunchSelectedAgentCommand() throws {
+        let appDelegate = AppDelegate()
+        let tempDirectory = try makeTemporaryDirectory()
+        let (boardStore, board, card) = makeBoardFixture(agent: .gemini, worktreePath: tempDirectory.path)
+        let hostStore = makeHostStore(boardStore: boardStore)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        hostStore.registerMainWindow(window)
+        defer {
+            window.close()
+            try? FileManager.default.removeItem(at: tempDirectory)
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let rootPanel = try #require(workspace.focusedTerminalPanel)
+        _ = try attachTerminalPanel(rootPanel, to: window)
+
+        let terminalIDsBeforeNewTab = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+        #expect(rootPanel.performBindingAction("new_tab"))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        let extraTabIDs = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+            .subtracting(terminalIDsBeforeNewTab)
+        #expect(extraTabIDs.count == 1)
+        let extraTabID = try #require(extraTabIDs.first)
+        let launchRequest = try #require(launchRequestRecord(panelID: extraTabID))
+
+        #expect(launchRequest.command == "gemini")
+    }
+
+    @Test
+    func additionalTerminalPanelsKeepWorkspaceStartupDirectory() throws {
+        let appDelegate = AppDelegate()
+        let tempDirectory = try makeTemporaryDirectory()
+        let inheritedDirectory = try makeTemporaryDirectory()
+        let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path)
+        let hostStore = makeHostStore(boardStore: boardStore)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        hostStore.registerMainWindow(window)
+        defer {
+            window.close()
+            try? FileManager.default.removeItem(at: inheritedDirectory)
+            try? FileManager.default.removeItem(at: tempDirectory)
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let rootPanel = try #require(workspace.focusedTerminalPanel)
+        _ = try attachTerminalPanel(rootPanel, to: window)
+
+        workspace.updatePanelDirectory(panelId: rootPanel.id, directory: inheritedDirectory.path)
+
+        let terminalIDsBeforeNewTab = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+        #expect(rootPanel.performBindingAction("new_tab"))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        let extraTabIDs = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+            .subtracting(terminalIDsBeforeNewTab)
+        let extraTabID = try #require(extraTabIDs.first)
+
+        let terminalIDsBeforeSplit = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+        #expect(rootPanel.performBindingAction("new_split:right"))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        let splitPanelIDs = Set(workspace.panels.values.compactMap { ($0 as? TerminalPanel)?.id })
+            .subtracting(terminalIDsBeforeSplit)
+        let splitPanelID = try #require(splitPanelIDs.first)
+
+        let extraTabAttachScript = try attachScriptContents(forPanelId: extraTabID)
+        let splitAttachScript = try attachScriptContents(forPanelId: splitPanelID)
+
+        #expect(extraTabAttachScript.contains("--default-cwd \(shellQuotedForTesting(tempDirectory.path))"))
+        #expect(splitAttachScript.contains("--default-cwd \(shellQuotedForTesting(tempDirectory.path))"))
+        #expect(!extraTabAttachScript.contains(shellQuotedForTesting(inheritedDirectory.path)))
+        #expect(!splitAttachScript.contains(shellQuotedForTesting(inheritedDirectory.path)))
     }
 
     @Test
@@ -715,6 +864,17 @@ struct CmuxHostStoreLaunchTests {
         return hostStore
     }
 
+    private func attachTerminalPanel(_ panel: TerminalPanel, to window: NSWindow) throws -> GhosttyNSView {
+        panel.hostedView.frame = window.contentView?.bounds ?? .zero
+        panel.hostedView.autoresizingMask = [.width, .height]
+        window.contentView?.addSubview(panel.hostedView)
+        let ghosttyView = try #require(panel.hostedView.terminalViewForDrop(at: NSPoint(x: 1, y: 1)))
+        window.makeKeyAndOrderFront(nil)
+        #expect(window.makeFirstResponder(ghosttyView))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        return ghosttyView
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -759,7 +919,26 @@ struct CmuxHostStoreLaunchTests {
     private func launchRequestRecord(hostStore: CmuxHostStore, cardID: UUID) -> LaunchRequestRecord? {
         guard let workspace = hostStore.workspace(for: cardID),
               let startupEnvironment = try? ZellijSessionManager.shared.startupEnvironment(for: workspace.id),
-              let launchFilePath = startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"],
+              let launchRecord = launchRequestRecord(startupEnvironment: startupEnvironment) else {
+            return nil
+        }
+
+        return launchRecord
+    }
+
+    private func launchRequestRecord(panelID: UUID) -> LaunchRequestRecord? {
+        guard let startupEnvironment = try? ZellijSessionManager.shared.startupEnvironment(forPanelId: panelID),
+              let launchRecord = launchRequestRecord(startupEnvironment: startupEnvironment) else {
+            return nil
+        }
+
+        return launchRecord
+    }
+
+    private func launchRequestRecord(
+        startupEnvironment: [String: String]
+    ) -> LaunchRequestRecord? {
+        guard let launchFilePath = startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"],
               let contents = try? String(contentsOfFile: launchFilePath, encoding: .utf8) else {
             return nil
         }
@@ -780,6 +959,11 @@ struct CmuxHostStoreLaunchTests {
             token: lines[0],
             command: command
         )
+    }
+
+    private func attachScriptContents(forPanelId panelID: UUID) throws -> String {
+        let attachScriptPath = try ZellijSessionManager.shared.attachCommand(forPanelId: panelID)
+        return try String(contentsOfFile: attachScriptPath, encoding: .utf8)
     }
 
     private func promptFileURL(in directory: URL) -> URL {

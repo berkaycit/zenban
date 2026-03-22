@@ -336,7 +336,7 @@ struct AppDelegateShortcutOverrideTests {
     }
 
     @Test
-    func ghosttyConfiguredNextTabShortcutCyclesTerminalTabsFromFocusedTerminal() throws {
+    func ghosttyGotoTabNextActionCyclesTerminalTabsFromFocusedTerminal() throws {
         let appDelegate = AppDelegate()
         let (boardStore, board, card) = makeBoardFixture()
         let (hostStore, window) = makeHostStore(boardStore: boardStore)
@@ -351,26 +351,18 @@ struct AppDelegateShortcutOverrideTests {
         let terminalPanel = try #require(workspace.focusedTerminalPanel)
         let nextSurface = try #require(workspace.newTerminalSurface(inPane: paneId, focus: false))
         appDelegate.tabManager = hostStore.tabManager
-        appDelegate.debugSetGhosttySurfaceNavigationShortcuts(
-            previous: StoredShortcut(key: "←", command: false, shift: true, option: true, control: false),
-            next: StoredShortcut(key: "→", command: false, shift: true, option: true, control: false)
-        )
 
         let ghosttyView = try attachFocusedTerminal(terminalPanel, to: window)
 
         #expect(window.firstResponder === ghosttyView)
         #expect(workspace.focusedPanelId == terminalPanel.id)
-        #expect(
-            appDelegate.debugHandleCustomShortcut(
-                event: try makeOptionShiftArrowEvent(direction: .right, window: window)
-            )
-        )
+        #expect(terminalPanel.performBindingAction("goto_tab:next"))
         RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         #expect(workspace.focusedPanelId == nextSurface.id)
     }
 
     @Test
-    func ghosttyConfiguredPreviousTabShortcutCyclesTerminalTabsFromFocusedTerminal() throws {
+    func ghosttyGotoTabPreviousActionCyclesTerminalTabsFromFocusedTerminal() throws {
         let appDelegate = AppDelegate()
         let (boardStore, board, card) = makeBoardFixture()
         let (hostStore, window) = makeHostStore(boardStore: boardStore)
@@ -385,56 +377,82 @@ struct AppDelegateShortcutOverrideTests {
         let previousSurface = try #require(workspace.focusedTerminalPanel)
         let terminalPanel = try #require(workspace.newTerminalSurface(inPane: paneId, focus: true))
         appDelegate.tabManager = hostStore.tabManager
-        appDelegate.debugSetGhosttySurfaceNavigationShortcuts(
-            previous: StoredShortcut(key: "←", command: false, shift: true, option: true, control: false),
-            next: StoredShortcut(key: "→", command: false, shift: true, option: true, control: false)
-        )
 
         let ghosttyView = try attachFocusedTerminal(terminalPanel, to: window)
 
         #expect(window.firstResponder === ghosttyView)
         #expect(workspace.focusedPanelId == terminalPanel.id)
-        #expect(
-            appDelegate.debugHandleCustomShortcut(
-                event: try makeOptionShiftArrowEvent(direction: .left, window: window)
-            )
-        )
+        #expect(terminalPanel.performBindingAction("goto_tab:previous"))
         RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         #expect(workspace.focusedPanelId == previousSurface.id)
     }
 
     @Test
-    func ghosttyConfiguredTabNavigationDoesNotConsumeWithoutFocusedTerminal() throws {
+    func terminalFocusedGhosttyBindingPrecedesWorkspaceShortcutHandling() throws {
         let appDelegate = AppDelegate()
         let (boardStore, board, card) = makeBoardFixture()
         let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        GhosttyNSView.setBindingFlagsOverrideForTesting { event in
+            guard event.keyCode == 45,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.command] else {
+                return nil
+            }
+            return ghostty_binding_flags_e(
+                GHOSTTY_BINDING_FLAGS_CONSUMED.rawValue |
+                GHOSTTY_BINDING_FLAGS_PERFORMABLE.rawValue
+            )
+        }
         defer {
+            GhosttyNSView.setBindingFlagsOverrideForTesting(nil)
             window.close()
             _ = appDelegate
         }
 
         hostStore.syncSelection(card: card, boardID: board.id)
         let workspace = try #require(hostStore.workspace(for: card.id))
+        let terminalPanel = try #require(workspace.focusedTerminalPanel)
         appDelegate.tabManager = hostStore.tabManager
-        appDelegate.debugSetGhosttySurfaceNavigationShortcuts(
-            previous: StoredShortcut(key: "←", command: false, shift: true, option: true, control: false),
-            next: StoredShortcut(key: "→", command: false, shift: true, option: true, control: false)
-        )
-
-        let textField = NSTextField(string: "Ghostty shortcuts should not trigger here")
-        textField.frame = window.contentView?.bounds ?? .zero
-        textField.autoresizingMask = [.width, .height]
-        window.contentView?.addSubview(textField)
-        window.makeKeyAndOrderFront(nil)
-        #expect(window.makeFirstResponder(textField))
+        let ghosttyView = try attachFocusedTerminal(terminalPanel, to: window)
         RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        let workspaceCountBefore = hostStore.tabManager.tabs.count
 
         #expect(
             !appDelegate.debugHandleCustomShortcut(
-                event: try makeOptionShiftArrowEvent(direction: .right, window: window)
+                event: try makeCommandNEvent(window: window)
             )
         )
-        #expect(hostStore.tabManager.selectedTabId == workspace.id)
+        #expect(window.firstResponder === ghosttyView)
+        #expect(hostStore.tabManager.tabs.count == workspaceCountBefore)
+    }
+
+    @Test
+    func terminalFocusedCommandTIsNotHandledByHostShortcutWhenGhosttyDoesNotBindIt() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        GhosttyNSView.setBindingFlagsOverrideForTesting { _ in nil }
+        defer {
+            GhosttyNSView.setBindingFlagsOverrideForTesting(nil)
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let terminalPanel = try #require(workspace.focusedTerminalPanel)
+        appDelegate.tabManager = hostStore.tabManager
+
+        let ghosttyView = try attachFocusedTerminal(terminalPanel, to: window)
+        let terminalCountBefore = panelCount(of: .terminal, in: workspace)
+
+        #expect(window.firstResponder === ghosttyView)
+        #expect(
+            appDelegate.debugHandleCustomShortcut(
+                event: try makeCommandTEvent(window: window)
+            )
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        #expect(panelCount(of: .terminal, in: workspace) == terminalCountBefore)
     }
 
     private func makeBoardFixture() -> (BoardStore, Board, Card) {
@@ -497,6 +515,40 @@ struct AppDelegateShortcutOverrideTests {
                 charactersIgnoringModifiers: "w",
                 isARepeat: false,
                 keyCode: 13
+            )
+        )
+    }
+
+    private func makeCommandTEvent(window: NSWindow? = nil) throws -> NSEvent {
+        try #require(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [.command],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window?.windowNumber ?? 0,
+                context: nil,
+                characters: "t",
+                charactersIgnoringModifiers: "t",
+                isARepeat: false,
+                keyCode: 17
+            )
+        )
+    }
+
+    private func makeCommandNEvent(window: NSWindow? = nil) throws -> NSEvent {
+        try #require(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [.command],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window?.windowNumber ?? 0,
+                context: nil,
+                characters: "n",
+                charactersIgnoringModifiers: "n",
+                isARepeat: false,
+                keyCode: 45
             )
         )
     }

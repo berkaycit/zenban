@@ -517,6 +517,49 @@ final class CmuxHostStore {
         }
     }
 
+    private func independentPanelLaunchCommand(
+        for workspaceID: UUID
+    ) -> (cardID: UUID, command: String)? {
+        guard let boardStore,
+              let cardID = workspaceToCardID[workspaceID],
+              let boardID = workspaceToBoardID[workspaceID],
+              let card = boardStore.card(id: cardID) else {
+            return nil
+        }
+
+        let agent = resolvedAgent(for: card, boardID: boardID)
+        return (cardID, launchCommand(for: agent, pendingPrompt: nil))
+    }
+
+    private func queueIndependentPanelLaunchIfNeeded(
+        registration: ZellijSessionManager.RegistrationResult,
+        workspaceID: UUID,
+        panelID: UUID
+    ) {
+        guard registration.didChangeStartup,
+              let (cardID, command) = independentPanelLaunchCommand(for: workspaceID) else {
+            return
+        }
+
+        do {
+            try zellijSessionManager.queueLaunchRequest(
+                forPanelId: panelID,
+                token: newLaunchToken(),
+                command: command
+            )
+#if DEBUG
+            launchCommandHandlerForTesting?(cardID, command)
+#endif
+        } catch {
+            NSLog(
+                "Failed to queue panel launch request for workspace %@ panel %@: %@",
+                workspaceID.uuidString,
+                panelID.uuidString,
+                String(describing: error)
+            )
+        }
+    }
+
     private func resumePendingLaunchIfNeeded(cardID: UUID, workspaceID: UUID) {
         guard pendingLaunchByCardID[cardID] != nil else { return }
         guard launchTasks[cardID] == nil else { return }
@@ -642,22 +685,27 @@ final class CmuxHostStore {
 
     @discardableResult
     private func ensureWorkspace(for card: Card, boardID: UUID) -> Workspace {
+        let workspaceDirectory = workingDirectory(for: card, boardID: boardID)
         if let workspace = workspace(for: card.id) {
             workspaceToBoardID[workspace.id] = boardID
             _ = updateWorkspaceRuntimeState(for: workspace.id) { _ in }
             workspace.setCustomTitle(card.title)
+            workspace.setDefaultTerminalWorkingDirectory(workspaceDirectory)
+            configureWorkspaceTerminalLifecycle(workspace)
             configureWorkspaceTerminalSession(workspace, card: card, boardID: boardID)
             observeWorkspaceStatus(in: workspace)
             return workspace
         }
 
         let workspace = tabManager.addWorkspace(
-            workingDirectory: workingDirectory(for: card, boardID: boardID),
+            workingDirectory: workspaceDirectory,
             select: false,
             eagerLoadTerminal: false,
             autoWelcomeIfNeeded: false
         )
         workspace.setCustomTitle(card.title)
+        workspace.setDefaultTerminalWorkingDirectory(workspaceDirectory)
+        configureWorkspaceTerminalLifecycle(workspace)
 
         cardToWorkspaceID[card.id] = workspace.id
         workspaceToCardID[workspace.id] = card.id
@@ -843,6 +891,20 @@ final class CmuxHostStore {
         if let sessionPanelID = zellijSessionManager.sessionPanelId(for: workspace.id),
            let terminalPanel = workspace.panels[sessionPanelID] as? TerminalPanel {
             return terminalPanel
+        }
+
+        if zellijSessionManager.isManagedWorkspace(workspace.id) {
+            if let existingRoot = workspace.workspaceRootTerminalPanel() {
+                _ = try? zellijSessionManager.reassignWorkspacePanel(
+                    workspaceId: workspace.id,
+                    panelId: existingRoot.id,
+                    portOrdinal: existingRoot.surface.portOrdinal
+                )
+                return existingRoot
+            }
+            if let recreatedRoot = workspace.ensureWorkspaceRootTerminalPanel(focus: false) {
+                return recreatedRoot
+            }
         }
 
         if let focusedTerminalPanel = workspace.focusedTerminalPanel {
@@ -1143,8 +1205,69 @@ final class CmuxHostStore {
         detachWorkspaceRuntime(workspace)
     }
 
+    private func configureWorkspaceTerminalLifecycle(_ workspace: Workspace) {
+        workspace.resolveTerminalStartupConfiguration = { [weak self] workspace, terminalPanel, launchMode in
+            guard let self else { return nil }
+            switch launchMode {
+            case .workspaceRootManagedSession:
+                guard self.zellijSessionManager.isManagedWorkspace(workspace.id) else { return nil }
+                do {
+                    let registration = try self.zellijSessionManager.reassignWorkspacePanel(
+                        workspaceId: workspace.id,
+                        panelId: terminalPanel.id,
+                        portOrdinal: terminalPanel.surface.portOrdinal
+                    )
+                    return Workspace.TerminalStartupConfiguration(
+                        command: registration.attachCommand,
+                        environment: registration.startupEnvironment
+                    )
+                } catch {
+                    NSLog(
+                        "Failed to reassign zellij root panel for workspace %@: %@",
+                        workspace.id.uuidString,
+                        String(describing: error)
+                    )
+                    return nil
+                }
+            case .independentPersistent:
+                let requestedDirectory = terminalPanel.requestedWorkingDirectory
+                do {
+                    let registration = try self.zellijSessionManager.registerPanelSession(
+                        workspaceId: workspace.id,
+                        panelId: terminalPanel.id,
+                        portOrdinal: terminalPanel.surface.portOrdinal,
+                        workingDirectory: requestedDirectory
+                    )
+                    self.queueIndependentPanelLaunchIfNeeded(
+                        registration: registration,
+                        workspaceID: workspace.id,
+                        panelID: terminalPanel.id
+                    )
+                    return Workspace.TerminalStartupConfiguration(
+                        command: registration.attachCommand,
+                        environment: registration.startupEnvironment
+                    )
+                } catch {
+                    NSLog(
+                        "Failed to register zellij panel session for workspace %@ panel %@: %@",
+                        workspace.id.uuidString,
+                        terminalPanel.id.uuidString,
+                        String(describing: error)
+                    )
+                    return nil
+                }
+            }
+        }
+        workspace.onDidCloseTerminalPanel = { [weak self] _, panelId, launchMode in
+            guard let self else { return }
+            guard launchMode == .independentPersistent else { return }
+            self.zellijSessionManager.killPanelSession(for: panelId)
+        }
+    }
+
     @discardableResult
     private func configureWorkspaceTerminalSession(_ workspace: Workspace, card: Card, boardID: UUID) -> Bool {
+        workspace.setDefaultTerminalWorkingDirectory(workingDirectory(for: card, boardID: boardID))
         guard let terminalPanel = launchTerminalPanel(in: workspace) else {
             zellijSessionManager.forgetWorkspace(workspace.id)
             NSLog(

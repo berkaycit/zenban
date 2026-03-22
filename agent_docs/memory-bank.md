@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Auto-launch selected agent in extra terminals
+- **Description**: Ghostty-created tabs and splits now queue the card's currently selected agent command into each panel session's own Zellij launch-request file the first time that independent terminal starts. This keeps the root workspace terminal on the existing acknowledged Claude launch path while making new tabs and splits feel like full card terminals instead of empty shells. The extra panels still keep isolated sessions, so their shell state stays separate even though they launch the same selected agent by default.
+
+- **Summary**: Let Ghostty own terminal-local tabs and splits
+- **Description**: Embedded terminal shortcuts now defer to Ghostty's own bindings when a Ghostty surface is focused, so remapping `new_tab`, `new_split`, `previous_tab`, `next_tab`, or `close_surface` in Zenban's app-scoped Ghostty config takes effect without host-level overrides. The workspace root terminal keeps the managed Claude/Zellij launch flow, but extra tabs and splits now get independent persistent Zellij sessions keyed by panel instead of sharing the root shell. Hidden-card runtime reclaim preserves both the root session and those independent panel sessions so reopening a card restores the same terminal topology.
+
 - **Summary**: Isolate Zenban Ghostty config from system Ghostty
 - **Description**: Zenban now seeds a dedicated Ghostty config file in its own Application Support directory and opens that file from `Ghostty Settings…` instead of the shared standalone Ghostty config. Embedded terminals reload only the Zenban-scoped config plus bundled overrides, so system Ghostty edits no longer bleed into Zenban. The seeded default config includes the app's preferred theme, typography, split bindings, and `Alt+Shift+Left/Right` tab navigation defaults on first launch.
 

@@ -14,7 +14,7 @@ final class ZellijSessionManager {
         )
     }
 
-    struct SessionSpec {
+    struct SessionSpec: Sendable {
         let workspaceId: UUID
         let panelId: UUID
         let portOrdinal: Int
@@ -26,6 +26,17 @@ final class ZellijSessionManager {
         let attachCommand: String
         let startupEnvironment: [String: String]
         let didChangeStartup: Bool
+    }
+
+    enum SessionLookupError: Error, LocalizedError {
+        case missingPanelSession
+
+        var errorDescription: String? {
+            switch self {
+            case .missingPanelSession:
+                return "Zellij panel session metadata is missing."
+            }
+        }
     }
 
     private struct TerminalSessionDescriptor: Equatable {
@@ -72,14 +83,17 @@ final class ZellijSessionManager {
     private let runner = ZellijProcessRunner()
     private var sessionSpecByWorkspaceId: [UUID: SessionSpec] = [:]
     private var descriptorByWorkspaceId: [UUID: TerminalSessionDescriptor] = [:]
+    private var panelSessionSpecByPanelId: [UUID: SessionSpec] = [:]
+    private var panelDescriptorByPanelId: [UUID: TerminalSessionDescriptor] = [:]
+    private var panelSessionIdsByWorkspaceId: [UUID: Set<UUID>] = [:]
     private var backgroundCreationTasks: [UUID: BackgroundCreationTaskRecord] = [:]
     private var startupCleanupTask: Task<Void, Never>?
     private var appTerminationShutdownTask: Task<ShutdownResult, Never>?
 #if DEBUG
-    private var prepareBackgroundSessionHookForTesting: ((SessionSpec) async throws -> Void)?
-    private var deleteSessionHookForTesting: ((String) async throws -> Void)?
-    private var cleanupSessionsHookForTesting: ((Set<String>) async throws -> Void)?
-    private var sessionNamesHookForTesting: (() async throws -> [String])?
+    private var prepareBackgroundSessionHookForTesting: (@Sendable (SessionSpec) async throws -> Void)?
+    private var deleteSessionHookForTesting: (@Sendable (String) async throws -> Void)?
+    private var cleanupSessionsHookForTesting: (@Sendable (Set<String>) async throws -> Void)?
+    private var sessionNamesHookForTesting: (@Sendable () async throws -> [String])?
 #endif
 
     private init() {
@@ -99,22 +113,74 @@ final class ZellijSessionManager {
             workingDirectory: normalizedDirectory(workingDirectory),
             sessionName: Self.sessionName(for: workspaceId)
         )
-        let descriptor = terminalSessionDescriptor(for: spec)
-        let needsStartupRefresh =
-            descriptorByWorkspaceId[workspaceId] != descriptor ||
-            !fileManager.fileExists(atPath: descriptor.attachCommand)
+        let result = try registerSession(
+            spec: spec,
+            currentDescriptor: descriptorByWorkspaceId[workspaceId]
+        )
+        sessionSpecByWorkspaceId[workspaceId] = spec
+        descriptorByWorkspaceId[workspaceId] = TerminalSessionDescriptor(
+            attachCommand: result.attachCommand,
+            startupEnvironment: result.startupEnvironment,
+            workingDirectory: normalizedDirectory(workingDirectory)
+        )
+        return result
+    }
 
-        if needsStartupRefresh {
-            try writeAttachScript(for: spec, descriptor: descriptor)
+    func reassignWorkspacePanel(
+        workspaceId: UUID,
+        panelId: UUID,
+        portOrdinal: Int
+    ) throws -> RegistrationResult {
+        guard var spec = sessionSpecByWorkspaceId[workspaceId] else {
+            throw SessionError.missingSessionSpec
         }
 
-        sessionSpecByWorkspaceId[workspaceId] = spec
-        descriptorByWorkspaceId[workspaceId] = descriptor
-        return RegistrationResult(
-            attachCommand: descriptor.attachCommand,
-            startupEnvironment: descriptor.startupEnvironment,
-            didChangeStartup: needsStartupRefresh
+        spec = SessionSpec(
+            workspaceId: spec.workspaceId,
+            panelId: panelId,
+            portOrdinal: portOrdinal,
+            workingDirectory: spec.workingDirectory,
+            sessionName: spec.sessionName
         )
+        sessionSpecByWorkspaceId[workspaceId] = spec
+        let result = try registerSession(
+            spec: spec,
+            currentDescriptor: descriptorByWorkspaceId[workspaceId]
+        )
+        descriptorByWorkspaceId[workspaceId] = TerminalSessionDescriptor(
+            attachCommand: result.attachCommand,
+            startupEnvironment: result.startupEnvironment,
+            workingDirectory: spec.workingDirectory
+        )
+        return result
+    }
+
+    func registerPanelSession(
+        workspaceId: UUID,
+        panelId: UUID,
+        portOrdinal: Int,
+        workingDirectory: String?
+    ) throws -> RegistrationResult {
+        let normalizedWorkingDirectory = normalizedDirectory(workingDirectory)
+        let spec = SessionSpec(
+            workspaceId: workspaceId,
+            panelId: panelId,
+            portOrdinal: portOrdinal,
+            workingDirectory: normalizedWorkingDirectory,
+            sessionName: Self.panelSessionName(for: panelId)
+        )
+        let result = try registerSession(
+            spec: spec,
+            currentDescriptor: panelDescriptorByPanelId[panelId]
+        )
+        panelSessionSpecByPanelId[panelId] = spec
+        panelDescriptorByPanelId[panelId] = TerminalSessionDescriptor(
+            attachCommand: result.attachCommand,
+            startupEnvironment: result.startupEnvironment,
+            workingDirectory: normalizedWorkingDirectory
+        )
+        panelSessionIdsByWorkspaceId[workspaceId, default: []].insert(panelId)
+        return result
     }
 
     func sessionPanelId(for workspaceId: UUID) -> UUID? {
@@ -123,6 +189,10 @@ final class ZellijSessionManager {
 
     func isManagedWorkspace(_ workspaceId: UUID) -> Bool {
         sessionSpecByWorkspaceId[workspaceId] != nil
+    }
+
+    func hasManagedPanelSession(_ panelId: UUID) -> Bool {
+        panelSessionSpecByPanelId[panelId] != nil
     }
 
     func attachCommand(for workspaceId: UUID) throws -> String {
@@ -143,6 +213,24 @@ final class ZellijSessionManager {
         return descriptor.startupEnvironment
     }
 
+    func attachCommand(forPanelId panelId: UUID) throws -> String {
+        guard let spec = panelSessionSpecByPanelId[panelId],
+              let descriptor = panelDescriptorByPanelId[panelId] else {
+            throw SessionLookupError.missingPanelSession
+        }
+        if !fileManager.fileExists(atPath: descriptor.attachCommand) {
+            try writeAttachScript(for: spec, descriptor: descriptor)
+        }
+        return descriptor.attachCommand
+    }
+
+    func startupEnvironment(forPanelId panelId: UUID) throws -> [String: String] {
+        guard let descriptor = panelDescriptorByPanelId[panelId] else {
+            throw SessionLookupError.missingPanelSession
+        }
+        return descriptor.startupEnvironment
+    }
+
     func queueLaunchRequest(
         for workspaceId: UUID,
         token: String,
@@ -151,17 +239,27 @@ final class ZellijSessionManager {
         guard let spec = sessionSpecByWorkspaceId[workspaceId] else {
             throw SessionError.missingSessionSpec
         }
-        try ensureRuntimeDirectories()
-        let launchRequest = "\(token)\n\(command)\n"
-        try launchRequest.write(
-            to: launchRequestFileURL(for: spec),
-            atomically: true,
-            encoding: .utf8
-        )
+        try writeLaunchRequest(token: token, command: command, for: spec)
+    }
+
+    func queueLaunchRequest(
+        forPanelId panelId: UUID,
+        token: String,
+        command: String
+    ) throws {
+        guard let spec = panelSessionSpecByPanelId[panelId] else {
+            throw SessionLookupError.missingPanelSession
+        }
+        try writeLaunchRequest(token: token, command: command, for: spec)
     }
 
     func clearLaunchRequest(for workspaceId: UUID) {
         guard let spec = sessionSpecByWorkspaceId[workspaceId] else { return }
+        try? removeLaunchRequestFile(for: spec)
+    }
+
+    func clearLaunchRequest(forPanelId panelId: UUID) {
+        guard let spec = panelSessionSpecByPanelId[panelId] else { return }
         try? removeLaunchRequestFile(for: spec)
     }
 
@@ -178,10 +276,13 @@ final class ZellijSessionManager {
         let environment = backgroundEnvironment(for: spec)
         let wrapperPath = try wrapperPath()
         let taskID = UUID()
-        let task = Task<Void, Error> { [runner, configuration, environment, wrapperPath] in
+        #if DEBUG
+        let testingHook = prepareBackgroundSessionHookForTesting
+        #endif
+        let task = Task.detached(priority: nil) { [runner, configuration, environment, wrapperPath, spec] in
 #if DEBUG
-            if let prepareBackgroundSessionHookForTesting {
-                try await prepareBackgroundSessionHookForTesting(spec)
+            if let testingHook {
+                try await testingHook(spec)
                 return
             }
 #endif
@@ -210,8 +311,13 @@ final class ZellijSessionManager {
     func killSession(for workspaceId: UUID) {
         let spec = sessionSpecByWorkspaceId[workspaceId]
         cancelBackgroundCreationTask(for: workspaceId)
+        let panelSpecs = removePanelRegistrations(for: workspaceId)
         removeRegistration(for: workspaceId)
         guard let spec else { return }
+        for panelSpec in panelSpecs {
+            cleanupWorkspaceArtifacts(for: panelSpec, removeAttachScriptFile: true)
+            scheduleSessionDeletion(sessionName: panelSpec.sessionName)
+        }
         cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
         scheduleSessionDeletion(sessionName: spec.sessionName)
     }
@@ -219,14 +325,26 @@ final class ZellijSessionManager {
     func killRuntime(for workspaceId: UUID) {
         guard let spec = sessionSpecByWorkspaceId[workspaceId] else { return }
         cancelBackgroundCreationTask(for: workspaceId)
+        let panelSpecs = panelSessionSpecs(for: workspaceId)
+        for panelSpec in panelSpecs {
+            cleanupWorkspaceArtifacts(for: panelSpec, removeAttachScriptFile: false)
+            scheduleSessionDeletion(sessionName: panelSpec.sessionName)
+        }
         cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: false)
+        scheduleSessionDeletion(sessionName: spec.sessionName)
+    }
+
+    func killPanelSession(for panelId: UUID) {
+        guard let spec = panelSessionSpecByPanelId[panelId] else { return }
+        removePanelRegistration(for: panelId)
+        cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
         scheduleSessionDeletion(sessionName: spec.sessionName)
     }
 
     func killAllSessions() {
         appTerminationShutdownTask?.cancel()
         appTerminationShutdownTask = nil
-        let knownSessionNames = Set(sessionSpecByWorkspaceId.values.map(\.sessionName))
+        let knownSessionNames = knownSessionNames()
         startupCleanupTask?.cancel()
         startupCleanupTask = nil
         for workspaceId in Array(backgroundCreationTasks.keys) {
@@ -235,8 +353,14 @@ final class ZellijSessionManager {
         for spec in sessionSpecByWorkspaceId.values {
             cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
         }
+        for spec in panelSessionSpecByPanelId.values {
+            cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
+        }
         sessionSpecByWorkspaceId.removeAll(keepingCapacity: false)
         descriptorByWorkspaceId.removeAll(keepingCapacity: false)
+        panelSessionSpecByPanelId.removeAll(keepingCapacity: false)
+        panelDescriptorByPanelId.removeAll(keepingCapacity: false)
+        panelSessionIdsByWorkspaceId.removeAll(keepingCapacity: false)
         Task { [runner] in
             do {
                 let configuration = try self.runnerConfiguration()
@@ -349,6 +473,7 @@ final class ZellijSessionManager {
 
     func forgetWorkspace(_ workspaceId: UUID) {
         cancelBackgroundCreationTask(for: workspaceId)
+        _ = removePanelRegistrations(for: workspaceId)
         removeRegistration(for: workspaceId)
     }
 
@@ -372,6 +497,26 @@ final class ZellijSessionManager {
             attachCommand: attachScriptURL(for: spec).path,
             startupEnvironment: launchRequestEnvironment(for: spec),
             workingDirectory: spec.workingDirectory
+        )
+    }
+
+    private func registerSession(
+        spec: SessionSpec,
+        currentDescriptor: TerminalSessionDescriptor?
+    ) throws -> RegistrationResult {
+        let descriptor = terminalSessionDescriptor(for: spec)
+        let needsStartupRefresh =
+            currentDescriptor != descriptor ||
+            !fileManager.fileExists(atPath: descriptor.attachCommand)
+
+        if needsStartupRefresh {
+            try writeAttachScript(for: spec, descriptor: descriptor)
+        }
+
+        return RegistrationResult(
+            attachCommand: descriptor.attachCommand,
+            startupEnvironment: descriptor.startupEnvironment,
+            didChangeStartup: needsStartupRefresh
         )
     }
 
@@ -462,6 +607,20 @@ final class ZellijSessionManager {
         try fileManager.removeItem(at: launchRequestFile)
     }
 
+    private func writeLaunchRequest(
+        token: String,
+        command: String,
+        for spec: SessionSpec
+    ) throws {
+        try ensureRuntimeDirectories()
+        let launchRequest = "\(token)\n\(command)\n"
+        try launchRequest.write(
+            to: launchRequestFileURL(for: spec),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
     private func removeAttachScript(for spec: SessionSpec) throws {
         let scriptURL = attachScriptURL(for: spec)
         guard fileManager.fileExists(atPath: scriptURL.path) else { return }
@@ -473,14 +632,48 @@ final class ZellijSessionManager {
         descriptorByWorkspaceId.removeValue(forKey: workspaceId)
     }
 
+    private func removePanelRegistration(for panelId: UUID) {
+        if let spec = panelSessionSpecByPanelId.removeValue(forKey: panelId) {
+            panelSessionIdsByWorkspaceId[spec.workspaceId]?.remove(panelId)
+            if panelSessionIdsByWorkspaceId[spec.workspaceId]?.isEmpty == true {
+                panelSessionIdsByWorkspaceId.removeValue(forKey: spec.workspaceId)
+            }
+        }
+        panelDescriptorByPanelId.removeValue(forKey: panelId)
+    }
+
+    private func removePanelRegistrations(for workspaceId: UUID) -> [SessionSpec] {
+        let panelIds = panelSessionIdsByWorkspaceId.removeValue(forKey: workspaceId) ?? []
+        var removedSpecs: [SessionSpec] = []
+        removedSpecs.reserveCapacity(panelIds.count)
+        for panelId in panelIds {
+            if let spec = panelSessionSpecByPanelId.removeValue(forKey: panelId) {
+                removedSpecs.append(spec)
+            }
+            panelDescriptorByPanelId.removeValue(forKey: panelId)
+        }
+        return removedSpecs
+    }
+
+    private func panelSessionSpecs(for workspaceId: UUID) -> [SessionSpec] {
+        let panelIds = panelSessionIdsByWorkspaceId[workspaceId] ?? []
+        return panelIds.compactMap { panelSessionSpecByPanelId[$0] }
+    }
+
     private func resetManagedSessionState(removeAttachScriptFiles: Bool) -> Set<String> {
         startupCleanupTask?.cancel()
         startupCleanupTask = nil
         for workspaceId in Array(backgroundCreationTasks.keys) {
             cancelBackgroundCreationTask(for: workspaceId)
         }
-        let knownSessionNames = Set(sessionSpecByWorkspaceId.values.map(\.sessionName))
+        let knownSessionNames = knownSessionNames()
         for spec in sessionSpecByWorkspaceId.values {
+            cleanupWorkspaceArtifacts(
+                for: spec,
+                removeAttachScriptFile: removeAttachScriptFiles
+            )
+        }
+        for spec in panelSessionSpecByPanelId.values {
             cleanupWorkspaceArtifacts(
                 for: spec,
                 removeAttachScriptFile: removeAttachScriptFiles
@@ -488,7 +681,15 @@ final class ZellijSessionManager {
         }
         sessionSpecByWorkspaceId.removeAll(keepingCapacity: false)
         descriptorByWorkspaceId.removeAll(keepingCapacity: false)
+        panelSessionSpecByPanelId.removeAll(keepingCapacity: false)
+        panelDescriptorByPanelId.removeAll(keepingCapacity: false)
+        panelSessionIdsByWorkspaceId.removeAll(keepingCapacity: false)
         return knownSessionNames
+    }
+
+    private func knownSessionNames() -> Set<String> {
+        Set(sessionSpecByWorkspaceId.values.map(\.sessionName))
+            .union(panelSessionSpecByPanelId.values.map(\.sessionName))
     }
 
     private func cleanupWorkspaceArtifacts(for spec: SessionSpec, removeAttachScriptFile: Bool) {
@@ -616,6 +817,10 @@ final class ZellijSessionManager {
         "\(sessionPrefix)\(workspaceId.uuidString.lowercased())"
     }
 
+    private static func panelSessionName(for panelId: UUID) -> String {
+        "\(sessionPrefix)panel-\(panelId.uuidString.lowercased())"
+    }
+
     private static func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
     }
@@ -679,25 +884,25 @@ final class ZellijSessionManager {
 #if DEBUG
 extension ZellijSessionManager {
     func configureBackgroundSessionHookForTesting(
-        _ hook: ((SessionSpec) async throws -> Void)? = nil
+        _ hook: (@Sendable (SessionSpec) async throws -> Void)? = nil
     ) {
         prepareBackgroundSessionHookForTesting = hook
     }
 
     func configureDeleteSessionHookForTesting(
-        _ hook: ((String) async throws -> Void)? = nil
+        _ hook: (@Sendable (String) async throws -> Void)? = nil
     ) {
         deleteSessionHookForTesting = hook
     }
 
     func configureCleanupSessionsHookForTesting(
-        _ hook: ((Set<String>) async throws -> Void)? = nil
+        _ hook: (@Sendable (Set<String>) async throws -> Void)? = nil
     ) {
         cleanupSessionsHookForTesting = hook
     }
 
     func configureSessionNamesHookForTesting(
-        _ hook: (() async throws -> [String])? = nil
+        _ hook: (@Sendable () async throws -> [String])? = nil
     ) {
         sessionNamesHookForTesting = hook
     }
