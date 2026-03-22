@@ -8,11 +8,6 @@
 import AppKit
 import SwiftUI
 
-enum ZenbanRootContentMode: Equatable {
-    case splitView
-    case terminalFullscreenCardDetail
-}
-
 struct ZenbanRootView: View {
     @Environment(BoardStore.self) private var store
     @Environment(CmuxHostStore.self) private var cmuxHost
@@ -150,11 +145,11 @@ struct ZenbanRootView: View {
     }
 
     private var terminalFullscreenContext: (card: Card, boardID: UUID)? {
-        guard Self.rootContentMode(
+        guard Self.shouldPresentTerminalFullscreen(
             selectedBoard: store.selectedBoard,
             selectedCard: store.selectedCard,
             terminalFullscreenCardID: store.terminalFullscreenCardID
-        ) == .terminalFullscreenCardDetail,
+        ),
         let board = store.selectedBoard,
         let card = store.selectedCard else {
             return nil
@@ -163,18 +158,13 @@ struct ZenbanRootView: View {
         return (card, board.id)
     }
 
-    static func rootContentMode(
+    static func shouldPresentTerminalFullscreen(
         selectedBoard: Board?,
         selectedCard: Card?,
         terminalFullscreenCardID: UUID?
-    ) -> ZenbanRootContentMode {
-        guard selectedBoard != nil,
-              let selectedCard,
-              terminalFullscreenCardID == selectedCard.id else {
-            return .splitView
-        }
-
-        return .terminalFullscreenCardDetail
+    ) -> Bool {
+        guard selectedBoard != nil, let selectedCard else { return false }
+        return terminalFullscreenCardID == selectedCard.id
     }
 
     private func handleDevServerVisibilityChange(wasShowing: Bool, isShowing: Bool) {

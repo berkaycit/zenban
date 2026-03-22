@@ -116,15 +116,13 @@ final class BoardStore {
     var selectedBoardID: UUID? {
         didSet {
             guard oldValue != selectedBoardID else { return }
-            clearTerminalFullscreen()
+            reconcileTerminalFullscreenState()
         }
     }
     var selectedCardID: UUID? {
         didSet {
             guard oldValue != selectedCardID else { return }
-            if terminalFullscreenCardID != selectedCardID {
-                clearTerminalFullscreen()
-            }
+            reconcileTerminalFullscreenState()
         }
     }
     var draggedCardID: UUID?
@@ -139,9 +137,7 @@ final class BoardStore {
     var overlayState: OverlayState = .none {
         didSet {
             guard oldValue != overlayState else { return }
-            if overlayState != .none {
-                clearTerminalFullscreen()
-            }
+            reconcileTerminalFullscreenState()
         }
     }
 
@@ -341,21 +337,23 @@ final class BoardStore {
     func toggleTerminalFullscreen(for cardID: UUID, in boardID: UUID) -> Bool {
         guard overlayState == .none,
               selectedBoardID == boardID,
+              let selectedBoard,
+              selectedBoard.id == boardID,
+              let selectedCard,
               selectedCardID == cardID,
-              board(for: boardID)?.cards.contains(where: { $0.id == cardID }) == true else {
+              selectedCard.id == cardID,
+              selectedCard.column != .done,
+              selectedBoard.cards.contains(where: { $0.id == cardID }) else {
             return false
         }
 
         terminalFullscreenCardID = terminalFullscreenCardID == cardID ? nil : cardID
+        reconcileTerminalFullscreenState()
         return true
     }
 
     func isTerminalFullscreenActive(for cardID: UUID) -> Bool {
         terminalFullscreenCardID == cardID
-    }
-
-    func clearTerminalFullscreen() {
-        terminalFullscreenCardID = nil
     }
 
     func clearTerminalFullscreen(for cardID: UUID) {
@@ -420,9 +418,6 @@ final class BoardStore {
 
         // Stop overlay if showing for any card in this board
         if let id = overlayState.cardID, cardIDs.contains(id) { overlayState = .none }
-        if let terminalFullscreenCardID, cardIDs.contains(terminalFullscreenCardID) {
-            clearTerminalFullscreen()
-        }
         if let request = deleteConfirmationRequest, request.affectsAnyCard(in: cardIDs) {
             deleteConfirmationRequest = nil
         }
@@ -447,6 +442,7 @@ final class BoardStore {
             selectedBoardID = boards.first?.id
             selectedCardID = nil
         }
+        reconcileTerminalFullscreenState()
         scheduleSave()
     }
 
@@ -508,9 +504,6 @@ final class BoardStore {
             .map(\.orderIndex)
             .min() ?? 1
         boards[bi].cards[ci].column = column
-        if column == .done {
-            clearTerminalFullscreen(for: cardID)
-        }
         boards[bi].cards[ci].orderIndex = minOrderIndex - 1
         if column == .done, previousColumn != .done {
             if overlayState.isDevServer, overlayState.cardID == cardID {
@@ -518,6 +511,7 @@ final class BoardStore {
             }
             cmuxHost?.removeWorkspace(for: cardID)
         }
+        reconcileTerminalFullscreenState()
         scheduleSave()
         return true
     }
@@ -899,9 +893,6 @@ final class BoardStore {
         if let overlayCardID = overlayState.cardID, cardIDs.contains(overlayCardID) {
             overlayState = .none
         }
-        if let terminalFullscreenCardID, cardIDs.contains(terminalFullscreenCardID) {
-            clearTerminalFullscreen()
-        }
         if let request = deleteConfirmationRequest, request.affectsAnyCard(in: cardIDs) {
             deleteConfirmationRequest = nil
         }
@@ -929,6 +920,7 @@ final class BoardStore {
             }
         }
 
+        reconcileTerminalFullscreenState()
         scheduleSave()
 
         if let repoPath,
@@ -944,6 +936,20 @@ final class BoardStore {
 
     private func fanOutCloneTitle(for title: String, copyNumber: Int) -> String {
         "\(title) (\(copyNumber))"
+    }
+
+    private func reconcileTerminalFullscreenState() {
+        guard let terminalFullscreenCardID else { return }
+
+        guard overlayState == .none,
+              let selectedBoard,
+              let selectedCard,
+              selectedCard.id == terminalFullscreenCardID,
+              selectedCard.column != .done,
+              selectedBoard.cards.contains(where: { $0.id == terminalFullscreenCardID }) else {
+            self.terminalFullscreenCardID = nil
+            return
+        }
     }
 
     // MARK: - Worktree Operations

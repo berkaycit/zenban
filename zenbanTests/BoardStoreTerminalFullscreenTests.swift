@@ -49,6 +49,23 @@ struct BoardStoreTerminalFullscreenTests {
 
     @MainActor
     @Test
+    func changingSelectedBoardClearsTerminalFullscreen() {
+        let firstCard = Card(title: "First", orderIndex: 0)
+        let firstBoard = Board(name: "First", cards: [firstCard])
+        let secondBoard = Board(name: "Second", cards: [])
+        let store = BoardStore(initialBoards: [firstBoard, secondBoard], persistenceEnabled: false)
+        store.selectedBoardID = firstBoard.id
+        store.selectedCardID = firstCard.id
+
+        #expect(store.toggleTerminalFullscreen(for: firstCard.id, in: firstBoard.id))
+
+        store.selectedBoardID = secondBoard.id
+
+        #expect(store.terminalFullscreenCardID == nil)
+    }
+
+    @MainActor
+    @Test
     func movingCardToDoneClearsTerminalFullscreen() {
         let card = Card(title: "Terminal", orderIndex: 0)
         let board = Board(name: "Board", cards: [card])
@@ -58,6 +75,38 @@ struct BoardStoreTerminalFullscreenTests {
 
         #expect(store.moveCard(card.id, to: .done, in: board.id))
         #expect(store.terminalFullscreenCardID == nil)
+    }
+
+    @MainActor
+    @Test
+    func deletingSelectedCardClearsTerminalFullscreen() {
+        let card = Card(title: "Terminal", orderIndex: 0)
+        let board = Board(name: "Board", cards: [card])
+        let store = makeStore(board: board, selectedCardID: card.id)
+
+        #expect(store.toggleTerminalFullscreen(for: card.id, in: board.id))
+
+        store.deleteCard(card.id, from: board.id)
+
+        #expect(store.terminalFullscreenCardID == nil)
+    }
+
+    @MainActor
+    @Test
+    func deletingSelectedBoardClearsTerminalFullscreen() {
+        let firstCard = Card(title: "Terminal", orderIndex: 0)
+        let firstBoard = Board(name: "First", cards: [firstCard])
+        let secondBoard = Board(name: "Second", cards: [])
+        let store = BoardStore(initialBoards: [firstBoard, secondBoard], persistenceEnabled: false)
+        store.selectedBoardID = firstBoard.id
+        store.selectedCardID = firstCard.id
+
+        #expect(store.toggleTerminalFullscreen(for: firstCard.id, in: firstBoard.id))
+
+        store.deleteBoard(firstBoard)
+
+        #expect(store.terminalFullscreenCardID == nil)
+        #expect(store.selectedBoardID == secondBoard.id)
     }
 
     @MainActor

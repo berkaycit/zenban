@@ -3,45 +3,45 @@ import Testing
 
 struct ZenbanRootViewTests {
     @Test
-    func rootContentModeUsesFullscreenWhenSelectedCardMatches() {
+    func shouldPresentTerminalFullscreenWhenSelectedCardMatches() {
         let card = Card(title: "Terminal", orderIndex: 0)
         let board = Board(name: "Board", cards: [card])
 
         #expect(
-            ZenbanRootView.rootContentMode(
+            ZenbanRootView.shouldPresentTerminalFullscreen(
                 selectedBoard: board,
                 selectedCard: card,
                 terminalFullscreenCardID: card.id
-            ) == .terminalFullscreenCardDetail
+            )
         )
     }
 
     @Test
-    func rootContentModeReturnsSplitViewWhenFullscreenClears() {
+    func shouldNotPresentTerminalFullscreenWhenFullscreenClears() {
         let card = Card(title: "Terminal", orderIndex: 0)
         let board = Board(name: "Board", cards: [card])
 
         #expect(
-            ZenbanRootView.rootContentMode(
+            !ZenbanRootView.shouldPresentTerminalFullscreen(
                 selectedBoard: board,
                 selectedCard: card,
                 terminalFullscreenCardID: nil
-            ) == .splitView
+            )
         )
     }
 
     @Test
-    func rootContentModeReturnsSplitViewWhenFullscreenCardDoesNotMatchSelection() {
+    func shouldNotPresentTerminalFullscreenWhenFullscreenCardDoesNotMatchSelection() {
         let first = Card(title: "First", orderIndex: 0)
         let second = Card(title: "Second", orderIndex: 1)
         let board = Board(name: "Board", cards: [first, second])
 
         #expect(
-            ZenbanRootView.rootContentMode(
+            !ZenbanRootView.shouldPresentTerminalFullscreen(
                 selectedBoard: board,
                 selectedCard: first,
                 terminalFullscreenCardID: second.id
-            ) == .splitView
+            )
         )
     }
 }
