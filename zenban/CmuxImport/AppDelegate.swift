@@ -1924,6 +1924,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let display: SessionDisplaySnapshot?
     }
 
+    private enum NotificationDeliveryDecision {
+        case deliver(String)
+        case suppress(String)
+
+        var shouldSuppress: Bool {
+            if case .suppress = self {
+                return true
+            }
+            return false
+        }
+
+        var reason: String {
+            switch self {
+            case .deliver(let reason), .suppress(let reason):
+                return reason
+            }
+        }
+    }
+
     private static let persistedWindowGeometryDefaultsKey = "cmux.session.lastWindowGeometry.v1"
 
     weak var tabManager: TabManager?
@@ -2013,6 +2032,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var didSetupMultiWindowNotificationsUITest = false
     var debugCloseMainWindowConfirmationHandler: ((NSWindow) -> Bool)?
     private var hostBundleIdentifierOverrideForTesting: String?
+    private var notificationFirstResponderOwnerPanelIdOverrideForTesting: UUID??
     // Keep debug-only windows alive when tests intentionally inject key mismatches.
     private var debugDetachedContextWindows: [NSWindow] = []
 
@@ -10033,6 +10053,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return nil
     }
 
+    func shouldSuppressExternalNotification(tabId: UUID, surfaceId: UUID?) -> Bool {
+        let decision = notificationDeliveryDecision(tabId: tabId, surfaceId: surfaceId)
+#if DEBUG
+        let host = isZenbanEmbeddedHost ? "zenban" : "cmux"
+        let result = decision.shouldSuppress ? "suppressed" : "delivered"
+        let tabToken = String(tabId.uuidString.prefix(8))
+        let surfaceToken = surfaceId.map { String($0.uuidString.prefix(8)) } ?? "nil"
+        dlog(
+            "notification.delivery host=\(host) result=\(result) reason=\(decision.reason) " +
+                "tab=\(tabToken) surface=\(surfaceToken)"
+        )
+#endif
+        return decision.shouldSuppress
+    }
+
+    private func notificationDeliveryDecision(tabId: UUID, surfaceId: UUID?) -> NotificationDeliveryDecision {
+        guard let context = contextContainingTabId(tabId) else {
+            return .deliver("missing_context")
+        }
+        guard let window = notificationSuppressionWindow(for: context) else {
+            return .deliver("window_not_focused")
+        }
+        guard context.tabManager.selectedTabId == tabId else {
+            return .deliver("tab_not_selected")
+        }
+        if let surfaceId,
+           context.tabManager.focusedSurfaceId(for: tabId) != surfaceId {
+            return .deliver("surface_not_focused")
+        }
+        guard isZenbanEmbeddedHost else {
+            return .suppress("standalone_focused_tab")
+        }
+        guard let workspace = context.tabManager.tabs.first(where: { $0.id == tabId }) else {
+            return .deliver("workspace_missing")
+        }
+        let responderPanelId = notificationFirstResponderOwnerPanelId(in: workspace, window: window)
+        if let surfaceId {
+            guard responderPanelId == surfaceId else {
+                return .deliver(responderPanelId == nil ? "surface_not_first_responder" : "other_panel_first_responder")
+            }
+        } else if responderPanelId == nil {
+            return .deliver("workspace_not_first_responder")
+        }
+        return .suppress("zenban_exact_panel_focus")
+    }
+
+    private func notificationSuppressionWindow(for context: MainWindowContext) -> NSWindow? {
+#if DEBUG
+        if let overrideIsFocused = AppFocusState.overrideIsFocused {
+            guard overrideIsFocused else { return nil }
+            return resolvedWindow(for: context)
+        }
+#endif
+        guard NSApp.isActive,
+              let keyWindow = NSApp.keyWindow,
+              keyWindow.isKeyWindow,
+              let keyContext = contextForMainTerminalWindow(keyWindow),
+              keyContext === context else {
+            return nil
+        }
+        return keyWindow
+    }
+
+    private func notificationFirstResponderOwnerPanelId(in workspace: Workspace, window: NSWindow) -> UUID? {
+#if DEBUG
+        if let override = notificationFirstResponderOwnerPanelIdOverrideForTesting {
+            return override
+        }
+#endif
+        guard let responder = window.firstResponder else { return nil }
+        for (panelId, panel) in workspace.panels {
+            guard panel.ownedFocusIntent(for: responder, in: window) != nil else { continue }
+            return panelId
+        }
+        return nil
+    }
+
     /// Returns the `TabManager` that owns `tabId`, if any.
     func tabManagerFor(tabId: UUID) -> TabManager? {
         contextContainingTabId(tabId)?.tabManager
@@ -10327,6 +10424,14 @@ extension AppDelegate {
         hostBundleIdentifierOverrideForTesting = bundleIdentifier
     }
 
+    func setNotificationFirstResponderOwnerPanelIdForTesting(_ panelId: UUID?) {
+        notificationFirstResponderOwnerPanelIdOverrideForTesting = .some(panelId)
+    }
+
+    func clearNotificationFirstResponderOwnerPanelIdOverrideForTesting() {
+        notificationFirstResponderOwnerPanelIdOverrideForTesting = nil
+    }
+
     func setStartupSessionSnapshotForTesting(_ snapshot: AppSessionSnapshot?) {
         startupSessionSnapshot = snapshot
         didPrepareStartupSessionSnapshot = snapshot != nil
@@ -10363,6 +10468,7 @@ extension AppDelegate {
         didSendApplicationTerminationReply = false
         isTerminatingApp = false
         hostBundleIdentifierOverrideForTesting = nil
+        notificationFirstResponderOwnerPanelIdOverrideForTesting = nil
         startupSessionSnapshot = nil
         didPrepareStartupSessionSnapshot = false
         didAttemptStartupSessionRestore = false

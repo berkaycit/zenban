@@ -8819,22 +8819,11 @@ struct CMUXCLI {
         let cwd = parsedInput.cwd ?? sessionRecord?.cwd
         let transcriptPath = parsedInput.transcriptPath
 
-        let projectName: String? = {
-            guard let cwd = cwd, !cwd.isEmpty else { return nil }
-            let path = NSString(string: cwd).expandingTildeInPath
-            let tail = URL(fileURLWithPath: path).lastPathComponent
-            return tail.isEmpty ? path : tail
-        }()
-
         // Try reading the transcript JSONL for a richer summary.
         let transcript = transcriptPath.flatMap { readTranscriptSummary(path: $0) }
 
         if let lastMsg = transcript?.lastAssistantMessage {
-            var subtitle = "Completed"
-            if let projectName, !projectName.isEmpty {
-                subtitle = "Completed in \(projectName)"
-            }
-            return (subtitle, truncate(lastMsg, maxLength: 480))
+            return ("", truncate(lastMsg, maxLength: 480))
         }
 
         // Fallback: use session record data.
@@ -8842,14 +8831,13 @@ struct CMUXCLI {
         let hasContext = cwd != nil || lastMessage != nil
         guard hasContext else { return nil }
 
-        var body = "Claude session completed"
-        if let projectName, !projectName.isEmpty {
-            body += " in \(projectName)"
-        }
+        let body: String
         if let lastMessage, !lastMessage.isEmpty {
-            body += ". Last: \(lastMessage)"
+            body = truncate("Latest update: \(lastMessage)", maxLength: 480)
+        } else {
+            body = "Claude has updates"
         }
-        return ("Completed", body)
+        return ("", body)
     }
 
     private struct TranscriptSummary {
@@ -8948,8 +8936,8 @@ struct CMUXCLI {
             return ("Error", body)
         }
         if lower.contains("complet") || lower.contains("finish") || lower.contains("done") || lower.contains("success") {
-            let body = message.isEmpty ? "Task completed" : message
-            return ("Completed", body)
+            let body = message.isEmpty ? "Claude has updates" : message
+            return ("", body)
         }
         if lower.contains("idle") || lower.contains("wait") || lower.contains("input") || lower.contains("idle_prompt") {
             let body = message.isEmpty ? "Waiting for input" : message

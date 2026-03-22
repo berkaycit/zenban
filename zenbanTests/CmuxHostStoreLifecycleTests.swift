@@ -70,13 +70,13 @@ struct CmuxHostStoreLifecycleTests {
             tabId: workspace.id,
             surfaceId: workspace.focusedPanelId,
             title: "Build finished",
-            subtitle: "Completed in cc-42",
+            subtitle: "",
             body: "Done"
         )
 
         let notification = try #require(notificationStore.notifications.first)
         #expect(notification.title == card.title)
-        #expect(notification.subtitle == "Completed in cc-42")
+        #expect(notification.subtitle.isEmpty)
         #expect(boardStore.card(id: card.id)?.column == .inProgress)
     }
 
@@ -366,24 +366,27 @@ struct CmuxHostStoreLifecycleTests {
     }
 
     @Test
-    func suppressedNotificationStillMovesMappedTodoCardToInReview() throws {
+    func standaloneHostSuppressedNotificationStillMovesMappedTodoCardToInReview() throws {
         let notificationStore = TerminalNotificationStore.shared
         var deliveryCount = 0
         notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
             deliveryCount += 1
         }
         notificationStore.replaceNotificationsForTesting([])
-        AppFocusState.overrideIsFocused = true
         defer {
-            AppFocusState.overrideIsFocused = nil
             notificationStore.replaceNotificationsForTesting([])
             notificationStore.resetNotificationDeliveryHandlerForTesting()
         }
 
         let appDelegate = AppDelegate()
+        appDelegate.setHostBundleIdentifierForTesting("com.cmuxterm.app")
+        AppFocusState.overrideIsFocused = true
         let (boardStore, board, card) = makeBoardFixture()
         let (hostStore, window) = makeHostStore(boardStore: boardStore)
         defer {
+            AppFocusState.overrideIsFocused = nil
+            appDelegate.clearNotificationFirstResponderOwnerPanelIdOverrideForTesting()
+            appDelegate.setHostBundleIdentifierForTesting(nil)
             window.close()
             _ = appDelegate
         }
@@ -404,6 +407,197 @@ struct CmuxHostStoreLifecycleTests {
         #expect(notification.title == card.title)
         #expect(notification.subtitle == "Workspace notification")
         #expect(boardStore.card(id: card.id)?.column == .inProgress)
+    }
+
+    @Test
+    func zenbanHostDeliversNotificationWhenCardIsSelectedButNoPanelOwnsFirstResponder() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        var deliveryCount = 0
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
+            deliveryCount += 1
+        }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let appDelegate = AppDelegate()
+        AppFocusState.overrideIsFocused = true
+        appDelegate.setNotificationFirstResponderOwnerPanelIdForTesting(nil)
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            AppFocusState.overrideIsFocused = nil
+            appDelegate.clearNotificationFirstResponderOwnerPanelIdOverrideForTesting()
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+
+        notificationStore.addNotification(
+            tabId: workspace.id,
+            surfaceId: workspace.focusedPanelId,
+            title: "Build finished",
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        let notification = try #require(notificationStore.notifications.first)
+        #expect(deliveryCount == 1)
+        #expect(notification.title == card.title)
+        #expect(notification.subtitle == "Workspace notification")
+        #expect(boardStore.card(id: card.id)?.column == .inProgress)
+    }
+
+    @Test
+    func zenbanHostSuppressesNotificationWhenExactTerminalPanelOwnsFirstResponder() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        var deliveryCount = 0
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
+            deliveryCount += 1
+        }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let appDelegate = AppDelegate()
+        AppFocusState.overrideIsFocused = true
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            AppFocusState.overrideIsFocused = nil
+            appDelegate.clearNotificationFirstResponderOwnerPanelIdOverrideForTesting()
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        appDelegate.setNotificationFirstResponderOwnerPanelIdForTesting(workspace.focusedPanelId)
+
+        notificationStore.addNotification(
+            tabId: workspace.id,
+            surfaceId: workspace.focusedPanelId,
+            title: "Build finished",
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        let notification = try #require(notificationStore.notifications.first)
+        #expect(deliveryCount == 0)
+        #expect(notification.title == card.title)
+        #expect(notification.subtitle == "Workspace notification")
+        #expect(boardStore.card(id: card.id)?.column == .inProgress)
+    }
+
+    @Test
+    func zenbanHostSuppressesNotificationWhenExactBrowserPanelOwnsFirstResponder() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        var deliveryCount = 0
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
+            deliveryCount += 1
+        }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let appDelegate = AppDelegate()
+        AppFocusState.overrideIsFocused = true
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            AppFocusState.overrideIsFocused = nil
+            appDelegate.clearNotificationFirstResponderOwnerPanelIdOverrideForTesting()
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        hostStore.ensureBrowserSurface(
+            for: card,
+            boardID: board.id,
+            url: URL(string: "http://localhost:5173")!
+        )
+        let browserContext = try #require(hostStore.browserSurface(for: card.id))
+        workspace.focusPanel(browserContext.panel.id)
+        appDelegate.setNotificationFirstResponderOwnerPanelIdForTesting(browserContext.panel.id)
+
+        notificationStore.addNotification(
+            tabId: workspace.id,
+            surfaceId: browserContext.panel.id,
+            title: "Build finished",
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        let notification = try #require(notificationStore.notifications.first)
+        #expect(deliveryCount == 0)
+        #expect(notification.title == card.title)
+        #expect(notification.subtitle == "Workspace notification")
+        #expect(boardStore.card(id: card.id)?.column == .inProgress)
+    }
+
+    @Test
+    func zenbanHostDeliversNotificationWhenAnotherWorkspaceIsSelected() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        var deliveryCount = 0
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
+            deliveryCount += 1
+        }
+        notificationStore.replaceNotificationsForTesting([])
+        defer {
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let firstCard = Card(title: "cc-42", column: .todo, orderIndex: 0, agent: .claude, worktreePath: "/tmp/cc-42")
+        let secondCard = Card(title: "cc-43", column: .todo, orderIndex: 1, agent: .claude, worktreePath: "/tmp/cc-43")
+        let board = Board(
+            name: "Workspace Ownership",
+            cards: [firstCard, secondCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = makeBoardStore(board: board, selectedCardID: firstCard.id)
+
+        let appDelegate = AppDelegate()
+        AppFocusState.overrideIsFocused = true
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            AppFocusState.overrideIsFocused = nil
+            appDelegate.clearNotificationFirstResponderOwnerPanelIdOverrideForTesting()
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: firstCard, boardID: board.id)
+        let firstWorkspace = try #require(hostStore.workspace(for: firstCard.id))
+        hostStore.syncSelection(card: secondCard, boardID: board.id)
+        _ = try #require(hostStore.workspace(for: secondCard.id))
+        appDelegate.setNotificationFirstResponderOwnerPanelIdForTesting(firstWorkspace.focusedPanelId)
+
+        notificationStore.addNotification(
+            tabId: firstWorkspace.id,
+            surfaceId: firstWorkspace.focusedPanelId,
+            title: "Build finished",
+            subtitle: "Workspace notification",
+            body: "Done"
+        )
+
+        let notification = try #require(notificationStore.notifications.first)
+        #expect(deliveryCount == 1)
+        #expect(notification.title == firstCard.title)
+        #expect(notification.subtitle == "Workspace notification")
+        #expect(boardStore.card(id: firstCard.id)?.column == .inProgress)
+        #expect(boardStore.card(id: secondCard.id)?.column == .todo)
     }
 
     @Test
