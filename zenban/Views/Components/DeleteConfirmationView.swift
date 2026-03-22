@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 struct DeleteConfirmationContent {
@@ -6,49 +5,13 @@ struct DeleteConfirmationContent {
     let message: String
     let detail: String?
     let deleteAccessibilityLabel: String
-}
 
-struct DeleteConfirmationView: View {
-    let content: DeleteConfirmationContent
-    let onDelete: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "trash")
-                .font(.system(size: 40))
-                .foregroundStyle(.red)
-
-            Text(content.title)
-                .font(.headline)
-
-            VStack(spacing: 4) {
-                Text(content.message)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                if let detail = content.detail {
-                    Text(detail)
-                        .font(.body.weight(.medium))
-                }
-            }
-            .multilineTextAlignment(.center)
-
-            HStack(spacing: 12) {
-                Spacer()
-
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityLabel("Cancel deletion")
-
-                Button("Delete", role: .destructive, action: onDelete)
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityLabel(content.deleteAccessibilityLabel)
-            }
+    var informativeText: String {
+        guard let detail,
+              !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return message
         }
-        .padding(24)
-        .frame(width: 360)
-        .background(Color(nsColor: .windowBackgroundColor))
+        return "\(message) \(detail)"
     }
 }
 

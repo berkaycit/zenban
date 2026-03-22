@@ -108,11 +108,18 @@ struct ZenbanRootView: View {
         .sheet(isPresented: $store.showKeyboardShortcuts) {
             KeyboardShortcutsView()
         }
-        .sheet(item: $store.deleteConfirmationRequest) { request in
-            DeleteConfirmationView(
-                content: request.content,
-                onDelete: store.confirmDeleteRequest,
-                onCancel: store.cancelDeleteRequest
+        .alert(item: $store.deleteConfirmationRequest) { request in
+            Alert(
+                title: Text(request.content.title),
+                message: Text(request.content.informativeText),
+                primaryButton: .destructive(
+                    Text(String(localized: "Delete", defaultValue: "Delete")),
+                    action: store.confirmDeleteRequest
+                ),
+                secondaryButton: .cancel(
+                    Text(String(localized: "common.cancel", defaultValue: "Cancel")),
+                    action: store.cancelDeleteRequest
+                )
             )
         }
     }
