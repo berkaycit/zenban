@@ -335,6 +335,108 @@ struct AppDelegateShortcutOverrideTests {
         #expect(boardStore.terminalFullscreenCardID == nil)
     }
 
+    @Test
+    func ghosttyConfiguredNextTabShortcutCyclesTerminalTabsFromFocusedTerminal() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        let terminalPanel = try #require(workspace.focusedTerminalPanel)
+        let nextSurface = try #require(workspace.newTerminalSurface(inPane: paneId, focus: false))
+        appDelegate.tabManager = hostStore.tabManager
+        appDelegate.debugSetGhosttySurfaceNavigationShortcuts(
+            previous: StoredShortcut(key: "←", command: false, shift: true, option: true, control: false),
+            next: StoredShortcut(key: "→", command: false, shift: true, option: true, control: false)
+        )
+
+        let ghosttyView = try attachFocusedTerminal(terminalPanel, to: window)
+
+        #expect(window.firstResponder === ghosttyView)
+        #expect(workspace.focusedPanelId == terminalPanel.id)
+        #expect(
+            appDelegate.debugHandleCustomShortcut(
+                event: try makeOptionShiftArrowEvent(direction: .right, window: window)
+            )
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        #expect(workspace.focusedPanelId == nextSurface.id)
+    }
+
+    @Test
+    func ghosttyConfiguredPreviousTabShortcutCyclesTerminalTabsFromFocusedTerminal() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        let previousSurface = try #require(workspace.focusedTerminalPanel)
+        let terminalPanel = try #require(workspace.newTerminalSurface(inPane: paneId, focus: true))
+        appDelegate.tabManager = hostStore.tabManager
+        appDelegate.debugSetGhosttySurfaceNavigationShortcuts(
+            previous: StoredShortcut(key: "←", command: false, shift: true, option: true, control: false),
+            next: StoredShortcut(key: "→", command: false, shift: true, option: true, control: false)
+        )
+
+        let ghosttyView = try attachFocusedTerminal(terminalPanel, to: window)
+
+        #expect(window.firstResponder === ghosttyView)
+        #expect(workspace.focusedPanelId == terminalPanel.id)
+        #expect(
+            appDelegate.debugHandleCustomShortcut(
+                event: try makeOptionShiftArrowEvent(direction: .left, window: window)
+            )
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        #expect(workspace.focusedPanelId == previousSurface.id)
+    }
+
+    @Test
+    func ghosttyConfiguredTabNavigationDoesNotConsumeWithoutFocusedTerminal() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        appDelegate.tabManager = hostStore.tabManager
+        appDelegate.debugSetGhosttySurfaceNavigationShortcuts(
+            previous: StoredShortcut(key: "←", command: false, shift: true, option: true, control: false),
+            next: StoredShortcut(key: "→", command: false, shift: true, option: true, control: false)
+        )
+
+        let textField = NSTextField(string: "Ghostty shortcuts should not trigger here")
+        textField.frame = window.contentView?.bounds ?? .zero
+        textField.autoresizingMask = [.width, .height]
+        window.contentView?.addSubview(textField)
+        window.makeKeyAndOrderFront(nil)
+        #expect(window.makeFirstResponder(textField))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        #expect(
+            !appDelegate.debugHandleCustomShortcut(
+                event: try makeOptionShiftArrowEvent(direction: .right, window: window)
+            )
+        )
+        #expect(hostStore.tabManager.selectedTabId == workspace.id)
+    }
+
     private func makeBoardFixture() -> (BoardStore, Board, Card) {
         let card = Card(title: "Preview", column: .todo, orderIndex: 0, agent: .claude, worktreePath: "/tmp/preview")
         let board = Board(name: "Board", cards: [card], repositoryPath: "/tmp/repo", agent: .claude)
@@ -414,6 +516,63 @@ struct AppDelegateShortcutOverrideTests {
                 keyCode: 36
             )
         )
+    }
+
+    private enum TestArrowDirection {
+        case left
+        case right
+        case up
+        case down
+    }
+
+    private func makeOptionShiftArrowEvent(
+        direction: TestArrowDirection,
+        window: NSWindow? = nil
+    ) throws -> NSEvent {
+        let keyCode: UInt16
+        let character: String
+
+        switch direction {
+        case .left:
+            keyCode = 123
+            character = String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!))
+        case .right:
+            keyCode = 124
+            character = String(Character(UnicodeScalar(NSRightArrowFunctionKey)!))
+        case .up:
+            keyCode = 126
+            character = String(Character(UnicodeScalar(NSUpArrowFunctionKey)!))
+        case .down:
+            keyCode = 125
+            character = String(Character(UnicodeScalar(NSDownArrowFunctionKey)!))
+        }
+
+        return try #require(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [.option, .shift],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window?.windowNumber ?? 0,
+                context: nil,
+                characters: character,
+                charactersIgnoringModifiers: character,
+                isARepeat: false,
+                keyCode: keyCode
+            )
+        )
+    }
+
+    private func attachFocusedTerminal(_ terminalPanel: TerminalPanel, to window: NSWindow) throws -> GhosttyNSView {
+        terminalPanel.hostedView.frame = window.contentView?.bounds ?? .zero
+        terminalPanel.hostedView.autoresizingMask = [.width, .height]
+        window.contentView?.addSubview(terminalPanel.hostedView)
+        let focusPoint = NSPoint(x: 1, y: 1)
+        let ghosttyView = try #require(terminalPanel.hostedView.terminalViewForDrop(at: focusPoint))
+        window.makeKeyAndOrderFront(nil)
+        #expect(window.makeFirstResponder(ghosttyView))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        return ghosttyView
     }
 
     private func panelCount(of panelType: PanelType, in workspace: Workspace) -> Int {

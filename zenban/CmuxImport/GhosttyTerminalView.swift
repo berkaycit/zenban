@@ -1643,11 +1643,26 @@ class GhosttyApp {
 
     func openConfigurationInTextEdit() {
         #if os(macOS)
-        let path = ghosttyStringValue(ghostty_config_open_path())
+        let preferredPath = ghosttyStringValue(ghostty_config_open_path())
+        let path: String
+        if !preferredPath.isEmpty {
+            path = preferredPath
+        } else {
+            let fileManager = FileManager.default
+            let bundledOverridePath = GhosttyConfig.embeddedPerformanceOverridePath(fileManager: fileManager)
+            let fallbackPath = GhosttyConfig.configPathsForDiskLoad(fileManager: fileManager).first {
+                $0 != bundledOverridePath && fileManager.fileExists(atPath: $0)
+            } ?? GhosttyConfig.configPathsForDiskLoad(fileManager: fileManager).first {
+                $0 != bundledOverridePath
+            }
+            guard let fallbackPath else { return }
+            path = fallbackPath
+        }
         guard !path.isEmpty else { return }
         let fileURL = URL(fileURLWithPath: path)
         let editorURL = URL(fileURLWithPath: "/System/Applications/TextEdit.app")
         let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
         NSWorkspace.shared.open([fileURL], withApplicationAt: editorURL, configuration: configuration)
         #endif
     }

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -15,6 +16,24 @@ struct BoardCommands: Commands {
 
     var body: some Commands {
         let refreshPreviewCard = refreshPreviewCard
+
+        CommandGroup(replacing: .appInfo) {
+            Button(String(localized: "menu.app.about", defaultValue: "About Zenban")) {
+                NSApp.orderFrontStandardAboutPanel(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+
+            Button(String(localized: "menu.app.ghosttySettings", defaultValue: "Ghostty Settings…")) {
+                GhosttyApp.shared.openConfigurationInTextEdit()
+            }
+
+            Button(String(localized: "menu.app.reloadConfiguration", defaultValue: "Reload Configuration")) {
+                GhosttyApp.shared.reloadConfiguration(source: "menu.reload_configuration")
+            }
+            .keyboardShortcut(",", modifiers: [.command, .shift])
+
+            Divider()
+        }
 
         CommandGroup(after: .newItem) {
             Button("New Board") {

@@ -46,6 +46,22 @@ struct GeneralSettingsView: View {
             } footer: {
                 Text("Zenban does not require separate Homebrew, tmux, zellij, or GitHub CLI installs.")
             }
+
+            Section {
+                Text("Embedded terminals reload Ghostty config in place. Ghostty `previous_tab` and `next_tab` bindings can drive terminal tab navigation in the focused pane when a terminal is focused.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button(String(localized: "menu.app.ghosttySettings", defaultValue: "Ghostty Settings…")) {
+                    GhosttyApp.shared.openConfigurationInTextEdit()
+                }
+
+                Button(String(localized: "menu.app.reloadConfiguration", defaultValue: "Reload Configuration")) {
+                    GhosttyApp.shared.reloadConfiguration(source: "settings.general.reload_configuration")
+                }
+            } header: {
+                Text(String(localized: "settings.section.terminal", defaultValue: "Terminal / Ghostty"))
+            }
         }
         .formStyle(.grouped)
         .onAppear {

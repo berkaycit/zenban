@@ -1970,6 +1970,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var ghosttyGotoSplitRightShortcut: StoredShortcut?
     private var ghosttyGotoSplitUpShortcut: StoredShortcut?
     private var ghosttyGotoSplitDownShortcut: StoredShortcut?
+    private var ghosttyPreviousTabShortcut: StoredShortcut?
+    private var ghosttyNextTabShortcut: StoredShortcut?
     private var browserAddressBarFocusedPanelId: UUID?
     private var browserOmnibarRepeatStartWorkItem: DispatchWorkItem?
     private var browserOmnibarRepeatTickWorkItem: DispatchWorkItem?
@@ -2245,7 +2247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         titlebarAccessoryController.start()
         windowDecorationsController.start()
         installMainWindowKeyObserver()
-        refreshGhosttyGotoSplitShortcuts()
+        refreshGhosttyConfigDrivenShortcuts()
         installGhosttyConfigObserver()
         installWindowResponderSwizzles()
         installBrowserAddressBarFocusObservers()
@@ -7784,31 +7786,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshGhosttyGotoSplitShortcuts()
+            self?.refreshGhosttyConfigDrivenShortcuts()
         }
     }
 
-    private func refreshGhosttyGotoSplitShortcuts() {
+    private func clearGhosttyConfigDrivenShortcuts() {
+        ghosttyGotoSplitLeftShortcut = nil
+        ghosttyGotoSplitRightShortcut = nil
+        ghosttyGotoSplitUpShortcut = nil
+        ghosttyGotoSplitDownShortcut = nil
+        ghosttyPreviousTabShortcut = nil
+        ghosttyNextTabShortcut = nil
+    }
+
+    private func refreshGhosttyConfigDrivenShortcuts(
+        resolveShortcut: (String) -> StoredShortcut?
+    ) {
+        ghosttyGotoSplitLeftShortcut = resolveShortcut("goto_split:left")
+        ghosttyGotoSplitRightShortcut = resolveShortcut("goto_split:right")
+        ghosttyGotoSplitUpShortcut = resolveShortcut("goto_split:up")
+        ghosttyGotoSplitDownShortcut = resolveShortcut("goto_split:down")
+        ghosttyPreviousTabShortcut = resolveShortcut("previous_tab")
+        ghosttyNextTabShortcut = resolveShortcut("next_tab")
+    }
+
+    private func refreshGhosttyConfigDrivenShortcuts() {
         guard let config = GhosttyApp.shared.config else {
-            ghosttyGotoSplitLeftShortcut = nil
-            ghosttyGotoSplitRightShortcut = nil
-            ghosttyGotoSplitUpShortcut = nil
-            ghosttyGotoSplitDownShortcut = nil
+            clearGhosttyConfigDrivenShortcuts()
             return
         }
 
-        ghosttyGotoSplitLeftShortcut = storedShortcutFromGhosttyTrigger(
-            ghostty_config_trigger(config, "goto_split:left", UInt("goto_split:left".utf8.count))
-        )
-        ghosttyGotoSplitRightShortcut = storedShortcutFromGhosttyTrigger(
-            ghostty_config_trigger(config, "goto_split:right", UInt("goto_split:right".utf8.count))
-        )
-        ghosttyGotoSplitUpShortcut = storedShortcutFromGhosttyTrigger(
-            ghostty_config_trigger(config, "goto_split:up", UInt("goto_split:up".utf8.count))
-        )
-        ghosttyGotoSplitDownShortcut = storedShortcutFromGhosttyTrigger(
-            ghostty_config_trigger(config, "goto_split:down", UInt("goto_split:down".utf8.count))
-        )
+        refreshGhosttyConfigDrivenShortcuts { [self] action in
+            storedShortcutFromGhosttyTrigger(
+                ghostty_config_trigger(config, action, UInt(action.utf8.count))
+            )
+        }
     }
 
     private func storedShortcutFromGhosttyTrigger(_ trigger: ghostty_input_trigger_s) -> StoredShortcut? {
@@ -7895,6 +7907,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         return StoredShortcut(key: key, command: command, shift: shift, option: option, control: control)
+    }
+
+    private enum GhosttySurfaceNavigationDirection {
+        case previous
+        case next
+    }
+
+    private func handleGhosttySurfaceNavigationShortcut(event: NSEvent) -> Bool {
+        let responder = event.window?.firstResponder
+            ?? NSApp.keyWindow?.firstResponder
+            ?? NSApp.mainWindow?.firstResponder
+        guard let ghosttyView = cmuxOwningGhosttyView(for: responder) else {
+            return false
+        }
+
+        let direction: GhosttySurfaceNavigationDirection?
+        if let shortcut = ghosttyNextTabShortcut,
+           matchArrowCapableShortcut(
+            event: event,
+            shortcut: shortcut,
+            arrowGlyph: "→",
+            arrowKeyCode: 124
+           ) {
+            direction = .next
+        } else if let shortcut = ghosttyPreviousTabShortcut,
+                  matchArrowCapableShortcut(
+                    event: event,
+                    shortcut: shortcut,
+                    arrowGlyph: "←",
+                    arrowKeyCode: 123
+                  ) {
+            direction = .previous
+        } else {
+            direction = nil
+        }
+
+        guard let direction else { return false }
+        guard let workspaceId = ghosttyView.tabId,
+              let manager = tabManagerFor(tabId: workspaceId) ?? tabManager else {
+            return false
+        }
+        if manager.selectedTabId != workspaceId {
+            manager.selectedTabId = workspaceId
+        }
+
+#if DEBUG
+        let selected = manager.selectedTabId.map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let directionLabel = direction == .next ? "next" : "prev"
+        dlog(
+            "surface.shortcut dir=\(directionLabel) source=ghostty_config repeat=\(event.isARepeat ? 1 : 0) keyCode=\(event.keyCode) selected=\(selected)"
+        )
+#endif
+
+        switch direction {
+        case .previous:
+            manager.selectPreviousSurface()
+        case .next:
+            manager.selectNextSurface()
+        }
+        return true
     }
 
     private func handleQuitShortcutWarning() -> Bool {
@@ -8430,6 +8502,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // Only consume when a focused terminal actually handled the toggle.
             // Otherwise allow the event to continue through the responder chain.
             return handled
+        }
+
+        if handleGhosttySurfaceNavigationShortcut(event: event) {
+            return true
         }
 
         // Workspace navigation: Cmd+Ctrl+] / Cmd+Ctrl+[
@@ -9433,6 +9509,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return clearEscapeSuppressionForKeyUp(event: event, consumeIfSuppressed: true)
     }
 
+    func debugSetGhosttySurfaceNavigationShortcuts(previous: StoredShortcut?, next: StoredShortcut?) {
+        ghosttyPreviousTabShortcut = previous
+        ghosttyNextTabShortcut = next
+    }
+
     func debugMarkCommandPaletteOpenPending(window: NSWindow) {
         markCommandPaletteOpenRequested(for: window)
     }
@@ -9690,9 +9771,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return event.keyCode == 48 && flags == shortcut.modifierFlags
     }
 
-    /// Directional shortcuts default to arrow keys, but the shortcut recorder only supports letter/number keys.
-    /// Support both so users can customize pane navigation (e.g. Cmd+Ctrl+H/J/K/L).
-    private func matchDirectionalShortcut(
+    private func matchArrowCapableShortcut(
         event: NSEvent,
         shortcut: StoredShortcut,
         arrowGlyph: String,
@@ -9702,6 +9781,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return matchArrowShortcut(event: event, shortcut: shortcut, keyCode: arrowKeyCode)
         }
         return matchShortcut(event: event, shortcut: shortcut)
+    }
+
+    /// Directional shortcuts default to arrow keys, but the shortcut recorder only supports letter/number keys.
+    /// Support both so users can customize pane navigation (e.g. Cmd+Ctrl+H/J/K/L).
+    private func matchDirectionalShortcut(
+        event: NSEvent,
+        shortcut: StoredShortcut,
+        arrowGlyph: String,
+        arrowKeyCode: UInt16
+    ) -> Bool {
+        matchArrowCapableShortcut(
+            event: event,
+            shortcut: shortcut,
+            arrowGlyph: arrowGlyph,
+            arrowKeyCode: arrowKeyCode
+        )
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {

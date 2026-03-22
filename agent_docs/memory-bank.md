@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Expose Ghostty config controls in Zenban
+- **Description**: Zenban now surfaces `Ghostty Settings…` and `Reload Configuration` in the active app menu and in General settings so embedded terminals can pick up config edits without leaving the app. Reloaded Ghostty `previous_tab` and `next_tab` bindings now map to terminal tab cycling in the focused pane when a terminal is focused, while `Cmd+T` stays owned by Zenban's existing New Surface flow. Added focused shortcut regressions so the new bridge only consumes events from terminal focus and does not break the existing split-navigation overrides.
+
 - **Summary**: Expand terminal fullscreen to app content
 - **Description**: Terminal fullscreen no longer stops at the detail column. When Ghostty toggles fullscreen for the selected card, Zenban now swaps out the split view and lets that card's detail view own the full app content area while keeping window chrome unchanged. The existing cleanup and shortcut routing rules stay the same, and a new root-view regression locks the presentation mode switch.
 
