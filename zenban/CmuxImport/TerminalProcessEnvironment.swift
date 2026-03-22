@@ -1,8 +1,5 @@
 import Darwin
 import Foundation
-#if DEBUG
-import Bonsplit
-#endif
 
 @MainActor
 enum TerminalProcessEnvironment {
@@ -144,71 +141,3 @@ enum TerminalProcessEnvironment {
         return env
     }
 }
-
-#if DEBUG
-enum DebugProcessMemory {
-    struct Snapshot {
-        let residentSize: UInt64
-        let physFootprint: UInt64
-        let compressed: UInt64
-    }
-
-    static func snapshot() -> Snapshot? {
-        var info = task_vm_info_data_t()
-        var count = mach_msg_type_number_t(MemoryLayout.size(ofValue: info) / MemoryLayout<natural_t>.size)
-        let status = withUnsafeMutablePointer(to: &info) { pointer in
-            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { integerPointer in
-                task_info(
-                    mach_task_self_,
-                    task_flavor_t(TASK_VM_INFO),
-                    integerPointer,
-                    &count
-                )
-            }
-        }
-        guard status == KERN_SUCCESS else { return nil }
-        return Snapshot(
-            residentSize: info.resident_size,
-            physFootprint: info.phys_footprint,
-            compressed: info.compressed
-        )
-    }
-
-    static func summary() -> String {
-        guard let snapshot = snapshot() else {
-            return "mem.residentMB=unavailable mem.footprintMB=unavailable mem.compressedMB=unavailable"
-        }
-        return [
-            "mem.residentMB=\(mbString(snapshot.residentSize))",
-            "mem.footprintMB=\(mbString(snapshot.physFootprint))",
-            "mem.compressedMB=\(mbString(snapshot.compressed))",
-        ].joined(separator: " ")
-    }
-
-    static func log(
-        _ event: String,
-        workspaceId: UUID? = nil,
-        panelId: UUID? = nil,
-        extra: String? = nil
-    ) {
-        var parts = [event, summary()]
-        if let workspaceId {
-            parts.append("workspace=\(workspaceId.uuidString.prefix(5))")
-        }
-        if let panelId {
-            parts.append("panel=\(panelId.uuidString.prefix(5))")
-        }
-        if let extra {
-            let trimmed = extra.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                parts.append(trimmed)
-            }
-        }
-        dlog(parts.joined(separator: " "))
-    }
-
-    private static func mbString(_ bytes: UInt64) -> String {
-        String(format: "%.1f", Double(bytes) / (1024 * 1024))
-    }
-}
-#endif

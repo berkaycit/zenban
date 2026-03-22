@@ -2809,15 +2809,6 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         let surfaceToFree = surface
         surface = nil
-
-#if DEBUG
-        DebugProcessMemory.log(
-            "zenban.surface.release.begin",
-            workspaceId: tabId,
-            panelId: id,
-            extra: "hadSurface=\(surfaceToFree != nil ? 1 : 0)"
-        )
-#endif
         guard let surfaceToFree else {
             callbackContext?.release()
             return
@@ -2828,30 +2819,6 @@ final class TerminalSurface: Identifiable, ObservableObject {
             // the next main-actor turn so SIGHUP delivery is deterministic but non-reentrant.
             ghostty_surface_free(surfaceToFree)
             callbackContext?.release()
-#if DEBUG
-            DebugProcessMemory.log(
-                "zenban.surface.release.end",
-                workspaceId: tabId,
-                panelId: id,
-                extra: "hadSurface=1"
-            )
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(250))
-                DebugProcessMemory.log(
-                    "zenban.surface.release.post250ms",
-                    workspaceId: tabId,
-                    panelId: id,
-                    extra: "hadSurface=0"
-                )
-                try? await Task.sleep(for: .milliseconds(750))
-                DebugProcessMemory.log(
-                    "zenban.surface.release.post1000ms",
-                    workspaceId: tabId,
-                    panelId: id,
-                    extra: "hadSurface=0"
-                )
-            }
-#endif
         }
     }
 
