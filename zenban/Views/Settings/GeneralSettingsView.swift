@@ -48,7 +48,7 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Text("Embedded terminals reload Ghostty config in place. Ghostty `previous_tab` and `next_tab` bindings can drive terminal tab navigation in the focused pane when a terminal is focused.")
+                Text("Zenban keeps a separate Ghostty config in Application Support and reloads it in place. Ghostty `previous_tab` and `next_tab` bindings drive terminal tab navigation in the focused pane when a terminal is focused.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

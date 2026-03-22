@@ -23,8 +23,9 @@
 - The lower detail pane embeds a cmux-derived Ghostty workspace per card, backed by a bundled Zellij session per workspace
 - Claude auto-launch now goes through a per-workspace launch request queue that the shell prompt hook acknowledges before Zenban marks the launch as delivered or consumes a pending prompt
 - Hidden card terminals stop rendering after a short delay but keep their shell and agent processes running in Zellij
-- The app menu and General settings expose `Ghostty Settings…` and `Reload Configuration` so embedded terminals can reopen or reload the active Ghostty config without leaving Zenban
-- When an embedded terminal is focused, Ghostty `previous_tab` and `next_tab` bindings can cycle terminal tabs in the focused pane after a config reload; `Cmd+T` remains Zenban's own New Surface shortcut
+- The app menu and General settings expose `Ghostty Settings…` and `Reload Configuration`; Zenban now seeds and opens its own app-scoped Ghostty config at `~/Library/Application Support/com.berkaycit.zenban/config.ghostty`
+- Embedded terminals no longer inherit the standalone Ghostty user config; Zenban reloads only its own Ghostty config plus bundled performance overrides
+- When an embedded terminal is focused, Ghostty `previous_tab` and `next_tab` bindings from the Zenban-scoped config can cycle terminal tabs in the focused pane after a config reload; `Cmd+T` remains Zenban's own New Surface shortcut
 - When the selected card's Ghostty terminal is focused, `Cmd+Shift+T` toggles an app-content fullscreen mode for that card and exits automatically if selection, overlays, or workspace availability changes
 - `Done` cards keep their terminal closed by default and expose an `Open Terminal` action for manual reopening
 - Leaving a reopened `Done` card closes its workspace and tears down that card's Zellij session again

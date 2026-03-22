@@ -10,6 +10,92 @@ struct GhosttyConfig {
     private static let cmuxReleaseBundleIdentifier = "com.cmuxterm.app"
     private static let loadCacheLock = NSLock()
     private static var cachedConfigsByColorScheme: [ColorSchemePreference: GhosttyConfig] = [:]
+    static let defaultAppScopedConfigContents = """
+# ============================================
+# Ghostty Terminal - Complete Configuration
+# ============================================
+# File: ~/Library/Application Support/com.berkaycit.zenban/config.ghostty
+# Reload: Cmd+Shift+, (macOS)
+# View options: ghostty +show-config --default --docs
+
+# --- Typography ---
+font-family = JetBrainsMonoNerdFont
+font-size = 14
+font-thicken = true
+adjust-cell-height = 2
+
+# --- Theme and Colors ---
+theme = Catppuccin Mocha
+
+# --- Window and Appearance ---
+background-opacity = 0.9
+background-blur-radius = 20
+macos-titlebar-style = transparent
+window-padding-x = 10
+window-padding-y = 8
+window-save-state = always
+window-theme = dark
+
+# --- Cursor ---
+cursor-style = bar
+cursor-style-blink = true
+cursor-opacity = 0.8
+
+# --- Mouse ---
+mouse-hide-while-typing = true
+copy-on-select = clipboard
+
+# --- Quick Terminal (Quake-style dropdown) ---
+# Activate with the global keybind configured below
+quick-terminal-position = top
+quick-terminal-screen = mouse
+quick-terminal-autohide = true
+quick-terminal-animation-duration = 0.15
+
+# --- Security ---
+clipboard-paste-protection = true
+clipboard-paste-bracketed-safe = true
+
+# --- Shell Integration ---
+shell-integration = detect
+
+# --- Keybindings ---
+# Tabs
+keybind = cmd+t=new_tab
+keybind = alt+shift+left=previous_tab
+keybind = alt+shift+right=next_tab
+keybind = cmd+w=close_surface
+
+# Splits
+keybind = cmd+d=new_split:right
+keybind = cmd+shift+d=new_split:down
+keybind = cmd+alt+left=goto_split:left
+keybind = cmd+alt+right=goto_split:right
+keybind = cmd+alt+up=goto_split:top
+keybind = cmd+alt+down=goto_split:bottom
+
+# Font size
+keybind = cmd+plus=increase_font_size:1
+keybind = cmd+minus=decrease_font_size:1
+keybind = cmd+zero=reset_font_size
+
+# Quick terminal global hotkey
+keybind = global:ctrl+grave_accent=toggle_quick_terminal
+
+# Splits management
+keybind = cmd+shift+e=equalize_splits
+keybind = cmd+shift+f=toggle_split_zoom
+
+# Reload config
+keybind = cmd+shift+comma=reload_config
+
+# Full screen
+keybind = cmd+shift+t=toggle_fullscreen
+
+# --- Performance ---
+# Generous scrollback (25MB)
+scrollback-limit = 25000000
+"""
 
     var fontFamily: String = "Menlo"
     var fontSize: CGFloat = 12
@@ -88,6 +174,117 @@ struct GhosttyConfig {
         loadCacheLock.unlock()
     }
 
+    private static func usesAppScopedConfig(
+        currentBundleIdentifier: String? = Bundle.main.bundleIdentifier
+    ) -> Bool {
+        guard let currentBundleIdentifier else { return false }
+        let trimmed = currentBundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return trimmed == SocketControlSettings.zenbanBundleIdentifier
+            || trimmed.hasPrefix("\(SocketControlSettings.zenbanBundleIdentifier).")
+    }
+
+    private static func appScopedConfigDirectory(
+        currentBundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        appSupportDirectory: URL? = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first
+    ) -> URL? {
+        guard let appSupportDirectory,
+              let currentBundleIdentifier else { return nil }
+        let trimmed = currentBundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return appSupportDirectory.appendingPathComponent(trimmed, isDirectory: true)
+    }
+
+    static func appScopedConfigURL(
+        currentBundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        appSupportDirectory: URL? = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first
+    ) -> URL? {
+        appScopedConfigDirectory(
+            currentBundleIdentifier: currentBundleIdentifier,
+            appSupportDirectory: appSupportDirectory
+        )?.appendingPathComponent("config.ghostty", isDirectory: false)
+    }
+
+    private static func appScopedLegacyConfigURL(
+        currentBundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        appSupportDirectory: URL? = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first
+    ) -> URL? {
+        appScopedConfigDirectory(
+            currentBundleIdentifier: currentBundleIdentifier,
+            appSupportDirectory: appSupportDirectory
+        )?.appendingPathComponent("config", isDirectory: false)
+    }
+
+    private static func regularFileSize(
+        at path: String,
+        fileManager: FileManager = .default
+    ) -> Int? {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: path),
+              let type = attributes[.type] as? FileAttributeType,
+              type == .typeRegular,
+              let size = attributes[.size] as? NSNumber else {
+            return nil
+        }
+        return size.intValue
+    }
+
+    @discardableResult
+    static func ensureAppScopedConfigExists(
+        fileManager: FileManager = .default,
+        currentBundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        appSupportDirectory: URL? = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first,
+        defaultContents: String = defaultAppScopedConfigContents
+    ) -> URL? {
+        guard usesAppScopedConfig(currentBundleIdentifier: currentBundleIdentifier),
+              let configURL = appScopedConfigURL(
+                  currentBundleIdentifier: currentBundleIdentifier,
+                  appSupportDirectory: appSupportDirectory
+              ) else {
+            return nil
+        }
+
+        do {
+            try fileManager.createDirectory(
+                at: configURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            return nil
+        }
+
+        if let size = regularFileSize(at: configURL.path, fileManager: fileManager),
+           size > 0 {
+            return configURL
+        }
+
+        if let legacyURL = appScopedLegacyConfigURL(
+            currentBundleIdentifier: currentBundleIdentifier,
+            appSupportDirectory: appSupportDirectory
+        ),
+           let size = regularFileSize(at: legacyURL.path, fileManager: fileManager),
+           size > 0,
+           let legacyContents = try? String(contentsOf: legacyURL, encoding: .utf8) {
+            try? legacyContents.write(to: configURL, atomically: true, encoding: .utf8)
+            return configURL
+        }
+
+        try? defaultContents.write(to: configURL, atomically: true, encoding: .utf8)
+        return configURL
+    }
+
     private static func cmuxConfigPaths(
         fileManager: FileManager = .default,
         currentBundleIdentifier: String? = Bundle.main.bundleIdentifier
@@ -158,33 +355,55 @@ struct GhosttyConfig {
     static func configPathsForDiskLoad(
         fileManager: FileManager = .default,
         currentBundleIdentifier: String? = Bundle.main.bundleIdentifier,
-        bundleResourceURL: URL? = Bundle.main.resourceURL
+        bundleResourceURL: URL? = Bundle.main.resourceURL,
+        appSupportDirectory: URL? = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first
     ) -> [String] {
-        let defaultPaths = [
-            "~/.config/ghostty/config",
-            "~/.config/ghostty/config.ghostty",
-            "~/Library/Application Support/com.mitchellh.ghostty/config",
-            "~/Library/Application Support/com.mitchellh.ghostty/config.ghostty",
-        ].map { NSString(string: $0).expandingTildeInPath }
+        let configPaths: [String]
+        if usesAppScopedConfig(currentBundleIdentifier: currentBundleIdentifier) {
+            configPaths = appScopedConfigURL(
+                currentBundleIdentifier: currentBundleIdentifier,
+                appSupportDirectory: appSupportDirectory
+            ).map { [$0.path] } ?? []
+        } else {
+            let defaultPaths = [
+                "~/.config/ghostty/config",
+                "~/.config/ghostty/config.ghostty",
+                "~/Library/Application Support/com.mitchellh.ghostty/config",
+                "~/Library/Application Support/com.mitchellh.ghostty/config.ghostty",
+            ].map { NSString(string: $0).expandingTildeInPath }
 
-        var configPaths = defaultPaths + cmuxConfigPaths(
-            fileManager: fileManager,
-            currentBundleIdentifier: currentBundleIdentifier
-        )
+            var resolvedPaths = defaultPaths + cmuxConfigPaths(
+                fileManager: fileManager,
+                currentBundleIdentifier: currentBundleIdentifier
+            )
+            if let embeddedOverridePath = embeddedPerformanceOverridePath(
+                bundleResourceURL: bundleResourceURL,
+                fileManager: fileManager
+            ) {
+                resolvedPaths.append(embeddedOverridePath)
+            }
+            return resolvedPaths
+        }
+
+        var resolvedPaths = configPaths
         if let embeddedOverridePath = embeddedPerformanceOverridePath(
             bundleResourceURL: bundleResourceURL,
             fileManager: fileManager
         ) {
-            configPaths.append(embeddedOverridePath)
+            resolvedPaths.append(embeddedOverridePath)
         }
 
-        return configPaths
+        return resolvedPaths
     }
 
     private static func loadFromDisk(preferredColorScheme: ColorSchemePreference) -> GhosttyConfig {
         var config = GhosttyConfig()
 
-        // Match Ghostty's default load order on macOS.
+        ensureAppScopedConfigExists()
+
         let configPaths = configPathsForDiskLoad()
 
         for path in configPaths {

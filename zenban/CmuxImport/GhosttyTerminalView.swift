@@ -1208,6 +1208,17 @@ class GhosttyApp {
     }
 
     private func loadDefaultConfigFilesWithLegacyFallback(_ config: ghostty_config_t) {
+        if let appScopedConfigURL = GhosttyConfig.ensureAppScopedConfigExists() {
+            appScopedConfigURL.path.withCString { path in
+                ghostty_config_load_file(config, path)
+            }
+            ghostty_config_load_recursive_files(config)
+            loadEmbeddedPerformanceOverridesIfNeeded(config)
+            loadCJKFontFallbackIfNeeded(config)
+            ghostty_config_finalize(config)
+            return
+        }
+
         ghostty_config_load_default_files(config)
         loadLegacyGhosttyConfigIfNeeded(config)
         ghostty_config_load_recursive_files(config)
@@ -1322,9 +1333,8 @@ class GhosttyApp {
         return mappings.isEmpty ? nil : mappings
     }
 
-    /// Checks whether the user's Ghostty config files already contain
-    /// a `font-codepoint-map` entry covering CJK ranges. Also checks
-    /// application-support config paths that cmux may load at runtime.
+    /// Checks whether the active Ghostty config files already contain
+    /// a `font-codepoint-map` entry covering CJK ranges.
     static func userConfigContainsCJKCodepointMap(
         configPaths: [String] = defaultCJKScanPaths()
     ) -> Bool {
@@ -1338,31 +1348,11 @@ class GhosttyApp {
         return false
     }
 
-    /// Returns the default set of config paths to scan for existing
-    /// `font-codepoint-map` entries. Includes both the standard Ghostty
-    /// config locations and any app-support paths that cmux may load.
+    /// Returns the active config paths to scan for existing
+    /// `font-codepoint-map` entries, excluding bundled overrides.
     private static func defaultCJKScanPaths() -> [String] {
-        var paths = [
-            "~/.config/ghostty/config",
-            "~/.config/ghostty/config.ghostty",
-            "~/Library/Application Support/com.mitchellh.ghostty/config",
-            "~/Library/Application Support/com.mitchellh.ghostty/config.ghostty",
-        ]
-        if let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first {
-            let releaseDir = appSupport.appendingPathComponent(releaseBundleIdentifier)
-            paths.append(releaseDir.appendingPathComponent("config").path)
-            paths.append(releaseDir.appendingPathComponent("config.ghostty").path)
-
-            if let bundleId = Bundle.main.bundleIdentifier, bundleId != releaseBundleIdentifier {
-                let currentDir = appSupport.appendingPathComponent(bundleId)
-                paths.append(currentDir.appendingPathComponent("config").path)
-                paths.append(currentDir.appendingPathComponent("config.ghostty").path)
-            }
-        }
-        return paths
+        let embeddedOverridePath = GhosttyConfig.embeddedPerformanceOverridePath()
+        return GhosttyConfig.configPathsForDiskLoad().filter { $0 != embeddedOverridePath }
     }
 
     /// Scans a single config file (and any files it includes) for
@@ -1643,20 +1633,24 @@ class GhosttyApp {
 
     func openConfigurationInTextEdit() {
         #if os(macOS)
-        let preferredPath = ghosttyStringValue(ghostty_config_open_path())
         let path: String
-        if !preferredPath.isEmpty {
-            path = preferredPath
+        if let appScopedConfigURL = GhosttyConfig.ensureAppScopedConfigExists() {
+            path = appScopedConfigURL.path
         } else {
-            let fileManager = FileManager.default
-            let bundledOverridePath = GhosttyConfig.embeddedPerformanceOverridePath(fileManager: fileManager)
-            let fallbackPath = GhosttyConfig.configPathsForDiskLoad(fileManager: fileManager).first {
-                $0 != bundledOverridePath && fileManager.fileExists(atPath: $0)
-            } ?? GhosttyConfig.configPathsForDiskLoad(fileManager: fileManager).first {
-                $0 != bundledOverridePath
+            let preferredPath = ghosttyStringValue(ghostty_config_open_path())
+            if !preferredPath.isEmpty {
+                path = preferredPath
+            } else {
+                let fileManager = FileManager.default
+                let bundledOverridePath = GhosttyConfig.embeddedPerformanceOverridePath(fileManager: fileManager)
+                let fallbackPath = GhosttyConfig.configPathsForDiskLoad(fileManager: fileManager).first {
+                    $0 != bundledOverridePath && fileManager.fileExists(atPath: $0)
+                } ?? GhosttyConfig.configPathsForDiskLoad(fileManager: fileManager).first {
+                    $0 != bundledOverridePath
+                }
+                guard let fallbackPath else { return }
+                path = fallbackPath
             }
-            guard let fallbackPath else { return }
-            path = fallbackPath
         }
         guard !path.isEmpty else { return }
         let fileURL = URL(fileURLWithPath: path)

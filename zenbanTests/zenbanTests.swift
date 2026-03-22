@@ -119,10 +119,13 @@ struct zenbanTests {
     }
 
     @Test
-    func ghosttyDiskConfigPathsAppendEmbeddedOverrideLast() throws {
+    func zenbanGhosttyDiskConfigPathsUseAppScopedConfigAndAppendEmbeddedOverrideLast() throws {
         let resourceDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let appSupportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: resourceDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: appSupportDirectory, withIntermediateDirectories: true)
         let overrideURL = resourceDirectory
             .appendingPathComponent("ghostty-embedded-performance", isDirectory: false)
             .appendingPathExtension("config")
@@ -131,15 +134,44 @@ struct zenbanTests {
         image-storage-limit = 8000000
         background-blur = false
         """.write(to: overrideURL, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: resourceDirectory) }
+        defer {
+            try? FileManager.default.removeItem(at: resourceDirectory)
+            try? FileManager.default.removeItem(at: appSupportDirectory)
+        }
 
         let configPaths = GhosttyConfig.configPathsForDiskLoad(
             currentBundleIdentifier: "com.berkaycit.zenban.tests",
-            bundleResourceURL: resourceDirectory
+            bundleResourceURL: resourceDirectory,
+            appSupportDirectory: appSupportDirectory
         )
+        let expectedConfigURL = appSupportDirectory
+            .appendingPathComponent("com.berkaycit.zenban.tests", isDirectory: true)
+            .appendingPathComponent("config.ghostty", isDirectory: false)
 
         #expect(configPaths.last == overrideURL.path)
-        #expect(configPaths.contains(NSString(string: "~/.config/ghostty/config").expandingTildeInPath))
+        #expect(configPaths.first == expectedConfigURL.path)
+        #expect(!configPaths.contains(NSString(string: "~/.config/ghostty/config").expandingTildeInPath))
+    }
+
+    @Test
+    func zenbanGhosttyBootstrapSeedsDefaultConfigIntoAppSupport() throws {
+        let appSupportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: appSupportDirectory) }
+
+        let configURL = try #require(GhosttyConfig.ensureAppScopedConfigExists(
+            currentBundleIdentifier: "com.berkaycit.zenban.tests",
+            appSupportDirectory: appSupportDirectory
+        ))
+        let contents = try String(contentsOf: configURL, encoding: .utf8)
+
+        #expect(configURL.path == appSupportDirectory
+            .appendingPathComponent("com.berkaycit.zenban.tests", isDirectory: true)
+            .appendingPathComponent("config.ghostty", isDirectory: false)
+            .path)
+        #expect(contents.contains("theme = Catppuccin Mocha"))
+        #expect(contents.contains("keybind = alt+shift+left=previous_tab"))
+        #expect(contents.contains("keybind = cmd+d=new_split:right"))
     }
 
     @Test

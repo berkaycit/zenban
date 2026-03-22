@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Isolate Zenban Ghostty config from system Ghostty
+- **Description**: Zenban now seeds a dedicated Ghostty config file in its own Application Support directory and opens that file from `Ghostty Settings…` instead of the shared standalone Ghostty config. Embedded terminals reload only the Zenban-scoped config plus bundled overrides, so system Ghostty edits no longer bleed into Zenban. The seeded default config includes the app's preferred theme, typography, split bindings, and `Alt+Shift+Left/Right` tab navigation defaults on first launch.
+
 - **Summary**: Expose Ghostty config controls in Zenban
 - **Description**: Zenban now surfaces `Ghostty Settings…` and `Reload Configuration` in the active app menu and in General settings so embedded terminals can pick up config edits without leaving the app. Reloaded Ghostty `previous_tab` and `next_tab` bindings now map to terminal tab cycling in the focused pane when a terminal is focused, while `Cmd+T` stays owned by Zenban's existing New Surface flow. Added focused shortcut regressions so the new bridge only consumes events from terminal focus and does not break the existing split-navigation overrides.
 
