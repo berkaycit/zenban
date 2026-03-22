@@ -1,4 +1,5 @@
 import AppKit
+import Bonsplit
 import Testing
 @testable import zenban
 
@@ -151,6 +152,160 @@ struct AppDelegateShortcutOverrideTests {
         )
     }
 
+    @Test
+    func typeScopedCloseClosesFocusedTerminalWhenMultipleTerminalsExist() throws {
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        let terminalPanel = try #require(workspace.newTerminalSurface(inPane: paneId, focus: true))
+
+        #expect(workspace.focusedPanelId == terminalPanel.id)
+        #expect(panelCount(of: .terminal, in: workspace) == 2)
+
+        #expect(hostStore.handleTypeScopedCloseShortcut(forSelectedCardID: boardStore.selectedCardID))
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        #expect(panelCount(of: .terminal, in: workspace) == 1)
+        #expect(workspace.panels[terminalPanel.id] == nil)
+    }
+
+    @Test
+    func typeScopedCloseConsumesFocusedTerminalWhenItIsLastTerminal() throws {
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        let previewURL = try #require(URL(string: "http://localhost:5173"))
+        _ = try #require(workspace.newBrowserSurface(inPane: paneId, url: previewURL, focus: false))
+        let panelIDsBeforeShortcut = Set(workspace.panels.keys)
+
+        #expect(workspace.focusedTerminalPanel != nil)
+        #expect(panelCount(of: .terminal, in: workspace) == 1)
+        #expect(panelCount(of: .browser, in: workspace) == 1)
+
+        #expect(hostStore.handleTypeScopedCloseShortcut(forSelectedCardID: boardStore.selectedCardID))
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        #expect(Set(workspace.panels.keys) == panelIDsBeforeShortcut)
+        #expect(panelCount(of: .terminal, in: workspace) == 1)
+        #expect(panelCount(of: .browser, in: workspace) == 1)
+    }
+
+    @Test
+    func commandWClosesFocusedBrowserWhenMultipleBrowsersExist() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        let firstURL = try #require(URL(string: "http://localhost:5173"))
+        let secondURL = try #require(URL(string: "http://localhost:4173"))
+        _ = try #require(workspace.newBrowserSurface(inPane: paneId, url: firstURL, focus: true))
+        let browserPanel = try #require(workspace.newBrowserSurface(inPane: paneId, url: secondURL, focus: true))
+
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        #expect(workspace.focusedPanelId == browserPanel.id)
+        #expect(panelCount(of: .browser, in: workspace) == 2)
+
+        #expect(
+            handleZenbanShortcutOverride(
+                event: try makeCommandWEvent(window: window),
+                store: boardStore,
+                cmuxHost: hostStore,
+                appDelegate: appDelegate
+            )
+        )
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        #expect(panelCount(of: .browser, in: workspace) == 1)
+        #expect(workspace.panels[browserPanel.id] == nil)
+    }
+
+    @Test
+    func typeScopedCloseConsumesFocusedBrowserWhenItIsLastBrowser() throws {
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        let previewURL = try #require(URL(string: "http://localhost:5173"))
+        let browserPanel = try #require(workspace.newBrowserSurface(inPane: paneId, url: previewURL, focus: true))
+        let panelIDsBeforeShortcut = Set(workspace.panels.keys)
+
+        #expect(workspace.focusedPanelId == browserPanel.id)
+        #expect(panelCount(of: .browser, in: workspace) == 1)
+        #expect(panelCount(of: .terminal, in: workspace) == 1)
+
+        #expect(hostStore.handleTypeScopedCloseShortcut(forSelectedCardID: boardStore.selectedCardID))
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        #expect(Set(workspace.panels.keys) == panelIDsBeforeShortcut)
+        #expect(panelCount(of: .browser, in: workspace) == 1)
+        #expect(panelCount(of: .terminal, in: workspace) == 1)
+    }
+
+    @Test
+    func commandWFileBrowserPreflightStillPostsCloseRequest() throws {
+        let (boardStore, _, card) = makeBoardFixture()
+        boardStore.overlayState = .fileBrowser(cardID: card.id)
+        var closeRequestCount = 0
+
+        #expect(
+            handleZenbanFileBrowserCloseShortcut(
+                event: try makeCommandWEvent(),
+                store: boardStore
+            ) {
+                closeRequestCount += 1
+            }
+        )
+        #expect(closeRequestCount == 1)
+    }
+
+    @Test
+    func commandShiftReturnRemainsUnchangedByZenbanOverride() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, _, _) = makeBoardFixture()
+        let hostStore = CmuxHostStore()
+        boardStore.cmuxHost = hostStore
+        hostStore.attach(boardStore: boardStore)
+
+        #expect(
+            !handleZenbanShortcutOverride(
+                event: try makeCommandShiftReturnEvent(),
+                store: boardStore,
+                cmuxHost: hostStore,
+                appDelegate: appDelegate
+            )
+        )
+    }
+
     private func makeBoardFixture() -> (BoardStore, Board, Card) {
         let card = Card(title: "Preview", column: .todo, orderIndex: 0, agent: .claude, worktreePath: "/tmp/preview")
         let board = Board(name: "Board", cards: [card], repositoryPath: "/tmp/repo", agent: .claude)
@@ -196,5 +351,43 @@ struct AppDelegateShortcutOverrideTests {
                 keyCode: 8
             )
         )
+    }
+
+    private func makeCommandWEvent(window: NSWindow? = nil) throws -> NSEvent {
+        try #require(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [.command],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window?.windowNumber ?? 0,
+                context: nil,
+                characters: "w",
+                charactersIgnoringModifiers: "w",
+                isARepeat: false,
+                keyCode: 13
+            )
+        )
+    }
+
+    private func makeCommandShiftReturnEvent(window: NSWindow? = nil) throws -> NSEvent {
+        try #require(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [.command, .shift],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window?.windowNumber ?? 0,
+                context: nil,
+                characters: "\r",
+                charactersIgnoringModifiers: "\r",
+                isARepeat: false,
+                keyCode: 36
+            )
+        )
+    }
+
+    private func panelCount(of panelType: PanelType, in workspace: Workspace) -> Int {
+        workspace.panels.values.filter { $0.panelType == panelType }.count
     }
 }

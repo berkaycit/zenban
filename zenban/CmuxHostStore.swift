@@ -17,6 +17,13 @@ final class CmuxHostStore {
         let boardID: UUID
     }
 
+    private struct SelectedCardFocusedPanelCloseContext {
+        let workspace: Workspace
+        let panelID: UUID
+        let panelType: PanelType
+        let matchingPanelCount: Int
+    }
+
     private enum WorkspaceResidency {
         case interactive
         case backgroundPrewarmOnly
@@ -126,6 +133,21 @@ final class CmuxHostStore {
     func workspace(for cardID: UUID) -> Workspace? {
         guard let workspaceID = cardToWorkspaceID[cardID] else { return nil }
         return workspace(forID: workspaceID)
+    }
+
+    @discardableResult
+    func handleTypeScopedCloseShortcut(forSelectedCardID cardID: UUID?) -> Bool {
+        guard let context = selectedCardFocusedPanelCloseContext(for: cardID) else {
+            return false
+        }
+
+        guard context.matchingPanelCount > 1 else {
+            return true
+        }
+
+        owningTabManager(for: context.workspace)
+            .closePanelWithConfirmation(tabId: context.workspace.id, surfaceId: context.panelID)
+        return true
     }
 
     func hasUnreadTerminalNotification(for cardID: UUID) -> Bool {
@@ -953,6 +975,35 @@ final class CmuxHostStore {
         workspace.owningTabManager
             ?? AppDelegate.shared?.tabManagerFor(tabId: workspace.id)
             ?? tabManager
+    }
+
+    private func selectedCardFocusedPanelCloseContext(
+        for cardID: UUID?
+    ) -> SelectedCardFocusedPanelCloseContext? {
+        guard let cardID,
+              let workspace = workspace(for: cardID) else {
+            return nil
+        }
+
+        let manager = owningTabManager(for: workspace)
+        guard manager.selectedTabId == workspace.id,
+              let panelID = workspace.focusedPanelId,
+              let panel = workspace.panels[panelID] else {
+            return nil
+        }
+
+        let matchingPanelCount = workspace.panels.values.reduce(into: 0) { count, candidate in
+            if candidate.panelType == panel.panelType {
+                count += 1
+            }
+        }
+
+        return SelectedCardFocusedPanelCloseContext(
+            workspace: workspace,
+            panelID: panelID,
+            panelType: panel.panelType,
+            matchingPanelCount: matchingPanelCount
+        )
     }
 
     private func selectWorkspace(_ workspace: Workspace) {

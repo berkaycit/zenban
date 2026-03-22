@@ -125,6 +125,14 @@ private let previewConsoleShortcut = StoredShortcut(
     control: false
 )
 
+private let closePanelShortcut = StoredShortcut(
+    key: "w",
+    command: true,
+    shift: false,
+    option: false,
+    control: false
+)
+
 @MainActor
 func shortcutEventWindow(for event: NSEvent) -> NSWindow? {
     event.window ?? NSApp.keyWindow ?? NSApp.mainWindow
@@ -185,6 +193,38 @@ func shouldHandlePreviewConsoleShortcut(
 }
 
 @MainActor
+func handleZenbanFileBrowserCloseShortcut(
+    event: NSEvent,
+    store: BoardStore,
+    postCloseFileBrowserTab: () -> Void
+) -> Bool {
+    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    guard modifiers == [.command],
+          event.charactersIgnoringModifiers?.lowercased() == "w",
+          store.showFileBrowser else {
+        return false
+    }
+
+    postCloseFileBrowserTab()
+    return true
+}
+
+@MainActor
+func handleZenbanEmbeddedPanelCloseShortcut(
+    event: NSEvent,
+    store: BoardStore,
+    cmuxHost: CmuxHostStore,
+    appDelegate: AppDelegate
+) -> Bool {
+    guard !store.showFileBrowser,
+          appDelegate.matchesShortcut(event: event, shortcut: closePanelShortcut) else {
+        return false
+    }
+
+    return cmuxHost.handleTypeScopedCloseShortcut(forSelectedCardID: store.selectedCardID)
+}
+
+@MainActor
 func handleZenbanShortcutOverride(
     event: NSEvent,
     store: BoardStore,
@@ -193,6 +233,15 @@ func handleZenbanShortcutOverride(
 ) -> Bool {
     if isShortcutBlockedByPresentedSheet(event: event) {
         return false
+    }
+
+    if handleZenbanEmbeddedPanelCloseShortcut(
+        event: event,
+        store: store,
+        cmuxHost: cmuxHost,
+        appDelegate: appDelegate
+    ) {
+        return true
     }
 
     if appDelegate.matchesShortcut(
@@ -268,12 +317,13 @@ struct zenbanApp: App {
                 return event
             }
 
-            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if modifiers == [.command],
-               event.charactersIgnoringModifiers?.lowercased() == "w" {
-                if store.showFileBrowser {
+            if handleZenbanFileBrowserCloseShortcut(
+                event: event,
+                store: store,
+                postCloseFileBrowserTab: {
                     NotificationCenter.default.post(name: .closeFileBrowserTab, object: nil)
                 }
+            ) {
                 return nil
             }
 
