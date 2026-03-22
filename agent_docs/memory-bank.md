@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Stop Zenban debug from opening standalone cmux
+- **Description**: Zenban now treats the copied cmux app shell as an embedded host instead of a standalone window/session manager when the app bundle is `com.berkaycit.zenban`. Main-window registration no longer triggers cmux startup session restore or autosave in Zenban, and standalone fallback paths that previously created a fresh cmux window now return early. Zenban debug builds also use their own socket path instead of sharing `/tmp/cmux-debug.sock`, and focused regression tests cover the embedded-host guards and socket split.
+
 - **Summary**: Align runtime tool messaging with actual dependencies
 - **Description**: `DependencyCheckService` now acts as a read-only availability checker for external `git` and `Claude Code CLI` only, while Settings shows bundled-vs-external tool status without install CTAs. Git history/diff loading now fails with a clear system-git message instead of silently degrading, PR creation remains token-and-API based with no `GitHub CLI` dependency, and the user-facing docs now state that Zenban already bundles its own terminal runtime.
 

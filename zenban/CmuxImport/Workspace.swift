@@ -4118,7 +4118,7 @@ final class Workspace: Identifiable, ObservableObject {
             )
 
         case .selectedWorkspaceInNewWindow:
-            let newWindowId = app.createMainWindow()
+            guard let newWindowId = app.createMainWindow() else { return }
             guard let destinationManager = app.tabManagerFor(windowId: newWindowId),
                   let destinationWorkspaceId = destinationManager.selectedTabId else {
                 return

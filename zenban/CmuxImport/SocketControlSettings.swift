@@ -292,12 +292,14 @@ struct SocketControlSettings {
     static let allowSocketPathOverrideKey = "CMUX_ALLOW_SOCKET_OVERRIDE"
     static let socketPasswordEnvKey = "CMUX_SOCKET_PASSWORD"
     static let launchTagEnvKey = "CMUX_TAG"
+    static let zenbanBundleIdentifier = "com.berkaycit.zenban"
     static let baseDebugBundleIdentifier = "com.cmuxterm.app.debug"
     private static let socketDirectoryName = "cmux"
     private static let stableSocketFileName = "cmux.sock"
     private static let lastSocketPathFileName = "last-socket-path"
     static let legacyStableDefaultSocketPath = "/tmp/cmux.sock"
     static let legacyLastSocketPathFile = "/tmp/cmux-last-socket-path"
+    static let zenbanDebugSocketPath = "/tmp/zenban-debug.sock"
 
     static var stableDefaultSocketPath: String {
         stableSocketFileURL()?.path ?? legacyStableDefaultSocketPath
@@ -455,6 +457,9 @@ struct SocketControlSettings {
         currentUserID: uid_t = getuid(),
         probeStableDefaultPathEntry: (String) -> StableDefaultSocketPathEntry = inspectStableDefaultSocketPathEntry
     ) -> String {
+        if isZenbanBundleIdentifier(bundleIdentifier), isDebugBuild {
+            return zenbanDebugSocketPath
+        }
         if bundleIdentifier == "com.cmuxterm.app.nightly" {
             return "/tmp/cmux-nightly.sock"
         }
@@ -516,6 +521,11 @@ struct SocketControlSettings {
         guard let bundleIdentifier else { return false }
         return bundleIdentifier == "com.cmuxterm.app.debug"
             || bundleIdentifier.hasPrefix("com.cmuxterm.app.debug.")
+    }
+
+    static func isZenbanBundleIdentifier(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines) == zenbanBundleIdentifier
     }
 
     static func isStagingBundleIdentifier(_ bundleIdentifier: String?) -> Bool {

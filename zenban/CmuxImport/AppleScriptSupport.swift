@@ -183,7 +183,11 @@ extension NSApplication {
             return nil
         }
 
-        let windowId = appDelegate.createMainWindow()
+        guard let windowId = appDelegate.createMainWindow() else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = AppleScriptStrings.failedToCreateWindow
+            return nil
+        }
         return ScriptWindow(windowId: windowId)
     }
 
@@ -211,7 +215,11 @@ extension NSApplication {
             return ScriptTab(windowId: frontWindow.windowId, tabId: workspaceId)
         }
 
-        let windowId = appDelegate.createMainWindow()
+        guard let windowId = appDelegate.createMainWindow() else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = AppleScriptStrings.failedToCreateWorkspace
+            return nil
+        }
         return ScriptWindow(windowId: windowId).selectedTab
     }
 

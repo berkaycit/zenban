@@ -1860,6 +1860,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         Self.detectRunningUnderXCTest(env)
     }
 
+    private var hostBundleIdentifier: String? {
+#if DEBUG
+        if let hostBundleIdentifierOverrideForTesting {
+            return hostBundleIdentifierOverrideForTesting
+        }
+#endif
+        return Bundle.main.bundleIdentifier
+    }
+
+    private var isZenbanEmbeddedHost: Bool {
+        SocketControlSettings.isZenbanBundleIdentifier(hostBundleIdentifier)
+    }
+
+    private var supportsStandaloneCmuxWindows: Bool {
+        !isZenbanEmbeddedHost
+    }
+
     private final class MainWindowContext {
         let windowId: UUID
         let tabManager: TabManager
@@ -1995,6 +2012,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var gotoSplitUITestObservers: [NSObjectProtocol] = []
     private var didSetupMultiWindowNotificationsUITest = false
     var debugCloseMainWindowConfirmationHandler: ((NSWindow) -> Bool)?
+    private var hostBundleIdentifierOverrideForTesting: String?
     // Keep debug-only windows alive when tests intentionally inject key mismatches.
     private var debugDetachedContextWindows: [NSWindow] = []
 
@@ -2402,6 +2420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func prepareStartupSessionSnapshotIfNeeded() {
         guard !didPrepareStartupSessionSnapshot else { return }
         didPrepareStartupSessionSnapshot = true
+        guard supportsStandaloneCmuxWindows else { return }
         guard SessionRestorePolicy.shouldAttemptRestore() else { return }
         startupSessionSnapshot = SessionPersistenceStore.load()
     }
@@ -2873,6 +2892,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func startSessionAutosaveTimerIfNeeded() {
+        guard supportsStandaloneCmuxWindows else { return }
         guard sessionAutosaveTimer == nil else { return }
         let env = ProcessInfo.processInfo.environment
         guard !isRunningUnderXCTest(env) else { return }
@@ -3099,6 +3119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @discardableResult
     private func saveSessionSnapshot(includeScrollback: Bool, removeWhenEmpty: Bool = false) -> Bool {
+        guard supportsStandaloneCmuxWindows else {
+            return false
+        }
         if Self.shouldSkipSessionSaveDuringStartupRestore(
             isApplyingStartupSessionRestore: isApplyingStartupSessionRestore,
             includeScrollback: includeScrollback
@@ -3494,9 +3517,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             setActiveMainWindow(window)
         }
 
-        attemptStartupSessionRestoreIfNeeded(primaryWindow: window)
-        if !isTerminatingApp {
-            _ = saveSessionSnapshot(includeScrollback: false)
+        if supportsStandaloneCmuxWindows {
+            attemptStartupSessionRestoreIfNeeded(primaryWindow: window)
+            if !isTerminatingApp {
+                _ = saveSessionSnapshot(includeScrollback: false)
+            }
         }
     }
 
@@ -3621,7 +3646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @discardableResult
     func moveWorkspaceToNewWindow(workspaceId: UUID, focus: Bool = true) -> UUID? {
-        let windowId = createMainWindow()
+        guard let windowId = createMainWindow() else { return nil }
         guard let destinationManager = tabManagerFor(windowId: windowId) else { return nil }
         let bootstrapWorkspaceId = destinationManager.tabs.first?.id
 
@@ -5033,7 +5058,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     @objc func openNewMainWindow(_ sender: Any?) {
-        _ = createMainWindow()
+        guard createMainWindow() != nil else {
+            NSSound.beep()
+            return
+        }
     }
 
     @objc func openWindow(
@@ -5422,7 +5450,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func createMainWindow(
         initialWorkingDirectory: String? = nil,
         sessionWindowSnapshot: SessionWindowSnapshot? = nil
-    ) -> UUID {
+    ) -> UUID? {
+        guard supportsStandaloneCmuxWindows else { return nil }
         let windowId = UUID()
         let tabManager = TabManager(initialWorkingDirectory: initialWorkingDirectory)
         if let tabManagerSnapshot = sessionWindowSnapshot?.tabManager {
@@ -5733,12 +5762,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             if let first = mainWindowContexts.values.first {
                 return first
             }
-            let windowId = createMainWindow()
+            guard let windowId = createMainWindow() else { return nil }
             return mainWindowContexts.values.first(where: { $0.windowId == windowId })
         }()
 
-        if let context,
-           let window = context.window ?? windowForMainWindowId(context.windowId) {
+        guard let context else { return }
+
+        if let window = context.window ?? windowForMainWindowId(context.windowId) {
             setActiveMainWindow(window)
             bringToFront(window)
         }
@@ -10289,6 +10319,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
 #if DEBUG
 extension AppDelegate {
+    func unregisterMainWindowForTesting(_ window: NSWindow) {
+        unregisterMainWindow(window)
+    }
+
+    func setHostBundleIdentifierForTesting(_ bundleIdentifier: String?) {
+        hostBundleIdentifierOverrideForTesting = bundleIdentifier
+    }
+
+    func setStartupSessionSnapshotForTesting(_ snapshot: AppSessionSnapshot?) {
+        startupSessionSnapshot = snapshot
+        didPrepareStartupSessionSnapshot = snapshot != nil
+        didAttemptStartupSessionRestore = false
+        isApplyingStartupSessionRestore = false
+    }
+
+    func startSessionAutosaveTimerForTesting() {
+        startSessionAutosaveTimerIfNeeded()
+    }
+
+    func hasSessionAutosaveTimerForTesting() -> Bool {
+        sessionAutosaveTimer != nil
+    }
+
+    @discardableResult
+    func saveSessionSnapshotForTesting(includeScrollback: Bool, removeWhenEmpty: Bool = false) -> Bool {
+        saveSessionSnapshot(includeScrollback: includeScrollback, removeWhenEmpty: removeWhenEmpty)
+    }
+
     func configureApplicationTerminationHooksForTesting(
         cleanupHandler: (() async -> Void)? = nil,
         replyHandler: ((Bool) -> Void)? = nil
@@ -10304,6 +10362,12 @@ extension AppDelegate {
         applicationTerminationCleanupTask = nil
         didSendApplicationTerminationReply = false
         isTerminatingApp = false
+        hostBundleIdentifierOverrideForTesting = nil
+        startupSessionSnapshot = nil
+        didPrepareStartupSessionSnapshot = false
+        didAttemptStartupSessionRestore = false
+        isApplyingStartupSessionRestore = false
+        stopSessionAutosaveTimer()
     }
 }
 #endif
