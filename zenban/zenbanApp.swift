@@ -264,7 +264,7 @@ struct zenbanApp: App {
             if NSApp.keyWindow?.sheetParent != nil {
                 return event
             }
-            if store.deleteConfirmationRequest != nil || store.showDependencySetup {
+            if store.deleteConfirmationRequest != nil {
                 return event
             }
 

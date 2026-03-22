@@ -53,11 +53,12 @@
 - Finder Services expose “New Zenban Workspace Here” and “New Zenban Window Here”
 - The app bundle includes a cmux-based AppleScript dictionary and English localization catalogs
 
-## Optional Tools
+## Tool Availability
 
-- Settings can check and install Homebrew
-- Settings can check and install GitHub CLI
-- Settings can check and install Claude Code CLI
+- Settings shows read-only availability for external tools used by optional workflows
+- Zenban bundles its terminal runtime internally and does not require separate Homebrew, tmux, zellij, or GitHub CLI installs
+- System `git` is used for git history, commit diffs, and shell git probes
+- `Claude Code CLI` remains optional and is only used for AI-assisted commit messages
 
 ## Data Storage
 

@@ -1,11 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project Overview
-
-Zenban is a macOS application built with SwiftUI, targeting macOS 15.6+. The project uses Xcode 26.2 and Swift 5.0.
-
 ## Build Commands
 
 ```bash

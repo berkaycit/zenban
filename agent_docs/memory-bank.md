@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Align runtime tool messaging with actual dependencies
+- **Description**: `DependencyCheckService` now acts as a read-only availability checker for external `git` and `Claude Code CLI` only, while Settings shows bundled-vs-external tool status without install CTAs. Git history/diff loading now fails with a clear system-git message instead of silently degrading, PR creation remains token-and-API based with no `GitHub CLI` dependency, and the user-facing docs now state that Zenban already bundles its own terminal runtime.
+
 - **Summary**: Refine Zellij launch lifecycle handling
 - **Description**: Zellij-backed card sessions now move their blocking session prep and cleanup work into a dedicated process runner, while `CmuxHostStore` uses a single queue-and-ack launch path with timeout-based retry instead of the legacy direct-send branch. Startup attach scripts and launch env are cached per workspace so repeated selection syncs do not rewrite the same files, recoverable setup failures now log and preserve pending prompts instead of crashing, and dead launch-shell plumbing was removed. Added focused launch, lifecycle, environment, and session-manager regressions around retry, cleanup, hidden detach, and startup wiring.
 

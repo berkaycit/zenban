@@ -17,7 +17,7 @@
 1. `BoardStore` owns app state, selection, overlays, worktree actions, and settings flows.
 2. `BoardStorage` persists `boards.json` with debounced saves.
 3. Views read and mutate state through `@Environment(BoardStore.self)`.
-4. Services perform side effects such as git operations, process execution, and tool installation.
+4. Services perform side effects such as git operations, process execution, and tool availability checks.
 
 ## Key Components
 
@@ -27,7 +27,7 @@
 - `ZellijSessionManager`: Bundles and owns per-workspace Zellij sessions, attach scripts, config isolation, and quit-time cleanup.
 - `GitService`: libgit2-backed repository, worktree, diff, commit, push, merge, and PR helpers.
 - `DevServerManager`: Runs setup and dev commands, buffers output, detects ready URLs, and owns process lifecycle.
-- `DependencyCheckService`: Checks and installs optional developer tools.
+- `DependencyCheckService`: Reports whether external tools like `git` and `Claude Code CLI` are available on this Mac.
 - `GitChangesView`: Board-area diff and history workspace for the selected card.
 - `GitLogService`: Async commit history and diff loading.
 - `DiffView`: Native diff renderer with file navigation and copy support.

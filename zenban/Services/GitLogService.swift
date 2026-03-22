@@ -1,8 +1,41 @@
 import Foundation
 
+enum GitToolAvailabilityError: Error, LocalizedError {
+    case gitUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .gitUnavailable:
+            return "Git is unavailable on this Mac. Zenban uses the system git tool for history, commit diffs, and shell git probes."
+        }
+    }
+}
+
 actor GitLogService {
+    typealias GitPathProvider = @Sendable () -> String?
+    typealias ProcessRunner = @Sendable (_ executable: String, _ arguments: [String], _ workingDirectory: String?) async throws -> ProcessResult
+
+    private let gitPathProvider: GitPathProvider
+    private let processRunner: ProcessRunner
+
+    init(
+        gitPathProvider: @escaping GitPathProvider = DependencyCheckService.resolveGitPath,
+        processRunner: @escaping ProcessRunner = { executable, arguments, workingDirectory in
+            try await ProcessExecutor.shared.executeWithOutput(
+                executable: executable,
+                arguments: arguments,
+                workingDirectory: workingDirectory
+            )
+        }
+    ) {
+        self.gitPathProvider = gitPathProvider
+        self.processRunner = processRunner
+    }
+
     func getCommitHistory(at repoPath: String, limit: Int = 30, skip: Int = 0) async throws -> [GitCommit] {
-        try await Task.detached(priority: .utility) {
+        _ = try requireGitAvailable()
+
+        return try await Task.detached(priority: .utility) {
             let repo = try Libgit2Repository(path: repoPath)
             let commits = try repo.log(limit: limit, skip: skip)
 
@@ -24,19 +57,21 @@ actor GitLogService {
     }
 
     func getCommitDiff(hash: String, at repoPath: String) async throws -> String {
-        let result = try await ProcessExecutor.shared.executeWithOutput(
-            executable: "/usr/bin/git",
-            arguments: ["show", "--format=", hash],
-            workingDirectory: repoPath
+        let gitPath = try requireGitAvailable()
+        let result = try await processRunner(
+            gitPath,
+            ["show", "--format=", hash],
+            repoPath
         )
         return result.stdout
     }
 
     func getCommitFiles(hash: String, at repoPath: String) async throws -> [CommitFileChange] {
-        let result = try await ProcessExecutor.shared.executeWithOutput(
-            executable: "/usr/bin/git",
-            arguments: ["show", "--format=", "--numstat", hash],
-            workingDirectory: repoPath
+        let gitPath = try requireGitAvailable()
+        let result = try await processRunner(
+            gitPath,
+            ["show", "--format=", "--numstat", hash],
+            repoPath
         )
 
         var files: [CommitFileChange] = []
@@ -61,12 +96,20 @@ actor GitLogService {
     }
 
     func getCommitFileDiff(hash: String, filePath: String, at repoPath: String) async throws -> String {
-        let result = try await ProcessExecutor.shared.executeWithOutput(
-            executable: "/usr/bin/git",
-            arguments: ["show", "--format=", hash, "--", filePath],
-            workingDirectory: repoPath
+        let gitPath = try requireGitAvailable()
+        let result = try await processRunner(
+            gitPath,
+            ["show", "--format=", hash, "--", filePath],
+            repoPath
         )
         return result.stdout
+    }
+
+    private func requireGitAvailable() throws -> String {
+        guard let gitPath = gitPathProvider() else {
+            throw GitToolAvailabilityError.gitUnavailable
+        }
+        return gitPath
     }
 }
 

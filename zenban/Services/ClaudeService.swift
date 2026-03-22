@@ -30,7 +30,9 @@ struct ClaudeService: AIProvider {
     // MARK: - Path Resolution
 
     private static var executablePath: String? {
-        DependencyCheckService.shared.claudePath()
+        DependencyCheckService.resolveClaudePath(
+            environment: ProcessEnvironment.buildWithNodeSupport()
+        )
     }
 
     // MARK: - CLI Execution

@@ -32,13 +32,12 @@ xcodebuild -project zenban.xcodeproj -scheme zenban test
 - The ready dev server state opens an embedded cmux browser surface instead of an external browser.
 - Desktop notifications and Finder Services come from the copied cmux host stack.
 
-## Optional Tools
+## Tool Availability
 
-Zenban can help install these optional tools from Settings:
-
-- Homebrew
-- GitHub CLI
-- Claude Code CLI
+- Zenban bundles its terminal runtime internally, including `cmux`, `open`, and the workspace session tooling it needs.
+- System `git` is still used for git history, commit diffs, and shell git probes.
+- `Claude Code CLI` remains optional and is only used for AI-assisted commit message generation.
+- Pull requests are created through the GitHub API with a token such as `GITHUB_TOKEN` or `GITHUB_PAT`.
 
 ## Sentry Symbols
 

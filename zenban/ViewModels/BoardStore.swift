@@ -119,12 +119,8 @@ final class BoardStore {
     var focusRegion: FocusRegion = .sidebar
     var deleteConfirmationRequest: DeleteConfirmationRequest?
     var showKeyboardShortcuts = false
-    var showDependencySetup = false
 
-    // Dependency checking state
     var dependencyStatus: DependencyCheckService.Status?
-    var isInstallingDependency = false
-    var installationOutput = ""
 
     // Unified overlay state (FSM)
     var overlayState: OverlayState = .none
@@ -331,21 +327,10 @@ final class BoardStore {
 
     func checkDependencies() {
         Task { [weak self] in
-            let status = await Task.detached(priority: .utility) {
-                DependencyCheckService.shared.checkAll()
-            }.value
+            let status = await DependencyCheckService.shared.checkAll()
             guard let self else { return }
             self.dependencyStatus = status
         }
-    }
-
-    func presentDependencySetup(blocking: Bool = false) {
-        _ = blocking
-        showDependencySetup = true
-    }
-
-    func dismissDependencySetup() {
-        showDependencySetup = false
     }
 
     // MARK: - Board Operations

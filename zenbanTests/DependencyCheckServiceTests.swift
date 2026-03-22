@@ -3,26 +3,50 @@ import Testing
 
 struct DependencyCheckServiceTests {
     @Test
-    func dependencyListContainsOnlyOptionalTools() {
+    func dependencyListMatchesRuntimeSurfaceTools() {
         #expect(
             DependencyCheckService.Dependency.allCases.map(\.rawValue) == [
-                "Homebrew",
-                "GitHub CLI",
+                "Git",
                 "Claude Code CLI",
             ]
         )
     }
 
     @Test
-    func statusTreatsMissingToolsAsOptional() {
-        let status = DependencyCheckService.Status(
-            homebrew: false,
-            gh: false,
-            claude: false
+    func checkAllReportsInjectedToolAvailability() async {
+        let service = DependencyCheckService(
+            gitPathProvider: { "/usr/bin/git" },
+            claudePathProvider: { nil }
         )
 
-        #expect(status.allRequired)
-        #expect(status.hasMissingDependencies)
-        #expect(status.hasMissingOptionalDependencies)
+        let status = await service.checkAll()
+
+        #expect(status.git)
+        #expect(!status.claude)
+        #expect(status[.git])
+        #expect(!status[.claude])
+    }
+
+    @Test
+    func checkAllReportsMissingTools() async {
+        let service = DependencyCheckService(
+            gitPathProvider: { nil },
+            claudePathProvider: { nil }
+        )
+
+        let status = await service.checkAll()
+
+        #expect(!status.git)
+        #expect(!status.claude)
+    }
+
+    @Test
+    func dependencyDescriptionsExplainExternalScope() {
+        #expect(
+            DependencyCheckService.Dependency.git.description.contains("External on this Mac")
+        )
+        #expect(
+            DependencyCheckService.Dependency.claude.description.contains("Optional")
+        )
     }
 }

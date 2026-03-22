@@ -71,7 +71,7 @@ enum GitError: Error, LocalizedError {
         case .branchListFailed(let msg):
             return "Failed to list branches: \(msg)"
         case .claudeNotInstalled:
-            return "Claude Code CLI is not installed. Install with: npm install -g @anthropic-ai/claude-code"
+            return "Claude Code CLI is unavailable on this Mac. You can still write the commit message manually."
         case .claudeGenerationFailed(let msg):
             return "AI generation failed: \(msg)"
         }
@@ -421,8 +421,12 @@ struct GitService {
         return lines.joined(separator: "\n")
     }
 
-    static func generateCommitMessage(worktreePath: String) async throws -> CommitMessageResult {
-        guard ClaudeService.isAvailable else {
+    static func generateCommitMessage(
+        worktreePath: String,
+        claudeAvailable: Bool? = nil
+    ) async throws -> CommitMessageResult {
+        let claudeAvailable = claudeAvailable ?? ClaudeService.isAvailable
+        guard claudeAvailable else {
             throw GitError.claudeNotInstalled
         }
 
@@ -720,8 +724,9 @@ struct GitService {
 
     // MARK: - PR Operations
 
-    private static var githubToken: String? {
-        let env = ProcessInfo.processInfo.environment
+    private static func githubToken(
+        from env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
         return env["GITHUB_TOKEN"] ?? env["GITHUB_PAT"] ?? env["GITHUB_API_TOKEN"]
     }
 
@@ -747,8 +752,12 @@ struct GitService {
         return nil
     }
 
-    static func createPR(worktreePath: String, config: PRConfig) async throws -> PRResult {
-        guard let token = githubToken else {
+    static func createPR(
+        worktreePath: String,
+        config: PRConfig,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) async throws -> PRResult {
+        guard let token = githubToken(from: environment) else {
             throw GitError.prCreationFailed("Missing GitHub token. Set GITHUB_TOKEN or GITHUB_PAT.")
         }
 

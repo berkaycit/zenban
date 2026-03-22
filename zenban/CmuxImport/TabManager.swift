@@ -1192,10 +1192,15 @@ class TabManager: ObservableObject {
     }
 
     private nonisolated static func runGitCommand(directory: String, arguments: [String]) -> String? {
+        guard let gitPath = DependencyCheckService.resolveGitPath() else {
+            NSLog("TabManager git probe skipped because system git is unavailable.")
+            return nil
+        }
+
         let process = Process()
         let stdout = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "-C", directory] + arguments
+        process.executableURL = URL(fileURLWithPath: gitPath)
+        process.arguments = ["-C", directory] + arguments
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
 

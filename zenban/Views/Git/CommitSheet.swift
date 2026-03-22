@@ -16,6 +16,10 @@ struct CommitSheet: View {
         !summary.trimmingCharacters(in: .whitespaces).isEmpty && !isCommitting
     }
 
+    private var canGenerateWithAI: Bool {
+        ClaudeService.isAvailable && !isGenerating
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             headerSection
@@ -25,9 +29,11 @@ struct CommitSheet: View {
         .frame(width: 450)
         .focusable()
         .focused($isShortcutScopeFocused)
-        .onAppear { isShortcutScopeFocused = true }
-        .task {
-            generateWithAI()
+        .onAppear {
+            isShortcutScopeFocused = true
+            if ClaudeService.isAvailable {
+                generateWithAI()
+            }
         }
         .backport.onKeyPress(KeyEquivalent("c"), action: handleCommitShortcut)
     }
@@ -96,7 +102,7 @@ struct CommitSheet: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
-                    .disabled(isGenerating)
+                    .disabled(!canGenerateWithAI)
                 }
 
                 TextEditor(text: $description)
@@ -107,6 +113,13 @@ struct CommitSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .scrollContentBackground(.hidden)
                     .backport.onKeyPress(KeyEquivalent("c"), action: handleCommitShortcut)
+            }
+
+            if !ClaudeService.isAvailable {
+                Text("Claude Code CLI is unavailable on this Mac. You can still write the commit message manually.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if let error = errorMessage {
@@ -147,6 +160,11 @@ struct CommitSheet: View {
     // MARK: - Actions
 
     private func generateWithAI() {
+        guard ClaudeService.isAvailable else {
+            errorMessage = GitError.claudeNotInstalled.errorDescription
+            return
+        }
+
         isGenerating = true
         errorMessage = nil
 

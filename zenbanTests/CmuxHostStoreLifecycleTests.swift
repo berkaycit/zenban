@@ -24,9 +24,6 @@ struct CmuxHostStoreLifecycleTests {
 
         primaryStore.syncSelection(card: card, boardID: board.id)
         let originalWorkspace = try #require(primaryStore.workspace(for: card.id))
-        let startupEnvironment = try ZellijSessionManager.shared.startupEnvironment(for: originalWorkspace.id)
-        let attachCommand = try ZellijSessionManager.shared.attachCommand(for: originalWorkspace.id)
-        let launchFilePath = try #require(startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
 
         #expect(
             appDelegate.moveWorkspaceToWindow(
@@ -423,9 +420,6 @@ struct CmuxHostStoreLifecycleTests {
 
         primaryStore.syncSelection(card: card, boardID: board.id)
         let originalWorkspace = try #require(primaryStore.workspace(for: card.id))
-        let startupEnvironment = try ZellijSessionManager.shared.startupEnvironment(for: originalWorkspace.id)
-        let attachCommand = try ZellijSessionManager.shared.attachCommand(for: originalWorkspace.id)
-        let launchFilePath = try #require(startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
 
         #expect(
             appDelegate.moveWorkspaceToWindow(
@@ -492,6 +486,9 @@ struct CmuxHostStoreLifecycleTests {
 
         primaryStore.syncSelection(card: card, boardID: board.id)
         let originalWorkspace = try #require(primaryStore.workspace(for: card.id))
+        let startupEnvironment = try ZellijSessionManager.shared.startupEnvironment(for: originalWorkspace.id)
+        let attachCommand = try ZellijSessionManager.shared.attachCommand(for: originalWorkspace.id)
+        let launchFilePath = try #require(startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
 
         #expect(
             appDelegate.moveWorkspaceToWindow(

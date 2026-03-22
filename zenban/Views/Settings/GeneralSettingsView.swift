@@ -4,8 +4,6 @@ struct GeneralSettingsView: View {
     @Environment(BoardStore.self) private var store
 
     var body: some View {
-        @Bindable var store = store
-
         Form {
             Section {
                 HStack {
@@ -29,53 +27,24 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Text("Optional tools can still be installed here for pull request creation and AI-assisted commit messages.")
+                Text("Zenban bundles its terminal tooling internally. Git and Claude Code CLI stay external and are only used for the features below.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 ForEach(DependencyCheckService.Dependency.allCases, id: \.self) { dependency in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Image(systemName: isInstalled(dependency) ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle(isInstalled(dependency) ? .green : .orange)
-
-                            Text(dependency.rawValue)
-                                .fontWeight(.medium)
-
-                            Text("Optional")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Spacer()
-
-                            Text(isInstalled(dependency) ? "Installed" : "Missing")
-                                .font(.caption)
-                                .foregroundStyle(isInstalled(dependency) ? .green : .orange)
-                        }
-
-                        Text(dependency.description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    ToolAvailabilityRow(
+                        dependency: dependency,
+                        isAvailable: isAvailable(dependency)
+                    )
                 }
 
-                HStack {
-                    Button("Check Again") {
-                        store.checkDependencies()
-                    }
-
-                    if hasMissingDependencies {
-                        Button("Install Missing Tools") {
-                            store.presentDependencySetup()
-                        }
-                    }
+                Button("Refresh") {
+                    store.checkDependencies()
                 }
             } header: {
-                Text("Dependencies")
+                Text("Tools")
             } footer: {
-                if hasMissingDependencies {
-                    Text("Optional tools can be installed later without affecting the rest of the app.")
-                }
+                Text("Zenban does not require separate Homebrew, tmux, zellij, or GitHub CLI installs.")
             }
         }
         .formStyle(.grouped)
@@ -84,17 +53,45 @@ struct GeneralSettingsView: View {
                 store.checkDependencies()
             }
         }
-        .sheet(isPresented: $store.showDependencySetup) {
-            DependencySetupView()
-                .frame(minWidth: 420, minHeight: 400)
-        }
     }
 
-    private func isInstalled(_ dependency: DependencyCheckService.Dependency) -> Bool {
+    private func isAvailable(_ dependency: DependencyCheckService.Dependency) -> Bool {
         store.dependencyStatus?[dependency] ?? false
     }
+}
 
-    private var hasMissingDependencies: Bool {
-        store.dependencyStatus?.hasMissingDependencies ?? true
+private struct ToolAvailabilityRow: View {
+    let dependency: DependencyCheckService.Dependency
+    let isAvailable: Bool
+
+    private var tint: Color {
+        isAvailable ? .green : .orange
+    }
+
+    private var statusText: String {
+        isAvailable ? "Available" : "Unavailable"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(tint)
+
+                Text(dependency.rawValue)
+                    .fontWeight(.medium)
+
+                Spacer()
+
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(tint)
+            }
+
+            Text(dependency.description)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
     }
 }
