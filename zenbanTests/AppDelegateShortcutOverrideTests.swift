@@ -306,6 +306,35 @@ struct AppDelegateShortcutOverrideTests {
         )
     }
 
+    @Test
+    func ghosttyFullscreenToggleTracksFocusedTerminalForSelectedCard() throws {
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let terminalPanel = try #require(workspace.focusedTerminalPanel)
+
+        #expect(
+            hostStore.handleGhosttyTerminalFullscreenToggle(
+                workspaceID: workspace.id,
+                panelID: terminalPanel.id
+            )
+        )
+        #expect(boardStore.terminalFullscreenCardID == card.id)
+
+        #expect(
+            hostStore.handleGhosttyTerminalFullscreenToggle(
+                workspaceID: workspace.id,
+                panelID: terminalPanel.id
+            )
+        )
+        #expect(boardStore.terminalFullscreenCardID == nil)
+    }
+
     private func makeBoardFixture() -> (BoardStore, Board, Card) {
         let card = Card(title: "Preview", column: .todo, orderIndex: 0, agent: .claude, worktreePath: "/tmp/preview")
         let board = Board(name: "Board", cards: [card], repositoryPath: "/tmp/repo", agent: .claude)

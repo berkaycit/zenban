@@ -150,6 +150,20 @@ final class CmuxHostStore {
         return true
     }
 
+    @discardableResult
+    func handleGhosttyTerminalFullscreenToggle(workspaceID: UUID, panelID: UUID) -> Bool {
+        guard let boardStore,
+              let workspace = workspace(forID: workspaceID),
+              workspace.focusedPanelId == panelID,
+              workspace.panels[panelID] is TerminalPanel,
+              let cardID = workspaceToCardID[workspaceID],
+              let boardID = workspaceToBoardID[workspaceID] else {
+            return false
+        }
+
+        return boardStore.toggleTerminalFullscreen(for: cardID, in: boardID)
+    }
+
     func hasUnreadTerminalNotification(for cardID: UUID) -> Bool {
         guard let workspace = workspace(for: cardID),
               let terminalPanel = launchTerminalPanel(in: workspace) else {
@@ -319,6 +333,7 @@ final class CmuxHostStore {
     }
 
     func removeWorkspace(for cardID: UUID) {
+        boardStore?.clearTerminalFullscreen(for: cardID)
         launchTasks[cardID]?.cancel()
         launchTasks.removeValue(forKey: cardID)
         if var pendingLaunch = pendingLaunchByCardID[cardID] {
@@ -402,6 +417,13 @@ final class CmuxHostStore {
                     token: token
                 )
             }
+        }
+        appDelegate.zenbanToggleTerminalFullscreenHandler = { [weak self] workspaceID, panelID in
+            guard let self else { return false }
+            return self.handleGhosttyTerminalFullscreenToggle(
+                workspaceID: workspaceID,
+                panelID: panelID
+            )
         }
         appDelegate.zenbanAppTerminationCleanupHandler = { [weak self] in
             guard let self else { return }

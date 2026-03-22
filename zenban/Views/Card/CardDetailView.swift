@@ -20,10 +20,12 @@ struct CardDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            cardInfoSection
-                .frame(maxHeight: 180)
+            if !isTerminalFullscreen {
+                cardInfoSection
+                    .frame(maxHeight: 180)
 
-            Divider()
+                Divider()
+            }
 
             terminalSection
                 .frame(minHeight: 220)
@@ -66,6 +68,7 @@ struct CardDetailView: View {
     }
 
     private var board: Board? { store.board(for: boardID) }
+    private var isTerminalFullscreen: Bool { store.isTerminalFullscreenActive(for: card.id) }
     private var agentSummary: String? {
         cmuxHost.agentSummary(for: card.id) ?? card.agentSummary
     }

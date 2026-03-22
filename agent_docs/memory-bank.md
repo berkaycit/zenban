@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Expand terminal fullscreen to app content
+- **Description**: Terminal fullscreen no longer stops at the detail column. When Ghostty toggles fullscreen for the selected card, Zenban now swaps out the split view and lets that card's detail view own the full app content area while keeping window chrome unchanged. The existing cleanup and shortcut routing rules stay the same, and a new root-view regression locks the presentation mode switch.
+
+- **Summary**: Add Ghostty-driven terminal fullscreen mode
+- **Description**: When the selected card's embedded Ghostty terminal is focused, `Cmd+Shift+T` now routes Ghostty's fullscreen action into a Zenban-only detail fullscreen mode instead of relying on window fullscreen. `BoardStore` tracks the fullscreen card and clears it when card selection, board selection, overlays, or workspace lifecycle changes. The card detail view now hides metadata while fullscreen is active, and focused regressions cover both store cleanup and Ghostty-to-host routing.
+
 - **Summary**: Stop Zenban debug from opening standalone cmux
 - **Description**: Zenban now treats the copied cmux app shell as an embedded host instead of a standalone window/session manager when the app bundle is `com.berkaycit.zenban`. Main-window registration no longer triggers cmux startup session restore or autosave in Zenban, and standalone fallback paths that previously created a fresh cmux window now return early. Zenban debug builds also use their own socket path instead of sharing `/tmp/cmux-debug.sock`, and focused regression tests cover the embedded-host guards and socket split.
 

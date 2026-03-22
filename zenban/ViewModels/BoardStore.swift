@@ -113,17 +113,37 @@ final class BoardStore {
     var boards: [Board] = [] {
         didSet { invalidateLookupCache() }
     }
-    var selectedBoardID: UUID?
-    var selectedCardID: UUID?
+    var selectedBoardID: UUID? {
+        didSet {
+            guard oldValue != selectedBoardID else { return }
+            clearTerminalFullscreen()
+        }
+    }
+    var selectedCardID: UUID? {
+        didSet {
+            guard oldValue != selectedCardID else { return }
+            if terminalFullscreenCardID != selectedCardID {
+                clearTerminalFullscreen()
+            }
+        }
+    }
     var draggedCardID: UUID?
     var focusRegion: FocusRegion = .sidebar
     var deleteConfirmationRequest: DeleteConfirmationRequest?
     var showKeyboardShortcuts = false
+    var terminalFullscreenCardID: UUID?
 
     var dependencyStatus: DependencyCheckService.Status?
 
     // Unified overlay state (FSM)
-    var overlayState: OverlayState = .none
+    var overlayState: OverlayState = .none {
+        didSet {
+            guard oldValue != overlayState else { return }
+            if overlayState != .none {
+                clearTerminalFullscreen()
+            }
+        }
+    }
 
     var onCardDeleted: ((UUID) -> Void)?
     @ObservationIgnored weak var cmuxHost: CmuxHostStore?
@@ -317,6 +337,33 @@ final class BoardStore {
         overlayState = .none
     }
 
+    @discardableResult
+    func toggleTerminalFullscreen(for cardID: UUID, in boardID: UUID) -> Bool {
+        guard overlayState == .none,
+              selectedBoardID == boardID,
+              selectedCardID == cardID,
+              board(for: boardID)?.cards.contains(where: { $0.id == cardID }) == true else {
+            return false
+        }
+
+        terminalFullscreenCardID = terminalFullscreenCardID == cardID ? nil : cardID
+        return true
+    }
+
+    func isTerminalFullscreenActive(for cardID: UUID) -> Bool {
+        terminalFullscreenCardID == cardID
+    }
+
+    func clearTerminalFullscreen() {
+        terminalFullscreenCardID = nil
+    }
+
+    func clearTerminalFullscreen(for cardID: UUID) {
+        if terminalFullscreenCardID == cardID {
+            terminalFullscreenCardID = nil
+        }
+    }
+
     init(initialBoards: [Board]? = nil, persistenceEnabled: Bool = true) {
         self.persistenceEnabled = persistenceEnabled
         boards = initialBoards ?? BoardStorage.load()
@@ -373,6 +420,9 @@ final class BoardStore {
 
         // Stop overlay if showing for any card in this board
         if let id = overlayState.cardID, cardIDs.contains(id) { overlayState = .none }
+        if let terminalFullscreenCardID, cardIDs.contains(terminalFullscreenCardID) {
+            clearTerminalFullscreen()
+        }
         if let request = deleteConfirmationRequest, request.affectsAnyCard(in: cardIDs) {
             deleteConfirmationRequest = nil
         }
@@ -458,6 +508,9 @@ final class BoardStore {
             .map(\.orderIndex)
             .min() ?? 1
         boards[bi].cards[ci].column = column
+        if column == .done {
+            clearTerminalFullscreen(for: cardID)
+        }
         boards[bi].cards[ci].orderIndex = minOrderIndex - 1
         if column == .done, previousColumn != .done {
             if overlayState.isDevServer, overlayState.cardID == cardID {
@@ -845,6 +898,9 @@ final class BoardStore {
 
         if let overlayCardID = overlayState.cardID, cardIDs.contains(overlayCardID) {
             overlayState = .none
+        }
+        if let terminalFullscreenCardID, cardIDs.contains(terminalFullscreenCardID) {
+            clearTerminalFullscreen()
         }
         if let request = deleteConfirmationRequest, request.affectsAnyCard(in: cardIDs) {
             deleteConfirmationRequest = nil

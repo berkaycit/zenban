@@ -23,6 +23,7 @@
 - The lower detail pane embeds a cmux-derived Ghostty workspace per card, backed by a bundled Zellij session per workspace
 - Claude auto-launch now goes through a per-workspace launch request queue that the shell prompt hook acknowledges before Zenban marks the launch as delivered or consumes a pending prompt
 - Hidden card terminals stop rendering after a short delay but keep their shell and agent processes running in Zellij
+- When the selected card's Ghostty terminal is focused, `Cmd+Shift+T` toggles an app-content fullscreen mode for that card and exits automatically if selection, overlays, or workspace availability changes
 - `Done` cards keep their terminal closed by default and expose an `Open Terminal` action for manual reopening
 - Leaving a reopened `Done` card closes its workspace and tears down that card's Zellij session again
 - Agent pills update stored card state and relaunch the selected command when needed

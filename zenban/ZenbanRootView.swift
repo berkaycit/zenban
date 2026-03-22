@@ -8,6 +8,11 @@
 import AppKit
 import SwiftUI
 
+enum ZenbanRootContentMode: Equatable {
+    case splitView
+    case terminalFullscreenCardDetail
+}
+
 struct ZenbanRootView: View {
     @Environment(BoardStore.self) private var store
     @Environment(CmuxHostStore.self) private var cmuxHost
@@ -18,54 +23,11 @@ struct ZenbanRootView: View {
     var body: some View {
         @Bindable var store = store
 
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            // Sidebar
-            BoardListView()
-                .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 220)
-        } content: {
-            // Board content, Dev server, or Git changes
-            Group {
-                if store.showDevServer, let card = store.devServerCard {
-                    DevServerView(
-                        card: card,
-                        boardID: store.selectedBoardID,
-                        setupCommand: store.devServerSetupCommand,
-                        devCommand: store.devServerDevCommand,
-                        onDismiss: stopDevServerAndRestoreSidebarIfNeeded,
-                        onReconfigure: store.openReconfigure
-                    )
-                    .id(card.id)
-                } else if store.showGitChanges, let card = store.gitChangesCard, let board = store.selectedBoard {
-                    GitChangesView(
-                        card: card,
-                        boardID: board.id,
-                        onDismiss: store.stopGitChanges
-                    )
-                    .id(card.id)
-                } else if store.showFileBrowser, let card = store.fileBrowserCard, let board = store.selectedBoard {
-                    FileBrowserOverlayView(card: card, boardID: board.id)
-                        .id(card.id)
-                } else if let board = store.selectedBoard {
-                    BoardView(board: board)
-                } else {
-                    EmptyStateView(
-                        icon: "square.stack.3d.up",
-                        title: "No Board Selected",
-                        subtitle: "Select a board from the sidebar or create a new one"
-                    )
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 600, ideal: 800, max: 1000)
-        } detail: {
-            // Card detail
-            if let board = store.selectedBoard, let card = store.selectedCard {
-                CardDetailView(card: card, boardID: board.id)
+        Group {
+            if let fullscreenContext = terminalFullscreenContext {
+                CardDetailView(card: fullscreenContext.card, boardID: fullscreenContext.boardID)
             } else {
-                EmptyStateView(
-                    icon: "rectangle.on.rectangle",
-                    title: "No Card Selected",
-                    subtitle: "Select a card to view its details"
-                )
+                navigationSplitContent
             }
         }
         .onChange(of: store.selectedBoardID) {
@@ -134,6 +96,85 @@ struct ZenbanRootView: View {
     private func stopDevServerAndRestoreSidebarIfNeeded() {
         devServerReconfigureRestartInFlight = false
         store.stopDevServer()
+    }
+
+    @ViewBuilder
+    private var navigationSplitContent: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            BoardListView()
+                .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 220)
+        } content: {
+            Group {
+                if store.showDevServer, let card = store.devServerCard {
+                    DevServerView(
+                        card: card,
+                        boardID: store.selectedBoardID,
+                        setupCommand: store.devServerSetupCommand,
+                        devCommand: store.devServerDevCommand,
+                        onDismiss: stopDevServerAndRestoreSidebarIfNeeded,
+                        onReconfigure: store.openReconfigure
+                    )
+                    .id(card.id)
+                } else if store.showGitChanges, let card = store.gitChangesCard, let board = store.selectedBoard {
+                    GitChangesView(
+                        card: card,
+                        boardID: board.id,
+                        onDismiss: store.stopGitChanges
+                    )
+                    .id(card.id)
+                } else if store.showFileBrowser, let card = store.fileBrowserCard, let board = store.selectedBoard {
+                    FileBrowserOverlayView(card: card, boardID: board.id)
+                        .id(card.id)
+                } else if let board = store.selectedBoard {
+                    BoardView(board: board)
+                } else {
+                    EmptyStateView(
+                        icon: "square.stack.3d.up",
+                        title: "No Board Selected",
+                        subtitle: "Select a board from the sidebar or create a new one"
+                    )
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 600, ideal: 800, max: 1000)
+        } detail: {
+            if let board = store.selectedBoard, let card = store.selectedCard {
+                CardDetailView(card: card, boardID: board.id)
+            } else {
+                EmptyStateView(
+                    icon: "rectangle.on.rectangle",
+                    title: "No Card Selected",
+                    subtitle: "Select a card to view its details"
+                )
+            }
+        }
+    }
+
+    private var terminalFullscreenContext: (card: Card, boardID: UUID)? {
+        guard Self.rootContentMode(
+            selectedBoard: store.selectedBoard,
+            selectedCard: store.selectedCard,
+            terminalFullscreenCardID: store.terminalFullscreenCardID
+        ) == .terminalFullscreenCardDetail,
+        let board = store.selectedBoard,
+        let card = store.selectedCard else {
+            return nil
+        }
+
+        return (card, board.id)
+    }
+
+    static func rootContentMode(
+        selectedBoard: Board?,
+        selectedCard: Card?,
+        terminalFullscreenCardID: UUID?
+    ) -> ZenbanRootContentMode {
+        guard selectedBoard != nil,
+              let selectedCard,
+              terminalFullscreenCardID == selectedCard.id else {
+            return .splitView
+        }
+
+        return .terminalFullscreenCardDetail
     }
 
     private func handleDevServerVisibilityChange(wasShowing: Bool, isShowing: Bool) {

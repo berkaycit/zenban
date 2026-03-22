@@ -1954,6 +1954,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var zenbanClaudePromptCaptureEnabledHandler: ((UUID) -> Bool)?
     var zenbanPromptSubmittedHandler: ((UUID, UUID, String) -> Void)?
     var zenbanLaunchRequestStartedHandler: ((UUID, UUID, String) -> Void)?
+    var zenbanToggleTerminalFullscreenHandler: ((UUID, UUID) -> Bool)?
     var zenbanAppTerminationCleanupHandler: (() async -> Void)?
     var zenbanShortcutOverrideHandler: ((NSEvent) -> Bool)?
     var shortcutLayoutCharacterProvider: (UInt16, NSEvent.ModifierFlags) -> String? = KeyboardLayout.character(forKeyCode:modifierFlags:)

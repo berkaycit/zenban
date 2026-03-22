@@ -2117,6 +2117,22 @@ class GhosttyApp {
                 guard let tabManager = AppDelegate.shared?.tabManager else { return false }
                 return tabManager.toggleSplitZoom(tabId: tabId, surfaceId: surfaceId)
             }
+        case GHOSTTY_ACTION_TOGGLE_FULLSCREEN:
+            guard let tabId = surfaceView.tabId,
+                  let surfaceId = surfaceView.terminalSurface?.id else {
+                return false
+            }
+            return performOnMain {
+                if let handler = AppDelegate.shared?.zenbanToggleTerminalFullscreenHandler {
+                    return handler(tabId, surfaceId)
+                }
+#if os(macOS)
+                surfaceView.window?.toggleFullScreen(nil)
+                return true
+#else
+                return false
+#endif
+            }
         case GHOSTTY_ACTION_SCROLLBAR:
             let scrollbar = GhosttyScrollbar(c: action.action.scrollbar)
             surfaceView.scrollbar = scrollbar
