@@ -3494,10 +3494,13 @@ final class Workspace: Identifiable, ObservableObject {
         requiresSplit: Bool = false,
         shouldFocus: Bool = true
     ) {
-        guard let terminalPanel = terminalPanel(for: panelId) else { return }
         if shouldFocus {
             focusPanel(panelId)
         }
+        guard NotificationPaneFlashSettings.showsNotificationFlash(
+            userPreferenceEnabled: NotificationPaneFlashSettings.isEnabled()
+        ) else { return }
+        guard let terminalPanel = terminalPanel(for: panelId) else { return }
         let isSplit = bonsplitController.allPaneIds.count > 1 || panels.count > 1
         if requiresSplit && !isSplit {
             return

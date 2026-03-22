@@ -543,6 +543,14 @@ enum NotificationPaneFlashSettings {
         }
         return defaults.bool(forKey: enabledKey)
     }
+
+    static func showsNotificationFlash(
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        userPreferenceEnabled: Bool
+    ) -> Bool {
+        guard userPreferenceEnabled else { return false }
+        return !SocketControlSettings.isZenbanBundleIdentifier(bundleIdentifier)
+    }
 }
 
 enum TaggedRunBadgeSettings {
