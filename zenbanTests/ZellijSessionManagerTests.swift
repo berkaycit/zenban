@@ -21,6 +21,14 @@ struct ZellijSessionManagerTests {
         }
     }
 
+    private actor SessionCleanupProbe {
+        private(set) var cleanedSessionNames: [String] = []
+
+        func record(_ sessionNames: Set<String>) {
+            cleanedSessionNames = sessionNames.sorted()
+        }
+    }
+
     @Test
     func killRuntimeCancelsInFlightPreparationAndClearsLaunchRequest() async throws {
         let manager = ZellijSessionManager.shared
@@ -174,6 +182,106 @@ struct ZellijSessionManagerTests {
         #expect((try? manager.startupEnvironment(for: workspaceID)) == nil)
         #expect((try? manager.attachCommand(for: workspaceID)) == nil)
         _ = await task.result
+    }
+
+    @Test
+    func shutdownAllSessionsForAppTerminationCancelsPreparationAndRemovesArtifacts() async throws {
+        let manager = ZellijSessionManager.shared
+        manager.resetTestingHooks()
+        manager.killAllSessions()
+        defer {
+            manager.resetTestingHooks()
+            manager.killAllSessions()
+        }
+
+        let workspaceID = UUID()
+        let registration = try manager.registerWorkspace(
+            workspaceId: workspaceID,
+            panelId: UUID(),
+            portOrdinal: 3,
+            workingDirectory: "/tmp/shutdown-termination"
+        )
+        try manager.queueLaunchRequest(
+            for: workspaceID,
+            token: "termination-cleanup-token",
+            command: "codex"
+        )
+
+        let launchFilePath = try #require(registration.startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
+        let preparationProbe = PreparationProbe()
+        let cleanupProbe = SessionCleanupProbe()
+        manager.configureBackgroundSessionHookForTesting { _ in
+            await preparationProbe.markStarted()
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch is CancellationError {
+                await preparationProbe.markCancelled()
+                throw CancellationError()
+            }
+        }
+        manager.configureSessionNamesHookForTesting { [] }
+        manager.configureCleanupSessionsHookForTesting { sessionNames in
+            await cleanupProbe.record(sessionNames)
+        }
+
+        let task = Task {
+            try await manager.prepareBackgroundSession(workspaceId: workspaceID)
+        }
+
+        try await waitUntil { await preparationProbe.started }
+        #expect(manager.hasBackgroundCreationTaskForTesting(workspaceId: workspaceID))
+
+        let shutdownResult = await manager.shutdownAllSessionsForAppTermination(timeout: 0.1)
+
+        #expect(shutdownResult.completedBeforeTimeout)
+        #expect(shutdownResult.remainingSessionNames.isEmpty)
+        #expect(await cleanupProbe.cleanedSessionNames == ["zenban-ws-\(workspaceID.uuidString.lowercased())"])
+        #expect(await preparationProbe.cancelled)
+        #expect(!manager.isManagedWorkspace(workspaceID))
+        #expect(!FileManager.default.fileExists(atPath: launchFilePath))
+        #expect(!FileManager.default.fileExists(atPath: registration.attachCommand))
+        #expect(!manager.hasBackgroundCreationTaskForTesting(workspaceId: workspaceID))
+        _ = await task.result
+    }
+
+    @Test
+    func shutdownAllSessionsForAppTerminationTimesOutButStillClearsLocalState() async throws {
+        let manager = ZellijSessionManager.shared
+        manager.resetTestingHooks()
+        manager.killAllSessions()
+        defer {
+            manager.resetTestingHooks()
+            manager.killAllSessions()
+        }
+
+        let workspaceID = UUID()
+        let registration = try manager.registerWorkspace(
+            workspaceId: workspaceID,
+            panelId: UUID(),
+            portOrdinal: 4,
+            workingDirectory: "/tmp/shutdown-timeout"
+        )
+        try manager.queueLaunchRequest(
+            for: workspaceID,
+            token: "termination-timeout-token",
+            command: "gemini"
+        )
+
+        let launchFilePath = try #require(registration.startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
+        manager.configureSessionNamesHookForTesting { [] }
+        manager.configureCleanupSessionsHookForTesting { _ in
+            try await Task.sleep(for: .seconds(60))
+        }
+
+        let shutdownResult = await manager.shutdownAllSessionsForAppTermination(timeout: 0.01)
+
+        #expect(!shutdownResult.completedBeforeTimeout)
+        #expect(shutdownResult.remainingSessionNames == ["zenban-ws-\(workspaceID.uuidString.lowercased())"])
+        #expect(!manager.isManagedWorkspace(workspaceID))
+        #expect(!FileManager.default.fileExists(atPath: launchFilePath))
+        #expect(!FileManager.default.fileExists(atPath: registration.attachCommand))
+        #expect((try? manager.startupEnvironment(for: workspaceID)) == nil)
+        #expect((try? manager.attachCommand(for: workspaceID)) == nil)
     }
 
     private func waitUntil(

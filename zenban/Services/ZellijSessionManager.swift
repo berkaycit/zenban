@@ -4,6 +4,16 @@ import Foundation
 final class ZellijSessionManager {
     private static let sessionPrefix = "zenban-ws-"
 
+    struct ShutdownResult: Equatable, Sendable {
+        let completedBeforeTimeout: Bool
+        let remainingSessionNames: [String]
+
+        static let completed = ShutdownResult(
+            completedBeforeTimeout: true,
+            remainingSessionNames: []
+        )
+    }
+
     struct SessionSpec {
         let workspaceId: UUID
         let panelId: UUID
@@ -27,6 +37,10 @@ final class ZellijSessionManager {
     private struct BackgroundCreationTaskRecord {
         let id: UUID
         let task: Task<Void, Error>
+    }
+
+    private enum ShutdownTimeoutError: Error {
+        case timedOut
     }
 
     enum SessionError: Error, LocalizedError {
@@ -60,10 +74,12 @@ final class ZellijSessionManager {
     private var descriptorByWorkspaceId: [UUID: TerminalSessionDescriptor] = [:]
     private var backgroundCreationTasks: [UUID: BackgroundCreationTaskRecord] = [:]
     private var startupCleanupTask: Task<Void, Never>?
+    private var appTerminationShutdownTask: Task<ShutdownResult, Never>?
 #if DEBUG
     private var prepareBackgroundSessionHookForTesting: ((SessionSpec) async throws -> Void)?
     private var deleteSessionHookForTesting: ((String) async throws -> Void)?
     private var cleanupSessionsHookForTesting: ((Set<String>) async throws -> Void)?
+    private var sessionNamesHookForTesting: (() async throws -> [String])?
 #endif
 
     private init() {
@@ -208,6 +224,8 @@ final class ZellijSessionManager {
     }
 
     func killAllSessions() {
+        appTerminationShutdownTask?.cancel()
+        appTerminationShutdownTask = nil
         let knownSessionNames = Set(sessionSpecByWorkspaceId.values.map(\.sessionName))
         startupCleanupTask?.cancel()
         startupCleanupTask = nil
@@ -237,6 +255,96 @@ final class ZellijSessionManager {
                 NSLog("Failed to clean up zellij sessions: %@", String(describing: error))
             }
         }
+    }
+
+    func shutdownAllSessionsForAppTermination(timeout: TimeInterval) async -> ShutdownResult {
+        if let task = appTerminationShutdownTask {
+            return await task.value
+        }
+
+        let knownSessionNames = resetManagedSessionState(removeAttachScriptFiles: true)
+        let configuration: ZellijProcessConfiguration?
+        do {
+            configuration = try runnerConfiguration()
+        } catch {
+            if !knownSessionNames.isEmpty {
+                NSLog(
+                    "Failed to build zellij shutdown configuration during app termination: %@",
+                    String(describing: error)
+                )
+            }
+            return ShutdownResult(
+                completedBeforeTimeout: knownSessionNames.isEmpty,
+                remainingSessionNames: knownSessionNames.sorted()
+            )
+        }
+
+        let task = Task<ShutdownResult, Never> {
+            guard let configuration else {
+                return ShutdownResult(
+                    completedBeforeTimeout: knownSessionNames.isEmpty,
+                    remainingSessionNames: knownSessionNames.sorted()
+                )
+            }
+
+            let snapshotSessionNames: Set<String>
+            do {
+                snapshotSessionNames = try await self.managedSessionNamesForTermination(
+                    configuration: configuration,
+                    knownSessionNames: knownSessionNames
+                )
+            } catch {
+                NSLog(
+                    "Failed to list zellij sessions during app termination: %@",
+                    String(describing: error)
+                )
+                snapshotSessionNames = knownSessionNames
+            }
+
+            guard !snapshotSessionNames.isEmpty else {
+                return .completed
+            }
+
+            let completedBeforeTimeout = await self.deleteSessionsForAppTermination(
+                snapshotSessionNames,
+                configuration: configuration,
+                timeout: timeout
+            )
+
+            let remainingSessionNames: [String]
+            do {
+                let remaining = try await self.managedSessionNamesForTermination(
+                    configuration: configuration,
+                    knownSessionNames: completedBeforeTimeout ? [] : snapshotSessionNames
+                )
+                if !completedBeforeTimeout && remaining.isEmpty {
+                    remainingSessionNames = snapshotSessionNames.sorted()
+                } else {
+                    remainingSessionNames = remaining.sorted()
+                }
+            } catch {
+                NSLog(
+                    "Failed to verify remaining zellij sessions during app termination: %@",
+                    String(describing: error)
+                )
+                remainingSessionNames = completedBeforeTimeout ? [] : snapshotSessionNames.sorted()
+            }
+
+            if !completedBeforeTimeout || !remainingSessionNames.isEmpty {
+                NSLog(
+                    "App termination zellij cleanup completed=%d remaining=%@",
+                    completedBeforeTimeout ? 1 : 0,
+                    remainingSessionNames.joined(separator: ",")
+                )
+            }
+
+            return ShutdownResult(
+                completedBeforeTimeout: completedBeforeTimeout,
+                remainingSessionNames: remainingSessionNames
+            )
+        }
+        appTerminationShutdownTask = task
+        return await task.value
     }
 
     func forgetWorkspace(_ workspaceId: UUID) {
@@ -365,6 +473,24 @@ final class ZellijSessionManager {
         descriptorByWorkspaceId.removeValue(forKey: workspaceId)
     }
 
+    private func resetManagedSessionState(removeAttachScriptFiles: Bool) -> Set<String> {
+        startupCleanupTask?.cancel()
+        startupCleanupTask = nil
+        for workspaceId in Array(backgroundCreationTasks.keys) {
+            cancelBackgroundCreationTask(for: workspaceId)
+        }
+        let knownSessionNames = Set(sessionSpecByWorkspaceId.values.map(\.sessionName))
+        for spec in sessionSpecByWorkspaceId.values {
+            cleanupWorkspaceArtifacts(
+                for: spec,
+                removeAttachScriptFile: removeAttachScriptFiles
+            )
+        }
+        sessionSpecByWorkspaceId.removeAll(keepingCapacity: false)
+        descriptorByWorkspaceId.removeAll(keepingCapacity: false)
+        return knownSessionNames
+    }
+
     private func cleanupWorkspaceArtifacts(for spec: SessionSpec, removeAttachScriptFile: Bool) {
         try? removeLaunchRequestFile(for: spec)
         guard removeAttachScriptFile else { return }
@@ -399,6 +525,82 @@ final class ZellijSessionManager {
                     String(describing: error)
                 )
             }
+        }
+    }
+
+    private func managedSessionNamesForTermination(
+        configuration: ZellijProcessConfiguration,
+        knownSessionNames: Set<String>
+    ) async throws -> Set<String> {
+        let listedSessionNames: [String]
+#if DEBUG
+        if let sessionNamesHookForTesting {
+            listedSessionNames = try await sessionNamesHookForTesting()
+        } else {
+            listedSessionNames = try await runner.currentSessionNames(configuration: configuration)
+        }
+#else
+        listedSessionNames = try await runner.currentSessionNames(configuration: configuration)
+#endif
+        let managedSessionNames = listedSessionNames
+            .filter { $0.hasPrefix(Self.sessionPrefix) }
+        return Set(managedSessionNames).union(knownSessionNames)
+    }
+
+    private func deleteSessionsForAppTermination(
+        _ sessionNames: Set<String>,
+        configuration: ZellijProcessConfiguration,
+        timeout: TimeInterval
+    ) async -> Bool {
+        let cleanupTask = Task<Void, Error> { [runner] in
+#if DEBUG
+            if let cleanupSessionsHookForTesting {
+                try await cleanupSessionsHookForTesting(sessionNames)
+                return
+            }
+#endif
+            for sessionName in sessionNames.sorted() {
+#if DEBUG
+                if let deleteSessionHookForTesting {
+                    try await deleteSessionHookForTesting(sessionName)
+                    continue
+                }
+#endif
+                try await runner.deleteSession(
+                    configuration: configuration,
+                    sessionName: sessionName,
+                    ignoredExitStatuses: [1]
+                )
+            }
+        }
+
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    try await cleanupTask.value
+                }
+                group.addTask {
+                    let timeoutDuration = max(timeout, 0)
+                    try await Task.sleep(for: .seconds(timeoutDuration))
+                    throw ShutdownTimeoutError.timedOut
+                }
+                _ = try await group.next()
+                group.cancelAll()
+            }
+            return true
+        } catch ShutdownTimeoutError.timedOut {
+            cleanupTask.cancel()
+            return false
+        } catch is CancellationError {
+            cleanupTask.cancel()
+            return false
+        } catch {
+            cleanupTask.cancel()
+            NSLog(
+                "Failed to delete zellij sessions during app termination: %@",
+                String(describing: error)
+            )
+            return false
         }
     }
 
@@ -494,10 +696,17 @@ extension ZellijSessionManager {
         cleanupSessionsHookForTesting = hook
     }
 
+    func configureSessionNamesHookForTesting(
+        _ hook: (() async throws -> [String])? = nil
+    ) {
+        sessionNamesHookForTesting = hook
+    }
+
     func resetTestingHooks() {
         prepareBackgroundSessionHookForTesting = nil
         deleteSessionHookForTesting = nil
         cleanupSessionsHookForTesting = nil
+        sessionNamesHookForTesting = nil
     }
 
     func hasBackgroundCreationTaskForTesting(workspaceId: UUID) -> Bool {

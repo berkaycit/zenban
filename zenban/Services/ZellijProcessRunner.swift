@@ -62,7 +62,7 @@ actor ZellijProcessRunner {
         )
     }
 
-    private func currentSessionNames(
+    func currentSessionNames(
         configuration: ZellijProcessConfiguration
     ) async throws -> [String] {
         var args = configuration.baseArguments

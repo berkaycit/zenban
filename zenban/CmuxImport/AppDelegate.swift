@@ -1918,6 +1918,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var zenbanClaudePromptCaptureEnabledHandler: ((UUID) -> Bool)?
     var zenbanPromptSubmittedHandler: ((UUID, UUID, String) -> Void)?
     var zenbanLaunchRequestStartedHandler: ((UUID, UUID, String) -> Void)?
+    var zenbanAppTerminationCleanupHandler: (() async -> Void)?
     var zenbanShortcutOverrideHandler: ((NSEvent) -> Bool)?
     var shortcutLayoutCharacterProvider: (UInt16, NSEvent.ModifierFlags) -> String? = KeyboardLayout.character(forKeyCode:modifierFlags:)
     private var workspaceObserver: NSObjectProtocol?
@@ -2065,6 +2066,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var lastTypingActivityAt: TimeInterval = 0
     private var didHandleExplicitOpenIntentAtStartup = false
     private var isTerminatingApp = false
+    private var didSendApplicationTerminationReply = false
+    private var applicationTerminationCleanupTask: Task<Void, Never>?
     private var didInstallLifecycleSnapshotObservers = false
     private var didDisableSuddenTermination = false
     private var commandPaletteVisibilityByWindowId: [UUID: Bool] = [:]
@@ -2077,6 +2080,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private static let commandPaletteRequestGraceInterval: TimeInterval = 1.25
     private static let commandPalettePendingOpenMaxAge: TimeInterval = 8.0
     private static let sessionAutosaveTypingQuietPeriod: TimeInterval = 0.65
+#if DEBUG
+    private var applicationTerminationReplyHandlerForTesting: ((Bool) -> Void)?
+#endif
 
     var updateViewModel: UpdateViewModel {
         updateController.viewModel
@@ -2300,7 +2306,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         isTerminatingApp = true
         _ = saveSessionSnapshot(includeScrollback: true, removeWhenEmpty: false)
-        return .terminateNow
+
+        if didSendApplicationTerminationReply {
+            return .terminateNow
+        }
+
+        if applicationTerminationCleanupTask != nil {
+            return .terminateLater
+        }
+
+        guard let zenbanAppTerminationCleanupHandler else {
+            return .terminateNow
+        }
+
+        applicationTerminationCleanupTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await zenbanAppTerminationCleanupHandler()
+            self.replyToApplicationShouldTerminate(allowsTermination: true)
+        }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -2321,6 +2345,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationWillResignActive(_ notification: Notification) {
         guard !isTerminatingApp else { return }
         _ = saveSessionSnapshot(includeScrollback: false)
+    }
+
+    private func replyToApplicationShouldTerminate(allowsTermination: Bool) {
+        guard !didSendApplicationTerminationReply else { return }
+        didSendApplicationTerminationReply = true
+#if DEBUG
+        if let applicationTerminationReplyHandlerForTesting {
+            applicationTerminationReplyHandlerForTesting(allowsTermination)
+            return
+        }
+#endif
+        NSApplication.shared.reply(toApplicationShouldTerminate: allowsTermination)
     }
 
     func persistSessionForUpdateRelaunch() {
@@ -10250,6 +10286,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
 
 }
+
+#if DEBUG
+extension AppDelegate {
+    func configureApplicationTerminationHooksForTesting(
+        cleanupHandler: (() async -> Void)? = nil,
+        replyHandler: ((Bool) -> Void)? = nil
+    ) {
+        zenbanAppTerminationCleanupHandler = cleanupHandler
+        applicationTerminationReplyHandlerForTesting = replyHandler
+    }
+
+    func resetApplicationTerminationHooksForTesting() {
+        zenbanAppTerminationCleanupHandler = nil
+        applicationTerminationReplyHandlerForTesting = nil
+        applicationTerminationCleanupTask?.cancel()
+        applicationTerminationCleanupTask = nil
+        didSendApplicationTerminationReply = false
+        isTerminatingApp = false
+    }
+}
+#endif
 
 @MainActor
 final class MenuBarExtraController: NSObject, NSMenuDelegate {

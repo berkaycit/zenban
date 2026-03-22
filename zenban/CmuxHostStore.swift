@@ -68,7 +68,6 @@ final class CmuxHostStore {
     @ObservationIgnored private var hiddenWorkspaceReclaimPollingInterval: Duration = .seconds(30)
     @ObservationIgnored private var hiddenWorkspaceDetachDelay: Duration = .seconds(3)
     @ObservationIgnored private var pendingLaunchAckTimeout: TimeInterval = 5
-    @ObservationIgnored private var applicationWillTerminateObserver: NSObjectProtocol?
 #if DEBUG
     @ObservationIgnored private var launchCommandHandlerForTesting: ((UUID, String) -> Void)?
     @ObservationIgnored private var backgroundReclaimHandlerForTesting: ((UUID) -> Void)?
@@ -86,23 +85,11 @@ final class CmuxHostStore {
         notificationStore = TerminalNotificationStore.shared
         tabManager = TabManager()
         startHiddenWorkspaceReclaimLoop()
-        applicationWillTerminateObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.handleApplicationWillTerminate()
-            }
-        }
     }
 
     deinit {
         hiddenWorkspaceReclaimTask?.cancel()
         hiddenWorkspaceDetachTasks.values.forEach { $0.cancel() }
-        if let applicationWillTerminateObserver {
-            NotificationCenter.default.removeObserver(applicationWillTerminateObserver)
-        }
     }
 
     func attach(boardStore: BoardStore) {
@@ -393,6 +380,10 @@ final class CmuxHostStore {
                     token: token
                 )
             }
+        }
+        appDelegate.zenbanAppTerminationCleanupHandler = { [weak self] in
+            guard let self else { return }
+            _ = await self.shutdownForApplicationTermination(timeout: 2.0)
         }
         didConfigureAppDelegate = true
     }
@@ -1187,16 +1178,20 @@ final class CmuxHostStore {
         return runtimeState
     }
 
-    private func handleApplicationWillTerminate() {
+    func shutdownForApplicationTermination(
+        timeout: TimeInterval
+    ) async -> ZellijSessionManager.ShutdownResult {
         launchTasks.values.forEach { $0.cancel() }
         launchTasks.removeAll(keepingCapacity: false)
         hiddenWorkspaceDetachTasks.values.forEach { $0.cancel() }
         hiddenWorkspaceDetachTasks.removeAll(keepingCapacity: false)
         hiddenWorkspaceReclaimTask?.cancel()
+        hiddenWorkspaceReclaimTask = nil
         pendingLaunchByCardID.removeAll(keepingCapacity: false)
         launchSignatureByCardID.removeAll(keepingCapacity: false)
-        zellijSessionManager.killAllSessions()
+        return await zellijSessionManager.shutdownAllSessionsForAppTermination(timeout: timeout)
     }
+
 }
 
 #if DEBUG
@@ -1269,10 +1264,6 @@ extension CmuxHostStore {
 
     func setPendingLaunchAckTimeoutForTesting(_ timeout: TimeInterval) {
         pendingLaunchAckTimeout = timeout
-    }
-
-    func simulateApplicationWillTerminateForTesting() {
-        handleApplicationWillTerminate()
     }
 
     func pendingLaunchSnapshotForTesting(cardID: UUID) -> (token: String, retryCount: Int, needsRequeue: Bool)? {

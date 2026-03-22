@@ -514,11 +514,17 @@ struct CmuxHostStoreLifecycleTests {
     }
 
     @Test
-    func applicationTerminationCleansUpManagedSessionArtifacts() async throws {
+    func applicationTerminationShutdownCleansUpManagedSessionArtifacts() async throws {
         let appDelegate = AppDelegate()
+        let sessionManager = ZellijSessionManager.shared
+        sessionManager.resetTestingHooks()
+        sessionManager.killAllSessions()
+        sessionManager.configureSessionNamesHookForTesting { [] }
         let (boardStore, board, card) = makeBoardFixture()
         let (hostStore, window) = makeHostStore(boardStore: boardStore)
         defer {
+            sessionManager.resetTestingHooks()
+            sessionManager.killAllSessions()
             window.close()
             _ = appDelegate
         }
@@ -535,7 +541,7 @@ struct CmuxHostStoreLifecycleTests {
             FileManager.default.fileExists(atPath: attachCommand)
         }
 
-        hostStore.simulateApplicationWillTerminateForTesting()
+        let shutdownResult = await hostStore.shutdownForApplicationTermination(timeout: 0.1)
 
         try await waitUntil {
             !ZellijSessionManager.shared.isManagedWorkspace(workspace.id) &&
@@ -543,6 +549,8 @@ struct CmuxHostStoreLifecycleTests {
             !FileManager.default.fileExists(atPath: attachCommand)
         }
 
+        #expect(shutdownResult.completedBeforeTimeout)
+        #expect(shutdownResult.remainingSessionNames.isEmpty)
         #expect(hostStore.pendingLaunchSnapshotForTesting(cardID: card.id) == nil)
         #expect((try? ZellijSessionManager.shared.startupEnvironment(for: workspace.id)) == nil)
         #expect((try? ZellijSessionManager.shared.attachCommand(for: workspace.id)) == nil)
