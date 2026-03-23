@@ -244,6 +244,41 @@ struct AppDelegateShortcutOverrideTests {
     }
 
     @Test
+    func commandWClosesFocusedTerminalWhenMultipleTerminalsExist() throws {
+        let appDelegate = AppDelegate()
+        let (boardStore, board, card) = makeBoardFixture()
+        let (hostStore, window) = makeHostStore(boardStore: boardStore)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        let focusedTerminal = try #require(workspace.focusedTerminalPanel)
+        let closingTerminal = try #require(workspace.newTerminalSurface(inPane: paneId, focus: true))
+        appDelegate.tabManager = hostStore.tabManager
+
+        let ghosttyView = try attachFocusedTerminal(closingTerminal, to: window)
+        let terminalCountBefore = panelCount(of: .terminal, in: workspace)
+
+        #expect(window.firstResponder === ghosttyView)
+        #expect(workspace.focusedPanelId == closingTerminal.id)
+        #expect(
+            appDelegate.debugHandleCustomShortcut(
+                event: try makeCommandWEvent(window: window)
+            )
+        )
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        #expect(panelCount(of: .terminal, in: workspace) == terminalCountBefore - 1)
+        #expect(workspace.panels[closingTerminal.id] == nil)
+        #expect(workspace.focusedPanelId == focusedTerminal.id)
+    }
+
+    @Test
     func typeScopedCloseConsumesFocusedBrowserWhenItIsLastBrowser() throws {
         let (boardStore, board, card) = makeBoardFixture()
         let (hostStore, window) = makeHostStore(boardStore: boardStore)

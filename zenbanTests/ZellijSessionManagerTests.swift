@@ -168,18 +168,25 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        _ = try manager.registerWorkspace(
+        let workspaceRegistration = try manager.registerWorkspace(
             workspaceId: workspaceID,
             panelId: UUID(),
             portOrdinal: 6,
             workingDirectory: "/tmp/panel-session-cleanup"
         )
-        let panelID = UUID()
-        let panelRegistration = try manager.registerPanelSession(
+        let firstPanelID = UUID()
+        let firstPanelRegistration = try manager.registerPanelSession(
             workspaceId: workspaceID,
-            panelId: panelID,
+            panelId: firstPanelID,
             portOrdinal: 6,
             workingDirectory: "/tmp/panel-session-cleanup-extra"
+        )
+        let secondPanelID = UUID()
+        let secondPanelRegistration = try manager.registerPanelSession(
+            workspaceId: workspaceID,
+            panelId: secondPanelID,
+            portOrdinal: 6,
+            workingDirectory: "/tmp/panel-session-cleanup-second"
         )
         manager.configureDeleteSessionHookForTesting { _ in }
 
@@ -187,12 +194,222 @@ struct ZellijSessionManagerTests {
 
         try await waitUntil {
             !manager.isManagedWorkspace(workspaceID) &&
+            !manager.hasManagedPanelSession(firstPanelID) &&
+            !manager.hasManagedPanelSession(secondPanelID) &&
+            !FileManager.default.fileExists(atPath: workspaceRegistration.attachCommand) &&
+            !FileManager.default.fileExists(atPath: firstPanelRegistration.attachCommand) &&
+            !FileManager.default.fileExists(atPath: secondPanelRegistration.attachCommand)
+        }
+
+        #expect((try? manager.attachCommand(forPanelId: firstPanelID)) == nil)
+        #expect((try? manager.startupEnvironment(forPanelId: firstPanelID)) == nil)
+        #expect((try? manager.attachCommand(forPanelId: secondPanelID)) == nil)
+        #expect((try? manager.startupEnvironment(forPanelId: secondPanelID)) == nil)
+    }
+
+    @Test
+    func forgetWorkspaceRemovesAssociatedPanelSessionsAndArtifacts() async throws {
+        let manager = ZellijSessionManager.shared
+        manager.resetTestingHooks()
+        manager.killAllSessions()
+        defer {
+            manager.resetTestingHooks()
+            manager.killAllSessions()
+        }
+
+        let workspaceID = UUID()
+        let workspaceRegistration = try manager.registerWorkspace(
+            workspaceId: workspaceID,
+            panelId: UUID(),
+            portOrdinal: 7,
+            workingDirectory: "/tmp/forget-workspace"
+        )
+        let panelID = UUID()
+        let panelRegistration = try manager.registerPanelSession(
+            workspaceId: workspaceID,
+            panelId: panelID,
+            portOrdinal: 7,
+            workingDirectory: "/tmp/forget-workspace-panel"
+        )
+        try manager.queueLaunchRequest(
+            for: workspaceID,
+            token: "forget-workspace-root",
+            command: "codex"
+        )
+        try manager.queueLaunchRequest(
+            forPanelId: panelID,
+            token: "forget-workspace-panel",
+            command: "codex"
+        )
+        manager.configureDeleteSessionHookForTesting { _ in }
+
+        let workspaceLaunchFilePath = try #require(
+            workspaceRegistration.startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"]
+        )
+        let panelLaunchFilePath = try #require(
+            panelRegistration.startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"]
+        )
+
+        manager.forgetWorkspace(workspaceID)
+
+        try await waitUntil {
+            !manager.isManagedWorkspace(workspaceID) &&
             !manager.hasManagedPanelSession(panelID) &&
+            !FileManager.default.fileExists(atPath: workspaceLaunchFilePath) &&
+            !FileManager.default.fileExists(atPath: panelLaunchFilePath) &&
+            !FileManager.default.fileExists(atPath: workspaceRegistration.attachCommand) &&
             !FileManager.default.fileExists(atPath: panelRegistration.attachCommand)
         }
 
+        #expect((try? manager.attachCommand(for: workspaceID)) == nil)
+        #expect((try? manager.startupEnvironment(for: workspaceID)) == nil)
         #expect((try? manager.attachCommand(forPanelId: panelID)) == nil)
         #expect((try? manager.startupEnvironment(forPanelId: panelID)) == nil)
+    }
+
+    @Test
+    func registerPanelSessionIsStableAcrossRepeatedAttachments() throws {
+        let manager = ZellijSessionManager.shared
+        manager.resetTestingHooks()
+        manager.killAllSessions()
+        defer {
+            manager.resetTestingHooks()
+            manager.killAllSessions()
+        }
+
+        let workspaceID = UUID()
+        let panelID = UUID()
+        let initialRegistration = try manager.registerPanelSession(
+            workspaceId: workspaceID,
+            panelId: panelID,
+            portOrdinal: 8,
+            workingDirectory: "/tmp/reattach-stability"
+        )
+
+        #expect(initialRegistration.didChangeStartup)
+        let attachCommand = initialRegistration.attachCommand
+        let startupEnvironment = initialRegistration.startupEnvironment
+        try FileManager.default.removeItem(atPath: attachCommand)
+        #expect(!FileManager.default.fileExists(atPath: attachCommand))
+
+        let reattachedCommand = try manager.attachCommand(forPanelId: panelID)
+        #expect(reattachedCommand == attachCommand)
+        #expect(FileManager.default.fileExists(atPath: attachCommand))
+        #expect(try manager.startupEnvironment(forPanelId: panelID) == startupEnvironment)
+
+        let secondRegistration = try manager.registerPanelSession(
+            workspaceId: workspaceID,
+            panelId: panelID,
+            portOrdinal: 8,
+            workingDirectory: "/tmp/reattach-stability"
+        )
+
+        #expect(secondRegistration.attachCommand == attachCommand)
+        #expect(secondRegistration.startupEnvironment == startupEnvironment)
+        #expect(!secondRegistration.didChangeStartup)
+        #expect(manager.hasManagedPanelSession(panelID))
+    }
+
+    @Test
+    func killRuntimePreservesRegistrationsWhileClearingLaunchRequests() async throws {
+        let manager = ZellijSessionManager.shared
+        manager.resetTestingHooks()
+        manager.killAllSessions()
+        defer {
+            manager.resetTestingHooks()
+            manager.killAllSessions()
+        }
+
+        let workspaceID = UUID()
+        let workspaceRegistration = try manager.registerWorkspace(
+            workspaceId: workspaceID,
+            panelId: UUID(),
+            portOrdinal: 9,
+            workingDirectory: "/tmp/runtime-reclaim"
+        )
+        let panelID = UUID()
+        let panelRegistration = try manager.registerPanelSession(
+            workspaceId: workspaceID,
+            panelId: panelID,
+            portOrdinal: 9,
+            workingDirectory: "/tmp/runtime-reclaim-panel"
+        )
+        try manager.queueLaunchRequest(
+            for: workspaceID,
+            token: "runtime-reclaim-workspace",
+            command: "codex"
+        )
+        try manager.queueLaunchRequest(
+            forPanelId: panelID,
+            token: "runtime-reclaim-panel",
+            command: "gemini"
+        )
+
+        let workspaceLaunchFilePath = try #require(workspaceRegistration.startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
+        let panelLaunchFilePath = try #require(panelRegistration.startupEnvironment["CMUX_ZELLIJ_LAUNCH_FILE"])
+
+        manager.killRuntime(for: workspaceID)
+
+        try await waitUntil {
+            manager.isManagedWorkspace(workspaceID) &&
+            manager.hasManagedPanelSession(panelID) &&
+            !FileManager.default.fileExists(atPath: workspaceLaunchFilePath) &&
+            !FileManager.default.fileExists(atPath: panelLaunchFilePath)
+        }
+
+        #expect(try manager.startupEnvironment(for: workspaceID) == workspaceRegistration.startupEnvironment)
+        #expect(try manager.startupEnvironment(forPanelId: panelID) == panelRegistration.startupEnvironment)
+        #expect(FileManager.default.fileExists(atPath: workspaceRegistration.attachCommand))
+        #expect(FileManager.default.fileExists(atPath: panelRegistration.attachCommand))
+    }
+
+    @Test
+    func killPanelSessionOnlyRemovesThatPanelRegistration() async throws {
+        let manager = ZellijSessionManager.shared
+        manager.resetTestingHooks()
+        manager.killAllSessions()
+        defer {
+            manager.resetTestingHooks()
+            manager.killAllSessions()
+        }
+
+        let workspaceID = UUID()
+        let workspaceRegistration = try manager.registerWorkspace(
+            workspaceId: workspaceID,
+            panelId: UUID(),
+            portOrdinal: 10,
+            workingDirectory: "/tmp/panel-cleanup-isolated"
+        )
+        let survivingPanelID = UUID()
+        let survivingPanelRegistration = try manager.registerPanelSession(
+            workspaceId: workspaceID,
+            panelId: survivingPanelID,
+            portOrdinal: 10,
+            workingDirectory: "/tmp/panel-cleanup-isolated-survivor"
+        )
+        let panelID = UUID()
+        let panelRegistration = try manager.registerPanelSession(
+            workspaceId: workspaceID,
+            panelId: panelID,
+            portOrdinal: 10,
+            workingDirectory: "/tmp/panel-cleanup-isolated-target"
+        )
+
+        manager.killPanelSession(for: panelID)
+
+        try await waitUntil {
+            manager.isManagedWorkspace(workspaceID) &&
+            manager.hasManagedPanelSession(survivingPanelID) &&
+            !manager.hasManagedPanelSession(panelID) &&
+            FileManager.default.fileExists(atPath: workspaceRegistration.attachCommand) &&
+            FileManager.default.fileExists(atPath: survivingPanelRegistration.attachCommand) &&
+            !FileManager.default.fileExists(atPath: panelRegistration.attachCommand)
+        }
+
+        #expect(try manager.startupEnvironment(for: workspaceID) == workspaceRegistration.startupEnvironment)
+        #expect(try manager.startupEnvironment(forPanelId: survivingPanelID) == survivingPanelRegistration.startupEnvironment)
+        #expect((try? manager.startupEnvironment(forPanelId: panelID)) == nil)
+        #expect((try? manager.attachCommand(forPanelId: panelID)) == nil)
     }
 
     @Test

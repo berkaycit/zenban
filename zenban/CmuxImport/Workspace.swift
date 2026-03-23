@@ -955,6 +955,7 @@ final class Workspace: Identifiable, ObservableObject {
     private var workspaceRootTerminalStartupCommand: String?
     private var workspaceRootTerminalStartupEnvironment: [String: String] = [:]
     private var terminalLaunchModeByPanelId: [UUID: TerminalLaunchMode] = [:]
+    private var rootTerminalPanelID: UUID?
 
     /// Callback used by TabManager to capture recently closed browser panels for Cmd+Shift+T restore.
     var onClosedBrowserPanel: ((ClosedBrowserPanelRestoreSnapshot) -> Void)?
@@ -1167,16 +1168,23 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     func workspaceRootTerminalPanel() -> TerminalPanel? {
-        guard let panelId = terminalLaunchModeByPanelId.first(where: { $0.value == .workspaceRootManagedSession })?.key else {
+        guard let panelId = rootTerminalPanelID else {
             return nil
         }
-        return terminalPanel(for: panelId)
+        guard let terminalPanel = terminalPanel(for: panelId) else {
+            rootTerminalPanelID = nil
+            return nil
+        }
+        return terminalPanel
     }
 
     @discardableResult
     func ensureWorkspaceRootTerminalPanel(focus: Bool? = nil) -> TerminalPanel? {
         if let existing = workspaceRootTerminalPanel() {
             return existing
+        }
+        if let promotedExisting = normalizeRootTerminalOwnership() {
+            return promotedExisting
         }
 
         guard let paneId = bonsplitController.focusedPaneId ?? bonsplitController.allPaneIds.first else {
@@ -1218,14 +1226,98 @@ final class Workspace: Identifiable, ObservableObject {
         return configuration
     }
 
+    private func setTerminalLaunchMode(
+        _ launchMode: TerminalLaunchMode,
+        for panelId: UUID
+    ) {
+        terminalLaunchModeByPanelId[panelId] = launchMode
+        switch launchMode {
+        case .workspaceRootManagedSession:
+            if let existingRootPanelID = rootTerminalPanelID,
+               existingRootPanelID != panelId {
+                terminalLaunchModeByPanelId[existingRootPanelID] = .independentPersistent
+            }
+            rootTerminalPanelID = panelId
+        case .independentPersistent:
+            if rootTerminalPanelID == panelId {
+                rootTerminalPanelID = nil
+            }
+        }
+    }
+
+    @discardableResult
+    private func normalizeRootTerminalOwnership(
+        preferredPanelId: UUID? = nil
+    ) -> TerminalPanel? {
+        let terminalPanelIDs = panels.keys
+            .filter { terminalPanel(for: $0) != nil }
+            .sorted { $0.uuidString < $1.uuidString }
+        guard !terminalPanelIDs.isEmpty else {
+            rootTerminalPanelID = nil
+            return nil
+        }
+
+        let chosenRootPanelID: UUID
+        if let existingRootPanelID = rootTerminalPanelID,
+           terminalPanelIDs.contains(existingRootPanelID) {
+            chosenRootPanelID = existingRootPanelID
+        } else if let preferredPanelId,
+                  terminalPanelIDs.contains(preferredPanelId) {
+            chosenRootPanelID = preferredPanelId
+        } else {
+            let markedRootPanelIDs = terminalPanelIDs.filter {
+                terminalLaunchModeByPanelId[$0] == .workspaceRootManagedSession
+            }
+            chosenRootPanelID = markedRootPanelIDs.first ?? terminalPanelIDs[0]
+        }
+
+        for terminalPanelID in terminalPanelIDs {
+            terminalLaunchModeByPanelId[terminalPanelID] =
+                terminalPanelID == chosenRootPanelID
+                ? .workspaceRootManagedSession
+                : .independentPersistent
+        }
+        rootTerminalPanelID = chosenRootPanelID
+        return terminalPanel(for: chosenRootPanelID)
+    }
+
     private func configureNewTerminalPanel(
         _ terminalPanel: TerminalPanel,
         launchMode: TerminalLaunchMode
     ) {
-        terminalLaunchModeByPanelId[terminalPanel.id] = launchMode
+        setTerminalLaunchMode(launchMode, for: terminalPanel.id)
         applyTerminalStartupConfiguration(
             terminalStartupConfiguration(for: terminalPanel, launchMode: launchMode),
             to: terminalPanel
+        )
+    }
+
+    private func resolvedAttachedTerminalLaunchMode(
+        _ requestedLaunchMode: TerminalLaunchMode?
+    ) -> TerminalLaunchMode {
+        let fallbackLaunchMode: TerminalLaunchMode =
+            workspaceRootTerminalPanel() == nil ? .workspaceRootManagedSession : .independentPersistent
+        let desiredLaunchMode = requestedLaunchMode ?? fallbackLaunchMode
+        if desiredLaunchMode == .workspaceRootManagedSession,
+           let existingRootPanelID = rootTerminalPanelID,
+           panels[existingRootPanelID] != nil {
+            return .independentPersistent
+        }
+        return desiredLaunchMode
+    }
+
+    private func configureAttachedTerminalPanel(
+        _ terminalPanel: TerminalPanel,
+        requestedLaunchMode: TerminalLaunchMode?
+    ) {
+        let resolvedLaunchMode = resolvedAttachedTerminalLaunchMode(requestedLaunchMode)
+        setTerminalLaunchMode(resolvedLaunchMode, for: terminalPanel.id)
+        applyTerminalStartupConfiguration(
+            terminalStartupConfiguration(for: terminalPanel, launchMode: resolvedLaunchMode),
+            to: terminalPanel
+        )
+        _ = normalizeRootTerminalOwnership(
+            preferredPanelId: resolvedLaunchMode == .workspaceRootManagedSession ? terminalPanel.id : nil
         )
     }
 
@@ -1285,6 +1377,7 @@ final class Workspace: Identifiable, ObservableObject {
         panels[terminalPanel.id] = terminalPanel
         panelTitles[terminalPanel.id] = terminalPanel.displayTitle
         seedTerminalInheritanceFontPoints(panelId: terminalPanel.id, configTemplate: configTemplate)
+        _ = normalizeRootTerminalOwnership(preferredPanelId: terminalPanel.id)
 
         // Create initial tab in bonsplit and store the mapping
         var initialTabId: TabID?
@@ -2204,6 +2297,42 @@ final class Workspace: Identifiable, ObservableObject {
         return nil
     }
 
+    private func makeTerminalPanel(
+        context: ghostty_surface_context_e,
+        configTemplate: ghostty_surface_config_s?,
+        workingDirectory: String?,
+        additionalEnvironment: [String: String] = [:],
+        launchMode: TerminalLaunchMode
+    ) -> TerminalPanel {
+        let terminalPanel = TerminalPanel(
+            workspaceId: id,
+            context: context,
+            configTemplate: configTemplate,
+            workingDirectory: workingDirectory,
+            additionalEnvironment: additionalEnvironment,
+            portOrdinal: portOrdinal
+        )
+        configureNewTerminalPanel(terminalPanel, launchMode: launchMode)
+        panels[terminalPanel.id] = terminalPanel
+        panelTitles[terminalPanel.id] = terminalPanel.displayTitle
+        seedTerminalInheritanceFontPoints(panelId: terminalPanel.id, configTemplate: configTemplate)
+        _ = normalizeRootTerminalOwnership(
+            preferredPanelId: launchMode == .workspaceRootManagedSession ? terminalPanel.id : nil
+        )
+        return terminalPanel
+    }
+
+    private func discardCreatedTerminalPanel(_ panelId: UUID) {
+        panels.removeValue(forKey: panelId)
+        terminalLaunchModeByPanelId.removeValue(forKey: panelId)
+        panelTitles.removeValue(forKey: panelId)
+        terminalInheritanceFontPointsByPanelId.removeValue(forKey: panelId)
+        if rootTerminalPanelID == panelId {
+            rootTerminalPanelID = nil
+            _ = normalizeRootTerminalOwnership()
+        }
+    }
+
     /// Create a new split with a terminal panel
     @discardableResult
     func newTerminalSplit(
@@ -2230,25 +2359,19 @@ final class Workspace: Identifiable, ObservableObject {
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT
         )
 
-        let splitWorkingDirectory = preferredNewTerminalWorkingDirectory()
+        let splitWorkingDirectory = resolvedWorkspaceDefaultTerminalWorkingDirectory()
 #if DEBUG
         dlog(
             "split.cwd panelId=\(panelId.uuidString.prefix(5)) defaultDir=\(defaultTerminalWorkingDirectory ?? "nil") panelDir=\(panelDirectories[panelId] ?? "nil") requestedDir=\(terminalPanel(for: panelId)?.requestedWorkingDirectory ?? "nil") currentDir=\(currentDirectory) resolved=\(splitWorkingDirectory ?? "nil")"
         )
 #endif
 
-        // Create the new terminal panel.
-        let newPanel = TerminalPanel(
-            workspaceId: id,
+        let newPanel = makeTerminalPanel(
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
             configTemplate: inheritedConfig,
             workingDirectory: splitWorkingDirectory,
-            portOrdinal: portOrdinal
+            launchMode: .independentPersistent
         )
-        configureNewTerminalPanel(newPanel, launchMode: .independentPersistent)
-        panels[newPanel.id] = newPanel
-        panelTitles[newPanel.id] = newPanel.displayTitle
-        seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
 
         // Pre-generate the bonsplit tab ID so we can install the panel mapping before bonsplit
         // mutates layout state (avoids transient "Empty Panel" flashes during split).
@@ -2270,10 +2393,8 @@ final class Workspace: Identifiable, ObservableObject {
         isProgrammaticSplit = true
         defer { isProgrammaticSplit = false }
         guard bonsplitController.splitPane(paneId, orientation: orientation, withTab: newTab, insertFirst: insertFirst) != nil else {
-            panels.removeValue(forKey: newPanel.id)
-            panelTitles.removeValue(forKey: newPanel.id)
+            discardCreatedTerminalPanel(newPanel.id)
             surfaceIdToPanelId.removeValue(forKey: newTab.id)
-            terminalInheritanceFontPointsByPanelId.removeValue(forKey: newPanel.id)
             return nil
         }
 
@@ -2322,22 +2443,16 @@ final class Workspace: Identifiable, ObservableObject {
         )
         let resolvedWorkingDirectory = {
             let trimmedWorkingDirectory = workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return trimmedWorkingDirectory.isEmpty ? preferredNewTerminalWorkingDirectory() : trimmedWorkingDirectory
+            return trimmedWorkingDirectory.isEmpty ? resolvedWorkspaceDefaultTerminalWorkingDirectory() : trimmedWorkingDirectory
         }()
 
-        // Create new terminal panel
-        let newPanel = TerminalPanel(
-            workspaceId: id,
+        let newPanel = makeTerminalPanel(
             context: surfaceContext,
             configTemplate: inheritedConfig,
             workingDirectory: resolvedWorkingDirectory,
             additionalEnvironment: startupEnvironment,
-            portOrdinal: portOrdinal
+            launchMode: launchMode
         )
-        configureNewTerminalPanel(newPanel, launchMode: launchMode)
-        panels[newPanel.id] = newPanel
-        panelTitles[newPanel.id] = newPanel.displayTitle
-        seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
 
         // Create tab in bonsplit
         guard let newTabId = bonsplitController.createTab(
@@ -2349,9 +2464,7 @@ final class Workspace: Identifiable, ObservableObject {
             select: shouldFocusNewTab,
             inPane: paneId
         ) else {
-            panels.removeValue(forKey: newPanel.id)
-            panelTitles.removeValue(forKey: newPanel.id)
-            terminalInheritanceFontPointsByPanelId.removeValue(forKey: newPanel.id)
+            discardCreatedTerminalPanel(newPanel.id)
             return nil
         }
 
@@ -3123,18 +3236,21 @@ final class Workspace: Identifiable, ObservableObject {
 #endif
             return nil
         }
+        _ = normalizeRootTerminalOwnership()
 
         panels[detached.panelId] = detached.panel
-        if let terminalLaunchMode = detached.terminalLaunchMode {
-            terminalLaunchModeByPanelId[detached.panelId] = terminalLaunchMode
-        } else {
-            terminalLaunchModeByPanelId.removeValue(forKey: detached.panelId)
-        }
         if let terminalPanel = detached.panel as? TerminalPanel {
             terminalPanel.updateWorkspaceId(id)
+            configureAttachedTerminalPanel(
+                terminalPanel,
+                requestedLaunchMode: detached.terminalLaunchMode
+            )
         } else if let browserPanel = detached.panel as? BrowserPanel {
+            terminalLaunchModeByPanelId.removeValue(forKey: detached.panelId)
             browserPanel.updateWorkspaceId(id)
             installBrowserPanelSubscription(browserPanel)
+        } else {
+            terminalLaunchModeByPanelId.removeValue(forKey: detached.panelId)
         }
 
         if let directory = detached.directory {
@@ -3179,6 +3295,10 @@ final class Workspace: Identifiable, ObservableObject {
             manualUnreadPanelIds.remove(detached.panelId)
             manualUnreadMarkedAt.removeValue(forKey: detached.panelId)
             panelSubscriptions.removeValue(forKey: detached.panelId)
+            if rootTerminalPanelID == detached.panelId {
+                rootTerminalPanelID = nil
+                _ = normalizeRootTerminalOwnership()
+            }
 #if DEBUG
             dlog(
                 "split.attach.fail ws=\(id.uuidString.prefix(5)) panel=\(detached.panelId.uuidString.prefix(5)) " +
@@ -3639,17 +3759,12 @@ final class Workspace: Identifiable, ObservableObject {
             inPane: bonsplitController.focusedPaneId,
             context: GHOSTTY_SURFACE_CONTEXT_TAB
         )
-        let newPanel = TerminalPanel(
-            workspaceId: id,
+        let newPanel = makeTerminalPanel(
             context: GHOSTTY_SURFACE_CONTEXT_TAB,
             configTemplate: inheritedConfig,
-            workingDirectory: preferredNewTerminalWorkingDirectory(),
-            portOrdinal: portOrdinal
+            workingDirectory: resolvedWorkspaceDefaultTerminalWorkingDirectory(),
+            launchMode: .workspaceRootManagedSession
         )
-        configureNewTerminalPanel(newPanel, launchMode: .workspaceRootManagedSession)
-        panels[newPanel.id] = newPanel
-        panelTitles[newPanel.id] = newPanel.displayTitle
-        seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
 
         // Create tab in bonsplit
         if let newTabId = bonsplitController.createTab(
@@ -3665,7 +3780,7 @@ final class Workspace: Identifiable, ObservableObject {
         return newPanel
     }
 
-    private func preferredNewTerminalWorkingDirectory() -> String? {
+    private func resolvedWorkspaceDefaultTerminalWorkingDirectory() -> String? {
         if let defaultTerminalWorkingDirectory {
             return defaultTerminalWorkingDirectory
         }
@@ -4725,6 +4840,51 @@ extension Workspace: BonsplitDelegate {
         pendingNonFocusSplitFocusReassert = nil
     }
 
+    private func removePanelState(
+        panelId: UUID,
+        tabId: TabID? = nil,
+        closePanel: Bool,
+        notifyTerminalClosure: Bool
+    ) {
+        if closePanel {
+            panels[panelId]?.close()
+        }
+        if notifyTerminalClosure,
+           let launchMode = terminalLaunchModeByPanelId[panelId] {
+            onDidCloseTerminalPanel?(self, panelId, launchMode)
+        }
+
+        panels.removeValue(forKey: panelId)
+        terminalLaunchModeByPanelId.removeValue(forKey: panelId)
+        if let tabId {
+            surfaceIdToPanelId.removeValue(forKey: tabId)
+        } else {
+            surfaceIdToPanelId = surfaceIdToPanelId.filter { $0.value != panelId }
+        }
+        panelDirectories.removeValue(forKey: panelId)
+        panelGitBranches.removeValue(forKey: panelId)
+        panelPullRequests.removeValue(forKey: panelId)
+        panelTitles.removeValue(forKey: panelId)
+        panelCustomTitles.removeValue(forKey: panelId)
+        pinnedPanelIds.remove(panelId)
+        manualUnreadPanelIds.remove(panelId)
+        manualUnreadMarkedAt.removeValue(forKey: panelId)
+        panelSubscriptions.removeValue(forKey: panelId)
+        panelShellActivityStates.removeValue(forKey: panelId)
+        surfaceTTYNames.removeValue(forKey: panelId)
+        surfaceListeningPorts.removeValue(forKey: panelId)
+        restoredTerminalScrollbackByPanelId.removeValue(forKey: panelId)
+        PortScanner.shared.unregisterPanel(workspaceId: id, panelId: panelId)
+        terminalInheritanceFontPointsByPanelId.removeValue(forKey: panelId)
+        if lastTerminalConfigInheritancePanelId == panelId {
+            lastTerminalConfigInheritancePanelId = nil
+        }
+        if rootTerminalPanelID == panelId {
+            rootTerminalPanelID = nil
+        }
+        AppDelegate.shared?.notificationStore?.clearNotifications(forTabId: id, surfaceId: panelId)
+    }
+
     func splitTabBar(_ controller: BonsplitController, shouldCloseTab tab: Bonsplit.Tab, inPane pane: PaneID) -> Bool {
         func recordPostCloseSelection() {
             let tabs = controller.tabs(inPane: pane)
@@ -4865,33 +5025,15 @@ extension Workspace: BonsplitDelegate {
             if let closedBrowserRestoreSnapshot {
                 onClosedBrowserPanel?(closedBrowserRestoreSnapshot)
             }
-            panel?.close()
-            if let launchMode = terminalLaunchModeByPanelId[panelId] {
-                onDidCloseTerminalPanel?(self, panelId, launchMode)
-            }
         }
-
-        panels.removeValue(forKey: panelId)
-        terminalLaunchModeByPanelId.removeValue(forKey: panelId)
-        surfaceIdToPanelId.removeValue(forKey: tabId)
-        panelDirectories.removeValue(forKey: panelId)
-        panelGitBranches.removeValue(forKey: panelId)
-        panelPullRequests.removeValue(forKey: panelId)
-        panelTitles.removeValue(forKey: panelId)
-        panelCustomTitles.removeValue(forKey: panelId)
-        pinnedPanelIds.remove(panelId)
-        manualUnreadPanelIds.remove(panelId)
-        manualUnreadMarkedAt.removeValue(forKey: panelId)
-        panelSubscriptions.removeValue(forKey: panelId)
-        panelShellActivityStates.removeValue(forKey: panelId)
-        surfaceTTYNames.removeValue(forKey: panelId)
-        restoredTerminalScrollbackByPanelId.removeValue(forKey: panelId)
-        PortScanner.shared.unregisterPanel(workspaceId: id, panelId: panelId)
-        terminalInheritanceFontPointsByPanelId.removeValue(forKey: panelId)
-        if lastTerminalConfigInheritancePanelId == panelId {
-            lastTerminalConfigInheritancePanelId = nil
-        }
-        AppDelegate.shared?.notificationStore?.clearNotifications(forTabId: id, surfaceId: panelId)
+        removePanelState(
+            panelId: panelId,
+            tabId: tabId,
+            closePanel: !isDetaching,
+            notifyTerminalClosure: !isDetaching
+        )
+        recomputeListeningPorts()
+        _ = normalizeRootTerminalOwnership()
 
         // Keep the workspace invariant for normal close paths.
         // Detach/move flows intentionally allow a temporary empty workspace so AppDelegate can
@@ -5053,29 +5195,14 @@ extension Workspace: BonsplitDelegate {
                     "panel=\(panelId.uuidString.prefix(5)) \(debugPanelLifecycleState(panelId: panelId, panel: panels[panelId]))"
                 )
 #endif
-                panels[panelId]?.close()
-                if let launchMode = terminalLaunchModeByPanelId[panelId] {
-                    onDidCloseTerminalPanel?(self, panelId, launchMode)
-                }
-                panels.removeValue(forKey: panelId)
-                terminalLaunchModeByPanelId.removeValue(forKey: panelId)
-                panelDirectories.removeValue(forKey: panelId)
-                panelGitBranches.removeValue(forKey: panelId)
-                panelPullRequests.removeValue(forKey: panelId)
-                panelTitles.removeValue(forKey: panelId)
-                panelCustomTitles.removeValue(forKey: panelId)
-                pinnedPanelIds.remove(panelId)
-                manualUnreadPanelIds.remove(panelId)
-                panelSubscriptions.removeValue(forKey: panelId)
-                panelShellActivityStates.removeValue(forKey: panelId)
-                surfaceTTYNames.removeValue(forKey: panelId)
-                surfaceListeningPorts.removeValue(forKey: panelId)
-                restoredTerminalScrollbackByPanelId.removeValue(forKey: panelId)
-                PortScanner.shared.unregisterPanel(workspaceId: id, panelId: panelId)
+                removePanelState(
+                    panelId: panelId,
+                    closePanel: true,
+                    notifyTerminalClosure: true
+                )
             }
 
-            let closedSet = Set(closedPanelIds)
-            surfaceIdToPanelId = surfaceIdToPanelId.filter { !closedSet.contains($0.value) }
+            _ = normalizeRootTerminalOwnership()
             recomputeListeningPorts()
 
             if let focusedPane = bonsplitController.focusedPaneId,
@@ -5200,16 +5327,12 @@ extension Workspace: BonsplitDelegate {
                         context: GHOSTTY_SURFACE_CONTEXT_SPLIT
                     )
 
-                    let replacementPanel = TerminalPanel(
-                        workspaceId: id,
+                    let replacementPanel = makeTerminalPanel(
                         context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
                         configTemplate: inheritedConfig,
-                        portOrdinal: portOrdinal
+                        workingDirectory: nil,
+                        launchMode: .independentPersistent
                     )
-                    configureNewTerminalPanel(replacementPanel, launchMode: .independentPersistent)
-                    panels[replacementPanel.id] = replacementPanel
-                    panelTitles[replacementPanel.id] = replacementPanel.displayTitle
-                    seedTerminalInheritanceFontPoints(panelId: replacementPanel.id, configTemplate: inheritedConfig)
                     surfaceIdToPanelId[replacementTab.id] = replacementPanel.id
 
                     bonsplitController.updateTab(
@@ -5268,16 +5391,12 @@ extension Workspace: BonsplitDelegate {
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT
         )
 
-        let newPanel = TerminalPanel(
-            workspaceId: id,
+        let newPanel = makeTerminalPanel(
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
             configTemplate: inheritedConfig,
-            portOrdinal: portOrdinal
+            workingDirectory: nil,
+            launchMode: .independentPersistent
         )
-        configureNewTerminalPanel(newPanel, launchMode: .independentPersistent)
-        panels[newPanel.id] = newPanel
-        panelTitles[newPanel.id] = newPanel.displayTitle
-        seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
 
         guard let newTabId = bonsplitController.createTab(
             title: newPanel.displayTitle,
@@ -5287,9 +5406,7 @@ extension Workspace: BonsplitDelegate {
             isPinned: false,
             inPane: newPane
         ) else {
-            panels.removeValue(forKey: newPanel.id)
-            panelTitles.removeValue(forKey: newPanel.id)
-            terminalInheritanceFontPointsByPanelId.removeValue(forKey: newPanel.id)
+            discardCreatedTerminalPanel(newPanel.id)
             return
         }
 

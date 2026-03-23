@@ -69,6 +69,10 @@ private func cmuxScalarHex(_ value: String?) -> String {
         .map { String(format: "%04X", $0.value) }
         .joined(separator: ",")
 }
+
+private func cmuxTabManager(for tabId: UUID) -> TabManager? {
+    AppDelegate.shared?.tabManagerFor(tabId: tabId) ?? AppDelegate.shared?.tabManager
+}
 #endif
 
 private enum GhosttyPasteboardHelper {
@@ -2073,14 +2077,12 @@ class GhosttyApp {
                 return false
             }
             return performOnMain {
-                guard let manager = AppDelegate.shared?.tabManagerFor(tabId: tabId)
-                        ?? AppDelegate.shared?.tabManager else {
+                guard let manager = cmuxTabManager(for: tabId) else {
                     return false
                 }
                 if manager.selectedTabId != tabId {
                     manager.selectedTabId = tabId
                 }
-                manager.selectedWorkspace?.clearSplitZoom()
                 manager.newSurface()
                 return true
             }
@@ -2090,8 +2092,7 @@ class GhosttyApp {
             }
             let target = Int(action.action.goto_tab.rawValue)
             return performOnMain {
-                guard let manager = AppDelegate.shared?.tabManagerFor(tabId: tabId)
-                        ?? AppDelegate.shared?.tabManager else {
+                guard let manager = cmuxTabManager(for: tabId) else {
                     return false
                 }
                 if manager.selectedTabId != tabId {

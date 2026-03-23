@@ -393,6 +393,128 @@ struct CmuxHostStoreLaunchTests {
     }
 
     @Test
+    func newTerminalTabsAndSplitsUseCardWorktreeAsDefaultWorkingDirectory() throws {
+        let appDelegate = AppDelegate()
+        let tempDirectory = try makeTemporaryDirectory()
+        let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path)
+        let hostStore = makeHostStore(boardStore: boardStore)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        hostStore.registerMainWindow(window)
+        defer {
+            window.close()
+            try? FileManager.default.removeItem(at: tempDirectory)
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let rootPanel = try #require(workspace.focusedTerminalPanel)
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        _ = try attachTerminalPanel(rootPanel, to: window)
+
+        let newTab = try #require(workspace.newTerminalSurface(inPane: paneId, focus: false))
+        let splitPanel = try #require(
+            workspace.newTerminalSplit(from: rootPanel.id, orientation: .horizontal, focus: false)
+        )
+
+        #expect(rootPanel.requestedWorkingDirectory == tempDirectory.path)
+        #expect(newTab.requestedWorkingDirectory == tempDirectory.path)
+        #expect(splitPanel.requestedWorkingDirectory == tempDirectory.path)
+    }
+
+    @Test
+    func newTerminalTabsAndSplitsFallbackToBoardRepositoryWhenWorktreeIsMissing() throws {
+        let appDelegate = AppDelegate()
+        let repositoryPath = "/tmp/board-repository-fallback"
+        let card = Card(title: "cc-42", column: .todo, orderIndex: 0, agent: .claude, worktreePath: nil)
+        let board = Board(
+            name: "Workspace Ownership",
+            cards: [card],
+            repositoryPath: repositoryPath,
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = card.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        hostStore.registerMainWindow(window)
+        defer {
+            window.close()
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let rootPanel = try #require(workspace.focusedTerminalPanel)
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        _ = try attachTerminalPanel(rootPanel, to: window)
+
+        let newTab = try #require(workspace.newTerminalSurface(inPane: paneId, focus: false))
+        let splitPanel = try #require(
+            workspace.newTerminalSplit(from: rootPanel.id, orientation: .horizontal, focus: false)
+        )
+
+        #expect(rootPanel.requestedWorkingDirectory == repositoryPath)
+        #expect(newTab.requestedWorkingDirectory == repositoryPath)
+        #expect(splitPanel.requestedWorkingDirectory == repositoryPath)
+    }
+
+    @Test
+    func closingIndependentTerminalTabCleansUpPanelSessionArtifacts() async throws {
+        let appDelegate = AppDelegate()
+        let tempDirectory = try makeTemporaryDirectory()
+        let (boardStore, board, card) = makeBoardFixture(agent: .claude, worktreePath: tempDirectory.path)
+        let hostStore = makeHostStore(boardStore: boardStore)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        hostStore.registerMainWindow(window)
+        defer {
+            window.close()
+            try? FileManager.default.removeItem(at: tempDirectory)
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let rootPanel = try #require(workspace.focusedTerminalPanel)
+        let paneId = try #require(workspace.bonsplitController.focusedPaneId)
+        _ = try attachTerminalPanel(rootPanel, to: window)
+
+        let closingPanel = try #require(workspace.newTerminalSurface(inPane: paneId, focus: true))
+        workspace.updatePanelShellActivityState(panelId: closingPanel.id, state: .promptIdle)
+        let attachCommand = try ZellijSessionManager.shared.attachCommand(forPanelId: closingPanel.id)
+        let tabId = try #require(workspace.surfaceIdFromPanelId(closingPanel.id))
+
+        #expect(workspace.bonsplitController.closeTab(tabId))
+
+        try await waitUntil {
+            !ZellijSessionManager.shared.hasManagedPanelSession(closingPanel.id) &&
+            !FileManager.default.fileExists(atPath: attachCommand)
+        }
+
+        #expect(workspace.panels[closingPanel.id] == nil)
+        #expect((try? ZellijSessionManager.shared.attachCommand(forPanelId: closingPanel.id)) == nil)
+    }
+
+    @Test
     func additionalTerminalPanelsLaunchSelectedAgentCommand() throws {
         let appDelegate = AppDelegate()
         let tempDirectory = try makeTemporaryDirectory()

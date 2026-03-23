@@ -7910,24 +7910,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return cmuxOwningGhosttyView(for: responder)
     }
 
-    private func matchesTerminalOwnedHostShortcut(event: NSEvent) -> Bool {
+    private enum TerminalShortcutRoute: Equatable {
+        case nextSurface
+        case prevSurface
+        case newSurface
+        case splitRight
+        case splitDown
+        case toggleSplitZoom
+        case focusLeft
+        case focusRight
+        case focusUp
+        case focusDown
+        case closeCurrentPanel
+    }
+
+    private func terminalShortcutRoute(for event: NSEvent) -> TerminalShortcutRoute? {
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .nextSurface)) {
-            return true
+            return .nextSurface
         }
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .prevSurface)) {
-            return true
+            return .prevSurface
         }
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .newSurface)) {
-            return true
+            return .newSurface
         }
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .splitRight)) {
-            return true
+            return .splitRight
         }
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .splitDown)) {
-            return true
+            return .splitDown
         }
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .toggleSplitZoom)) {
-            return true
+            return .toggleSplitZoom
         }
         if matchDirectionalShortcut(
             event: event,
@@ -7935,7 +7949,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             arrowGlyph: "←",
             arrowKeyCode: 123
         ) {
-            return true
+            return .focusLeft
         }
         if matchDirectionalShortcut(
             event: event,
@@ -7943,7 +7957,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             arrowGlyph: "→",
             arrowKeyCode: 124
         ) {
-            return true
+            return .focusRight
         }
         if matchDirectionalShortcut(
             event: event,
@@ -7951,7 +7965,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             arrowGlyph: "↑",
             arrowKeyCode: 126
         ) {
-            return true
+            return .focusUp
         }
         if matchDirectionalShortcut(
             event: event,
@@ -7959,12 +7973,106 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             arrowGlyph: "↓",
             arrowKeyCode: 125
         ) {
-            return true
+            return .focusDown
         }
-        return matchShortcut(
+        if matchShortcut(
             event: event,
             shortcut: StoredShortcut(key: "w", command: true, shift: false, option: false, control: false)
-        )
+        ) {
+            return .closeCurrentPanel
+        }
+        return nil
+    }
+
+    @discardableResult
+    private func handleTerminalShortcutRoute(_ route: TerminalShortcutRoute, event: NSEvent) -> Bool {
+        switch route {
+        case .nextSurface:
+            tabManager?.selectNextSurface()
+            return true
+        case .prevSurface:
+            tabManager?.selectPreviousSurface()
+            return true
+        case .newSurface:
+            tabManager?.newSurface()
+            return true
+        case .splitRight:
+#if DEBUG
+            dlog("shortcut.action name=splitRight \(debugShortcutRouteSnapshot(event: event))")
+#endif
+            if shouldSuppressSplitShortcutForTransientTerminalFocusState(direction: .right) {
+                return true
+            }
+            _ = performSplitShortcut(direction: .right)
+            return true
+        case .splitDown:
+#if DEBUG
+            dlog("shortcut.action name=splitDown \(debugShortcutRouteSnapshot(event: event))")
+#endif
+            if shouldSuppressSplitShortcutForTransientTerminalFocusState(direction: .down) {
+                return true
+            }
+            _ = performSplitShortcut(direction: .down)
+            return true
+        case .toggleSplitZoom:
+            _ = tabManager?.toggleFocusedSplitZoom()
+#if DEBUG
+            recordGotoSplitZoomIfNeeded()
+#endif
+            return true
+        case .focusLeft:
+            tabManager?.movePaneFocus(direction: .left)
+#if DEBUG
+            recordGotoSplitMoveIfNeeded(direction: .left)
+#endif
+            return true
+        case .focusRight:
+            tabManager?.movePaneFocus(direction: .right)
+#if DEBUG
+            recordGotoSplitMoveIfNeeded(direction: .right)
+#endif
+            return true
+        case .focusUp:
+            tabManager?.movePaneFocus(direction: .up)
+#if DEBUG
+            recordGotoSplitMoveIfNeeded(direction: .up)
+#endif
+            return true
+        case .focusDown:
+            tabManager?.movePaneFocus(direction: .down)
+#if DEBUG
+            recordGotoSplitMoveIfNeeded(direction: .down)
+#endif
+            return true
+        case .closeCurrentPanel:
+            if let targetWindow = event.window ?? NSApp.keyWindow ?? NSApp.mainWindow,
+               targetWindow.identifier?.rawValue == "cmux.settings" {
+                targetWindow.performClose(nil)
+                return true
+            }
+
+            let responder = event.window?.firstResponder
+                ?? NSApp.keyWindow?.firstResponder
+                ?? NSApp.mainWindow?.firstResponder
+            if let ghosttyView = cmuxOwningGhosttyView(for: responder),
+               let workspaceId = ghosttyView.tabId,
+               let panelId = ghosttyView.terminalSurface?.id,
+               let manager = tabManagerFor(tabId: workspaceId) ?? tabManager {
+#if DEBUG
+                dlog(
+                    "shortcut.cmdW route=ghostty workspace=\(workspaceId.uuidString.prefix(5)) " +
+                    "panel=\(panelId.uuidString.prefix(5)) selected=\(manager.selectedTabId?.uuidString.prefix(5) ?? "nil")"
+                )
+#endif
+                manager.closePanelWithConfirmation(tabId: workspaceId, surfaceId: panelId)
+            } else {
+#if DEBUG
+                dlog("shortcut.cmdW route=focusedPanelFallback")
+#endif
+                tabManager?.closeCurrentPanelWithConfirmation()
+            }
+            return true
+        }
     }
 
     private func handleQuitShortcutWarning() -> Bool {
@@ -8239,16 +8347,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
 
+        let terminalShortcutRoute = terminalShortcutRoute(for: event)
         if let ghosttyView = focusedGhosttyViewForShortcutEvent(event) {
-            if ghosttyView.bindingFlagsForKeyEquivalentEvent(
-                event,
-                requireCommandModifier: false
-            ) != nil {
+            if terminalShortcutRoute != .closeCurrentPanel,
+               ghosttyView.bindingFlagsForKeyEquivalentEvent(
+                    event,
+                    requireCommandModifier: false
+               ) != nil {
                 return false
             }
-            if matchesTerminalOwnedHostShortcut(event: event) {
-                return true
+            if terminalShortcutRoute == nil {
+                return false
             }
+        }
+
+        if let terminalShortcutRoute {
+            return handleTerminalShortcutRoute(terminalShortcutRoute, event: event)
         }
 
         // Guard against stale browserAddressBarFocusedPanelId after focus transitions
@@ -8491,16 +8605,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
-        // Surface navigation: Cmd+Shift+] / Cmd+Shift+[
-        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .nextSurface)) {
-            tabManager?.selectNextSurface()
-            return true
-        }
-        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .prevSurface)) {
-            tabManager?.selectPreviousSurface()
-            return true
-        }
-
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .toggleTerminalCopyMode)) {
             let handled = tabManager?.toggleFocusedTerminalCopyMode() ?? false
 #if DEBUG
@@ -8565,40 +8669,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
-        // Cmd+W must close the focused panel even if first-responder momentarily lags on a
-        // browser NSTextView during split focus transitions.
-        if matchShortcut(
-            event: event,
-            shortcut: StoredShortcut(key: "w", command: true, shift: false, option: false, control: false)
-        ) {
-            if let targetWindow = event.window ?? NSApp.keyWindow ?? NSApp.mainWindow,
-               targetWindow.identifier?.rawValue == "cmux.settings" {
-                targetWindow.performClose(nil)
-            } else {
-                let responder = event.window?.firstResponder
-                    ?? NSApp.keyWindow?.firstResponder
-                    ?? NSApp.mainWindow?.firstResponder
-                if let ghosttyView = cmuxOwningGhosttyView(for: responder),
-                   let workspaceId = ghosttyView.tabId,
-                   let panelId = ghosttyView.terminalSurface?.id,
-                   let manager = tabManagerFor(tabId: workspaceId) ?? tabManager {
-#if DEBUG
-                    dlog(
-                        "shortcut.cmdW route=ghostty workspace=\(workspaceId.uuidString.prefix(5)) " +
-                        "panel=\(panelId.uuidString.prefix(5)) selected=\(manager.selectedTabId?.uuidString.prefix(5) ?? "nil")"
-                    )
-#endif
-                    manager.closePanelWithConfirmation(tabId: workspaceId, surfaceId: panelId)
-                } else {
-#if DEBUG
-                    dlog("shortcut.cmdW route=focusedPanelFallback")
-#endif
-                    tabManager?.closeCurrentPanelWithConfirmation()
-                }
-            }
-            return true
-        }
-
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .closeWorkspace)) {
             tabManager?.closeCurrentWorkspaceWithConfirmation()
             return true
@@ -8649,87 +8719,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
 
-        // Pane focus navigation (defaults to Cmd+Option+Arrow, but can be customized to letter/number keys).
-        if matchDirectionalShortcut(
-            event: event,
-            shortcut: KeyboardShortcutSettings.shortcut(for: .focusLeft),
-            arrowGlyph: "←",
-            arrowKeyCode: 123
-        ) || (ghosttyGotoSplitLeftShortcut.map { matchDirectionalShortcut(event: event, shortcut: $0, arrowGlyph: "←", arrowKeyCode: 123) } ?? false) {
-            tabManager?.movePaneFocus(direction: .left)
-#if DEBUG
-            recordGotoSplitMoveIfNeeded(direction: .left)
-#endif
-            return true
-        }
-        if matchDirectionalShortcut(
-            event: event,
-            shortcut: KeyboardShortcutSettings.shortcut(for: .focusRight),
-            arrowGlyph: "→",
-            arrowKeyCode: 124
-        ) || (ghosttyGotoSplitRightShortcut.map { matchDirectionalShortcut(event: event, shortcut: $0, arrowGlyph: "→", arrowKeyCode: 124) } ?? false) {
-            tabManager?.movePaneFocus(direction: .right)
-#if DEBUG
-            recordGotoSplitMoveIfNeeded(direction: .right)
-#endif
-            return true
-        }
-        if matchDirectionalShortcut(
-            event: event,
-            shortcut: KeyboardShortcutSettings.shortcut(for: .focusUp),
-            arrowGlyph: "↑",
-            arrowKeyCode: 126
-        ) || (ghosttyGotoSplitUpShortcut.map { matchDirectionalShortcut(event: event, shortcut: $0, arrowGlyph: "↑", arrowKeyCode: 126) } ?? false) {
-            tabManager?.movePaneFocus(direction: .up)
-#if DEBUG
-            recordGotoSplitMoveIfNeeded(direction: .up)
-#endif
-            return true
-        }
-        if matchDirectionalShortcut(
-            event: event,
-            shortcut: KeyboardShortcutSettings.shortcut(for: .focusDown),
-            arrowGlyph: "↓",
-            arrowKeyCode: 125
-        ) || (ghosttyGotoSplitDownShortcut.map { matchDirectionalShortcut(event: event, shortcut: $0, arrowGlyph: "↓", arrowKeyCode: 125) } ?? false) {
-            tabManager?.movePaneFocus(direction: .down)
-#if DEBUG
-            recordGotoSplitMoveIfNeeded(direction: .down)
-#endif
-            return true
-        }
-
-        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .toggleSplitZoom)) {
-            _ = tabManager?.toggleFocusedSplitZoom()
-#if DEBUG
-            recordGotoSplitZoomIfNeeded()
-#endif
-            return true
-        }
-
-        // Split actions: Cmd+D / Cmd+Shift+D
-        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .splitRight)) {
-#if DEBUG
-            dlog("shortcut.action name=splitRight \(debugShortcutRouteSnapshot(event: event))")
-#endif
-            if shouldSuppressSplitShortcutForTransientTerminalFocusState(direction: .right) {
-                return true
-            }
-            _ = performSplitShortcut(direction: .right)
-            return true
-        }
-
-        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .splitDown)) {
-#if DEBUG
-            dlog("shortcut.action name=splitDown \(debugShortcutRouteSnapshot(event: event))")
-#endif
-            if shouldSuppressSplitShortcutForTransientTerminalFocusState(direction: .down) {
-                return true
-            }
-            _ = performSplitShortcut(direction: .down)
-            return true
-        }
-
         if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .splitBrowserRight)) {
 #if DEBUG
             dlog("shortcut.action name=splitBrowserRight \(debugShortcutRouteSnapshot(event: event))")
@@ -8743,22 +8732,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             dlog("shortcut.action name=splitBrowserDown \(debugShortcutRouteSnapshot(event: event))")
 #endif
             _ = performBrowserSplitShortcut(direction: .down)
-            return true
-        }
-
-        // Surface navigation (legacy Ctrl+Tab support)
-        if matchTabShortcut(event: event, shortcut: StoredShortcut(key: "\t", command: false, shift: false, option: false, control: true)) {
-            tabManager?.selectNextSurface()
-            return true
-        }
-        if matchTabShortcut(event: event, shortcut: StoredShortcut(key: "\t", command: false, shift: true, option: false, control: true)) {
-            tabManager?.selectPreviousSurface()
-            return true
-        }
-
-        // New surface: Cmd+T
-        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .newSurface)) {
-            tabManager?.newSurface()
             return true
         }
 
@@ -9192,7 +9165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
 
         let start = DispatchWorkItem { [weak self] in
-            self?.scheduleBrowserOmnibarSelectionRepeatTick()
+            Task { @MainActor [weak self] in
+                self?.scheduleBrowserOmnibarSelectionRepeatTick()
+            }
         }
         browserOmnibarRepeatStartWorkItem = start
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: start)
@@ -9219,7 +9194,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         dispatchBrowserOmnibarSelectionMove(delta: browserOmnibarRepeatDelta)
 
         let tick = DispatchWorkItem { [weak self] in
-            self?.scheduleBrowserOmnibarSelectionRepeatTick()
+            Task { @MainActor [weak self] in
+                self?.scheduleBrowserOmnibarSelectionRepeatTick()
+            }
         }
         browserOmnibarRepeatTickWorkItem = tick
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.055, execute: tick)

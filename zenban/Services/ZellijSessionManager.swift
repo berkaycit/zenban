@@ -45,6 +45,16 @@ final class ZellijSessionManager {
         let workingDirectory: String?
     }
 
+    private enum SessionOwner: Hashable {
+        case workspaceRoot(UUID)
+        case panel(UUID)
+    }
+
+    private struct RegisteredSession {
+        var spec: SessionSpec
+        var descriptor: TerminalSessionDescriptor
+    }
+
     private struct BackgroundCreationTaskRecord {
         let id: UUID
         let task: Task<Void, Error>
@@ -81,11 +91,7 @@ final class ZellijSessionManager {
 
     private let fileManager = FileManager.default
     private let runner = ZellijProcessRunner()
-    private var sessionSpecByWorkspaceId: [UUID: SessionSpec] = [:]
-    private var descriptorByWorkspaceId: [UUID: TerminalSessionDescriptor] = [:]
-    private var panelSessionSpecByPanelId: [UUID: SessionSpec] = [:]
-    private var panelDescriptorByPanelId: [UUID: TerminalSessionDescriptor] = [:]
-    private var panelSessionIdsByWorkspaceId: [UUID: Set<UUID>] = [:]
+    private var sessionByOwner: [SessionOwner: RegisteredSession] = [:]
     private var backgroundCreationTasks: [UUID: BackgroundCreationTaskRecord] = [:]
     private var startupCleanupTask: Task<Void, Never>?
     private var appTerminationShutdownTask: Task<ShutdownResult, Never>?
@@ -113,17 +119,11 @@ final class ZellijSessionManager {
             workingDirectory: normalizedDirectory(workingDirectory),
             sessionName: Self.sessionName(for: workspaceId)
         )
-        let result = try registerSession(
+        return try registerSession(
+            owner: .workspaceRoot(workspaceId),
             spec: spec,
-            currentDescriptor: descriptorByWorkspaceId[workspaceId]
+            currentDescriptor: rootRegistration(for: workspaceId)?.descriptor
         )
-        sessionSpecByWorkspaceId[workspaceId] = spec
-        descriptorByWorkspaceId[workspaceId] = TerminalSessionDescriptor(
-            attachCommand: result.attachCommand,
-            startupEnvironment: result.startupEnvironment,
-            workingDirectory: normalizedDirectory(workingDirectory)
-        )
-        return result
     }
 
     func reassignWorkspacePanel(
@@ -131,26 +131,23 @@ final class ZellijSessionManager {
         panelId: UUID,
         portOrdinal: Int
     ) throws -> RegistrationResult {
-        guard var spec = sessionSpecByWorkspaceId[workspaceId] else {
+        guard var registration = rootRegistration(for: workspaceId) else {
             throw SessionError.missingSessionSpec
         }
 
-        spec = SessionSpec(
-            workspaceId: spec.workspaceId,
+        let currentDescriptor = registration.descriptor
+        registration.spec = SessionSpec(
+            workspaceId: registration.spec.workspaceId,
             panelId: panelId,
             portOrdinal: portOrdinal,
-            workingDirectory: spec.workingDirectory,
-            sessionName: spec.sessionName
+            workingDirectory: registration.spec.workingDirectory,
+            sessionName: registration.spec.sessionName
         )
-        sessionSpecByWorkspaceId[workspaceId] = spec
+        sessionByOwner[.workspaceRoot(workspaceId)] = registration
         let result = try registerSession(
-            spec: spec,
-            currentDescriptor: descriptorByWorkspaceId[workspaceId]
-        )
-        descriptorByWorkspaceId[workspaceId] = TerminalSessionDescriptor(
-            attachCommand: result.attachCommand,
-            startupEnvironment: result.startupEnvironment,
-            workingDirectory: spec.workingDirectory
+            owner: .workspaceRoot(workspaceId),
+            spec: registration.spec,
+            currentDescriptor: currentDescriptor
         )
         return result
     }
@@ -169,66 +166,57 @@ final class ZellijSessionManager {
             workingDirectory: normalizedWorkingDirectory,
             sessionName: Self.panelSessionName(for: panelId)
         )
-        let result = try registerSession(
+        return try registerSession(
+            owner: .panel(panelId),
             spec: spec,
-            currentDescriptor: panelDescriptorByPanelId[panelId]
+            currentDescriptor: panelRegistration(for: panelId)?.descriptor
         )
-        panelSessionSpecByPanelId[panelId] = spec
-        panelDescriptorByPanelId[panelId] = TerminalSessionDescriptor(
-            attachCommand: result.attachCommand,
-            startupEnvironment: result.startupEnvironment,
-            workingDirectory: normalizedWorkingDirectory
-        )
-        panelSessionIdsByWorkspaceId[workspaceId, default: []].insert(panelId)
-        return result
     }
 
     func sessionPanelId(for workspaceId: UUID) -> UUID? {
-        sessionSpecByWorkspaceId[workspaceId]?.panelId
+        rootRegistration(for: workspaceId)?.spec.panelId
     }
 
     func isManagedWorkspace(_ workspaceId: UUID) -> Bool {
-        sessionSpecByWorkspaceId[workspaceId] != nil
+        rootRegistration(for: workspaceId) != nil
     }
 
     func hasManagedPanelSession(_ panelId: UUID) -> Bool {
-        panelSessionSpecByPanelId[panelId] != nil
+        panelRegistration(for: panelId) != nil
     }
 
     func attachCommand(for workspaceId: UUID) throws -> String {
-        guard let spec = sessionSpecByWorkspaceId[workspaceId],
-              let descriptor = descriptorByWorkspaceId[workspaceId] else {
+        guard let registration = rootRegistration(for: workspaceId) else {
             throw SessionError.missingSessionSpec
         }
-        if !fileManager.fileExists(atPath: descriptor.attachCommand) {
-            try writeAttachScript(for: spec, descriptor: descriptor)
+        if !fileManager.fileExists(atPath: registration.descriptor.attachCommand) {
+            try writeAttachScript(for: registration.spec, descriptor: registration.descriptor)
         }
-        return descriptor.attachCommand
+        return registration.descriptor.attachCommand
     }
 
     func startupEnvironment(for workspaceId: UUID) throws -> [String: String] {
-        guard let descriptor = descriptorByWorkspaceId[workspaceId] else {
+        guard let registration = rootRegistration(for: workspaceId) else {
             throw SessionError.missingSessionSpec
         }
-        return descriptor.startupEnvironment
+        return registration.descriptor.startupEnvironment
     }
 
     func attachCommand(forPanelId panelId: UUID) throws -> String {
-        guard let spec = panelSessionSpecByPanelId[panelId],
-              let descriptor = panelDescriptorByPanelId[panelId] else {
+        guard let registration = panelRegistration(for: panelId) else {
             throw SessionLookupError.missingPanelSession
         }
-        if !fileManager.fileExists(atPath: descriptor.attachCommand) {
-            try writeAttachScript(for: spec, descriptor: descriptor)
+        if !fileManager.fileExists(atPath: registration.descriptor.attachCommand) {
+            try writeAttachScript(for: registration.spec, descriptor: registration.descriptor)
         }
-        return descriptor.attachCommand
+        return registration.descriptor.attachCommand
     }
 
     func startupEnvironment(forPanelId panelId: UUID) throws -> [String: String] {
-        guard let descriptor = panelDescriptorByPanelId[panelId] else {
+        guard let registration = panelRegistration(for: panelId) else {
             throw SessionLookupError.missingPanelSession
         }
-        return descriptor.startupEnvironment
+        return registration.descriptor.startupEnvironment
     }
 
     func queueLaunchRequest(
@@ -236,7 +224,7 @@ final class ZellijSessionManager {
         token: String,
         command: String
     ) throws {
-        guard let spec = sessionSpecByWorkspaceId[workspaceId] else {
+        guard let spec = rootRegistration(for: workspaceId)?.spec else {
             throw SessionError.missingSessionSpec
         }
         try writeLaunchRequest(token: token, command: command, for: spec)
@@ -247,26 +235,26 @@ final class ZellijSessionManager {
         token: String,
         command: String
     ) throws {
-        guard let spec = panelSessionSpecByPanelId[panelId] else {
+        guard let spec = panelRegistration(for: panelId)?.spec else {
             throw SessionLookupError.missingPanelSession
         }
         try writeLaunchRequest(token: token, command: command, for: spec)
     }
 
     func clearLaunchRequest(for workspaceId: UUID) {
-        guard let spec = sessionSpecByWorkspaceId[workspaceId] else { return }
+        guard let spec = rootRegistration(for: workspaceId)?.spec else { return }
         try? removeLaunchRequestFile(for: spec)
     }
 
     func clearLaunchRequest(forPanelId panelId: UUID) {
-        guard let spec = panelSessionSpecByPanelId[panelId] else { return }
+        guard let spec = panelRegistration(for: panelId)?.spec else { return }
         try? removeLaunchRequestFile(for: spec)
     }
 
     func prepareBackgroundSession(
         workspaceId: UUID
     ) async throws {
-        guard let spec = sessionSpecByWorkspaceId[workspaceId] else { return }
+        guard let spec = rootRegistration(for: workspaceId)?.spec else { return }
         await startupCleanupTask?.value
         if let task = backgroundCreationTasks[workspaceId]?.task {
             return try await task.value
@@ -309,36 +297,28 @@ final class ZellijSessionManager {
     }
 
     func killSession(for workspaceId: UUID) {
-        let spec = sessionSpecByWorkspaceId[workspaceId]
         cancelBackgroundCreationTask(for: workspaceId)
-        let panelSpecs = removePanelRegistrations(for: workspaceId)
-        removeRegistration(for: workspaceId)
-        guard let spec else { return }
-        for panelSpec in panelSpecs {
-            cleanupWorkspaceArtifacts(for: panelSpec, removeAttachScriptFile: true)
-            scheduleSessionDeletion(sessionName: panelSpec.sessionName)
-        }
-        cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
-        scheduleSessionDeletion(sessionName: spec.sessionName)
+        cleanupAndScheduleDeletion(
+            for: removeRegistrations(for: workspaceId),
+            removeAttachScriptFiles: true
+        )
     }
 
     func killRuntime(for workspaceId: UUID) {
-        guard let spec = sessionSpecByWorkspaceId[workspaceId] else { return }
         cancelBackgroundCreationTask(for: workspaceId)
-        let panelSpecs = panelSessionSpecs(for: workspaceId)
-        for panelSpec in panelSpecs {
-            cleanupWorkspaceArtifacts(for: panelSpec, removeAttachScriptFile: false)
-            scheduleSessionDeletion(sessionName: panelSpec.sessionName)
-        }
-        cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: false)
-        scheduleSessionDeletion(sessionName: spec.sessionName)
+        cleanupAndScheduleDeletion(
+            for: sessionSpecs(for: workspaceId),
+            removeAttachScriptFiles: false
+        )
     }
 
     func killPanelSession(for panelId: UUID) {
-        guard let spec = panelSessionSpecByPanelId[panelId] else { return }
+        guard let registration = panelRegistration(for: panelId) else { return }
         removePanelRegistration(for: panelId)
-        cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
-        scheduleSessionDeletion(sessionName: spec.sessionName)
+        cleanupAndScheduleDeletion(
+            for: [registration.spec],
+            removeAttachScriptFiles: true
+        )
     }
 
     func killAllSessions() {
@@ -350,17 +330,10 @@ final class ZellijSessionManager {
         for workspaceId in Array(backgroundCreationTasks.keys) {
             cancelBackgroundCreationTask(for: workspaceId)
         }
-        for spec in sessionSpecByWorkspaceId.values {
+        for spec in sessionByOwner.values.map(\.spec) {
             cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
         }
-        for spec in panelSessionSpecByPanelId.values {
-            cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: true)
-        }
-        sessionSpecByWorkspaceId.removeAll(keepingCapacity: false)
-        descriptorByWorkspaceId.removeAll(keepingCapacity: false)
-        panelSessionSpecByPanelId.removeAll(keepingCapacity: false)
-        panelDescriptorByPanelId.removeAll(keepingCapacity: false)
-        panelSessionIdsByWorkspaceId.removeAll(keepingCapacity: false)
+        sessionByOwner.removeAll(keepingCapacity: false)
         Task { [runner] in
             do {
                 let configuration = try self.runnerConfiguration()
@@ -473,8 +446,10 @@ final class ZellijSessionManager {
 
     func forgetWorkspace(_ workspaceId: UUID) {
         cancelBackgroundCreationTask(for: workspaceId)
-        _ = removePanelRegistrations(for: workspaceId)
-        removeRegistration(for: workspaceId)
+        cleanupAndScheduleDeletion(
+            for: removeRegistrations(for: workspaceId),
+            removeAttachScriptFiles: true
+        )
     }
 
     private func startStartupCleanup() {
@@ -501,8 +476,9 @@ final class ZellijSessionManager {
     }
 
     private func registerSession(
+        owner: SessionOwner,
         spec: SessionSpec,
-        currentDescriptor: TerminalSessionDescriptor?
+        currentDescriptor: TerminalSessionDescriptor? = nil
     ) throws -> RegistrationResult {
         let descriptor = terminalSessionDescriptor(for: spec)
         let needsStartupRefresh =
@@ -512,6 +488,8 @@ final class ZellijSessionManager {
         if needsStartupRefresh {
             try writeAttachScript(for: spec, descriptor: descriptor)
         }
+
+        sessionByOwner[owner] = RegisteredSession(spec: spec, descriptor: descriptor)
 
         return RegistrationResult(
             attachCommand: descriptor.attachCommand,
@@ -627,37 +605,16 @@ final class ZellijSessionManager {
         try fileManager.removeItem(at: scriptURL)
     }
 
-    private func removeRegistration(for workspaceId: UUID) {
-        sessionSpecByWorkspaceId.removeValue(forKey: workspaceId)
-        descriptorByWorkspaceId.removeValue(forKey: workspaceId)
-    }
-
     private func removePanelRegistration(for panelId: UUID) {
-        if let spec = panelSessionSpecByPanelId.removeValue(forKey: panelId) {
-            panelSessionIdsByWorkspaceId[spec.workspaceId]?.remove(panelId)
-            if panelSessionIdsByWorkspaceId[spec.workspaceId]?.isEmpty == true {
-                panelSessionIdsByWorkspaceId.removeValue(forKey: spec.workspaceId)
+        guard let owner = sessionByOwner.keys.first(where: { owner in
+            if case .panel(let ownerPanelId) = owner {
+                return ownerPanelId == panelId
             }
+            return false
+        }) else {
+            return
         }
-        panelDescriptorByPanelId.removeValue(forKey: panelId)
-    }
-
-    private func removePanelRegistrations(for workspaceId: UUID) -> [SessionSpec] {
-        let panelIds = panelSessionIdsByWorkspaceId.removeValue(forKey: workspaceId) ?? []
-        var removedSpecs: [SessionSpec] = []
-        removedSpecs.reserveCapacity(panelIds.count)
-        for panelId in panelIds {
-            if let spec = panelSessionSpecByPanelId.removeValue(forKey: panelId) {
-                removedSpecs.append(spec)
-            }
-            panelDescriptorByPanelId.removeValue(forKey: panelId)
-        }
-        return removedSpecs
-    }
-
-    private func panelSessionSpecs(for workspaceId: UUID) -> [SessionSpec] {
-        let panelIds = panelSessionIdsByWorkspaceId[workspaceId] ?? []
-        return panelIds.compactMap { panelSessionSpecByPanelId[$0] }
+        sessionByOwner.removeValue(forKey: owner)
     }
 
     private func resetManagedSessionState(removeAttachScriptFiles: Bool) -> Set<String> {
@@ -667,29 +624,70 @@ final class ZellijSessionManager {
             cancelBackgroundCreationTask(for: workspaceId)
         }
         let knownSessionNames = knownSessionNames()
-        for spec in sessionSpecByWorkspaceId.values {
+        for spec in sessionByOwner.values.map(\.spec) {
             cleanupWorkspaceArtifacts(
                 for: spec,
                 removeAttachScriptFile: removeAttachScriptFiles
             )
         }
-        for spec in panelSessionSpecByPanelId.values {
-            cleanupWorkspaceArtifacts(
-                for: spec,
-                removeAttachScriptFile: removeAttachScriptFiles
-            )
-        }
-        sessionSpecByWorkspaceId.removeAll(keepingCapacity: false)
-        descriptorByWorkspaceId.removeAll(keepingCapacity: false)
-        panelSessionSpecByPanelId.removeAll(keepingCapacity: false)
-        panelDescriptorByPanelId.removeAll(keepingCapacity: false)
-        panelSessionIdsByWorkspaceId.removeAll(keepingCapacity: false)
+        sessionByOwner.removeAll(keepingCapacity: false)
         return knownSessionNames
     }
 
     private func knownSessionNames() -> Set<String> {
-        Set(sessionSpecByWorkspaceId.values.map(\.sessionName))
-            .union(panelSessionSpecByPanelId.values.map(\.sessionName))
+        Set(sessionByOwner.values.map(\.spec.sessionName))
+    }
+
+    private func rootRegistration(for workspaceId: UUID) -> RegisteredSession? {
+        sessionByOwner[.workspaceRoot(workspaceId)]
+    }
+
+    private func panelRegistration(for panelId: UUID) -> RegisteredSession? {
+        sessionByOwner.first { owner, _ in
+            if case .panel(let ownerPanelId) = owner {
+                return ownerPanelId == panelId
+            }
+            return false
+        }?.value
+    }
+
+    private func sessionSpecs(for workspaceId: UUID) -> [SessionSpec] {
+        sessionByOwner.compactMap { owner, registration in
+            switch owner {
+            case .workspaceRoot(let ownerWorkspaceId) where ownerWorkspaceId == workspaceId:
+                return registration.spec
+            case .panel where registration.spec.workspaceId == workspaceId:
+                return registration.spec
+            default:
+                return nil
+            }
+        }
+    }
+
+    private func removeRegistrations(for workspaceId: UUID) -> [SessionSpec] {
+        let owners = sessionByOwner.compactMap { owner, registration -> SessionOwner? in
+            switch owner {
+            case .workspaceRoot(let ownerWorkspaceId) where ownerWorkspaceId == workspaceId:
+                return owner
+            case .panel where registration.spec.workspaceId == workspaceId:
+                return owner
+            default:
+                return nil
+            }
+        }
+        return owners.compactMap { owner in
+            sessionByOwner.removeValue(forKey: owner)?.spec
+        }
+    }
+
+    private func cleanupAndScheduleDeletion(
+        for specs: [SessionSpec],
+        removeAttachScriptFiles: Bool
+    ) {
+        for spec in specs {
+            cleanupWorkspaceArtifacts(for: spec, removeAttachScriptFile: removeAttachScriptFiles)
+            scheduleSessionDeletion(sessionName: spec.sessionName)
+        }
     }
 
     private func cleanupWorkspaceArtifacts(for spec: SessionSpec, removeAttachScriptFile: Bool) {

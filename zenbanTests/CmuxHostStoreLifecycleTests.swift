@@ -631,6 +631,39 @@ struct CmuxHostStoreLifecycleTests {
     }
 
     @Test
+    func movingRootTerminalBetweenWorkspacesKeepsOneDeterministicRootPerWorkspace() throws {
+        let tabManager = TabManager()
+        let sourceWorkspace = tabManager.addWorkspace(
+            workingDirectory: "/tmp/source-root",
+            select: false
+        )
+        let destinationWorkspace = tabManager.addWorkspace(
+            workingDirectory: "/tmp/destination-root",
+            select: false
+        )
+
+        let originalSourceRoot = try #require(sourceWorkspace.workspaceRootTerminalPanel())
+        let remainingSourceTerminal = try #require(
+            sourceWorkspace.newTerminalSurfaceInFocusedPane(focus: false)
+        )
+        let originalDestinationRoot = try #require(destinationWorkspace.workspaceRootTerminalPanel())
+        let destinationPane = try #require(destinationWorkspace.bonsplitController.focusedPaneId)
+
+        let detached = try #require(sourceWorkspace.detachSurface(panelId: originalSourceRoot.id))
+        let attachedPanelId = try #require(
+            destinationWorkspace.attachDetachedSurface(
+                detached,
+                inPane: destinationPane,
+                focus: false
+            )
+        )
+
+        #expect(attachedPanelId == detached.panelId)
+        #expect(sourceWorkspace.workspaceRootTerminalPanel()?.id == remainingSourceTerminal.id)
+        #expect(destinationWorkspace.workspaceRootTerminalPanel()?.id == originalDestinationRoot.id)
+    }
+
+    @Test
     func hiddenWorkspaceDetachCancelsWhenReselectedAndDetachesWhenStillHidden() async throws {
         let appDelegate = AppDelegate()
         let sourceCard = Card(title: "cc-42", column: .todo, orderIndex: 0, agent: .claude, worktreePath: "/tmp/cc-42")
