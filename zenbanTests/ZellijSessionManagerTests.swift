@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import zenban
 
+@Suite(.serialized)
 @MainActor
 struct ZellijSessionManagerTests {
     private enum WaitError: Error {
