@@ -16,6 +16,7 @@ final class ZellijSessionManager {
 
     struct SessionSpec: Sendable {
         let workspaceId: UUID
+        let cardId: UUID?
         let panelId: UUID
         let portOrdinal: Int
         let workingDirectory: String?
@@ -95,6 +96,8 @@ final class ZellijSessionManager {
     private var backgroundCreationTasks: [UUID: BackgroundCreationTaskRecord] = [:]
     private var startupCleanupTask: Task<Void, Never>?
     private var appTerminationShutdownTask: Task<ShutdownResult, Never>?
+    private(set) var aliveSessionCardIDs: Set<UUID> = []
+    private var reconciliationTask: Task<Void, Never>?
 #if DEBUG
     private var prepareBackgroundSessionHookForTesting: (@Sendable (SessionSpec) async throws -> Void)?
     private var deleteSessionHookForTesting: (@Sendable (String) async throws -> Void)?
@@ -103,21 +106,23 @@ final class ZellijSessionManager {
 #endif
 
     private init() {
-        startStartupCleanup()
+        // Startup cleanup is now deferred to reconcileSessionsOnStartup()
     }
 
     func registerWorkspace(
         workspaceId: UUID,
+        cardId: UUID,
         panelId: UUID,
         portOrdinal: Int,
         workingDirectory: String?
     ) throws -> RegistrationResult {
         let spec = SessionSpec(
             workspaceId: workspaceId,
+            cardId: cardId,
             panelId: panelId,
             portOrdinal: portOrdinal,
             workingDirectory: normalizedDirectory(workingDirectory),
-            sessionName: Self.sessionName(for: workspaceId)
+            sessionName: Self.sessionName(forCardId: cardId)
         )
         return try registerSession(
             owner: .workspaceRoot(workspaceId),
@@ -138,6 +143,7 @@ final class ZellijSessionManager {
         let currentDescriptor = registration.descriptor
         registration.spec = SessionSpec(
             workspaceId: registration.spec.workspaceId,
+            cardId: registration.spec.cardId,
             panelId: panelId,
             portOrdinal: portOrdinal,
             workingDirectory: registration.spec.workingDirectory,
@@ -161,6 +167,7 @@ final class ZellijSessionManager {
         let normalizedWorkingDirectory = normalizedDirectory(workingDirectory)
         let spec = SessionSpec(
             workspaceId: workspaceId,
+            cardId: nil,
             panelId: panelId,
             portOrdinal: portOrdinal,
             workingDirectory: normalizedWorkingDirectory,
@@ -255,7 +262,28 @@ final class ZellijSessionManager {
         workspaceId: UUID
     ) async throws {
         guard let spec = rootRegistration(for: workspaceId)?.spec else { return }
-        await startupCleanupTask?.value
+        await reconciliationTask?.value
+
+        // If this card's session survived from previous run, skip creation
+        if let cardId = spec.cardId, aliveSessionCardIDs.contains(cardId) {
+            let configuration = try runnerConfiguration()
+            #if DEBUG
+            let sessions: [String]
+            if let sessionNamesHookForTesting {
+                sessions = try await sessionNamesHookForTesting()
+            } else {
+                sessions = try await runner.currentSessionNames(configuration: configuration)
+            }
+            #else
+            let sessions = try await runner.currentSessionNames(configuration: configuration)
+            #endif
+            if sessions.contains(spec.sessionName) {
+                aliveSessionCardIDs.remove(cardId)
+                return
+            }
+            aliveSessionCardIDs.remove(cardId)
+        }
+
         if let task = backgroundCreationTasks[workspaceId]?.task {
             return try await task.value
         }
@@ -444,12 +472,77 @@ final class ZellijSessionManager {
         return await task.value
     }
 
+    func detachAllSessionsForAppTermination() {
+        let _ = resetManagedSessionState(removeAttachScriptFiles: false)
+    }
+
     func forgetWorkspace(_ workspaceId: UUID) {
         cancelBackgroundCreationTask(for: workspaceId)
         cleanupAndScheduleDeletion(
             for: removeRegistrations(for: workspaceId),
             removeAttachScriptFiles: true
         )
+    }
+
+    func isSessionAlive(forCardId cardId: UUID) -> Bool {
+        aliveSessionCardIDs.contains(cardId)
+    }
+
+    func reconcileSessionsOnStartup(validCardIDs: Set<UUID>) async {
+        if let task = reconciliationTask {
+            await task.value
+            return
+        }
+
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            do {
+                let configuration = try self.runnerConfiguration()
+                #if DEBUG
+                let allSessions: [String]
+                if let sessionNamesHookForTesting {
+                    allSessions = try await sessionNamesHookForTesting()
+                } else {
+                    allSessions = try await self.runner.currentSessionNames(configuration: configuration)
+                }
+                #else
+                let allSessions = try await self.runner.currentSessionNames(configuration: configuration)
+                #endif
+
+                let managedSessions = allSessions.filter { $0.hasPrefix(Self.sessionPrefix) }
+                let panelPrefix = "\(Self.sessionPrefix)panel-"
+
+                var aliveCardIDs: Set<UUID> = []
+
+                for sessionName in managedSessions {
+                    // Panel sessions are always killed (ephemeral IDs)
+                    if sessionName.hasPrefix(panelPrefix) {
+                        self.scheduleSessionDeletion(sessionName: sessionName)
+                        continue
+                    }
+
+                    // Parse card UUID from session name: "zenban-ws-<uuid>"
+                    let uuidString = String(sessionName.dropFirst(Self.sessionPrefix.count))
+                    guard let cardId = UUID(uuidString: uuidString.uppercased()) else {
+                        self.scheduleSessionDeletion(sessionName: sessionName)
+                        continue
+                    }
+
+                    if validCardIDs.contains(cardId) {
+                        aliveCardIDs.insert(cardId)
+                    } else {
+                        // Orphaned session - card was deleted while app was closed
+                        self.scheduleSessionDeletion(sessionName: sessionName)
+                    }
+                }
+
+                self.aliveSessionCardIDs = aliveCardIDs
+            } catch {
+                NSLog("Failed to reconcile zellij sessions on startup: %@", String(describing: error))
+            }
+        }
+        reconciliationTask = task
+        await task.value
     }
 
     private func startStartupCleanup() {
@@ -811,8 +904,8 @@ final class ZellijSessionManager {
         attachScriptsDirectoryURL.appendingPathComponent("\(spec.sessionName).sh")
     }
 
-    private static func sessionName(for workspaceId: UUID) -> String {
-        "\(sessionPrefix)\(workspaceId.uuidString.lowercased())"
+    private static func sessionName(forCardId cardId: UUID) -> String {
+        "\(sessionPrefix)\(cardId.uuidString.lowercased())"
     }
 
     private static func panelSessionName(for panelId: UUID) -> String {
@@ -914,6 +1007,15 @@ extension ZellijSessionManager {
 
     func hasBackgroundCreationTaskForTesting(workspaceId: UUID) -> Bool {
         backgroundCreationTasks[workspaceId] != nil
+    }
+
+    func configureReconciliationForTesting() {
+        reconciliationTask = nil
+        aliveSessionCardIDs = []
+    }
+
+    func setAliveSessionCardIDsForTesting(_ ids: Set<UUID>) {
+        aliveSessionCardIDs = ids
     }
 }
 #endif
