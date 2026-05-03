@@ -41,10 +41,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let registration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 0,
             workingDirectory: "/tmp/runtime-cancel"
@@ -99,10 +97,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let registration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 1,
             workingDirectory: "/tmp/kill-session"
@@ -142,10 +138,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let rootRegistration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 5,
             workingDirectory: "/tmp/panel-session-root"
@@ -175,10 +169,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let workspaceRegistration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 6,
             workingDirectory: "/tmp/panel-session-cleanup"
@@ -227,10 +219,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let workspaceRegistration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 7,
             workingDirectory: "/tmp/forget-workspace"
@@ -332,10 +322,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let workspaceRegistration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 9,
             workingDirectory: "/tmp/runtime-reclaim"
@@ -387,10 +375,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let workspaceRegistration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 10,
             workingDirectory: "/tmp/panel-cleanup-isolated"
@@ -438,10 +424,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let registration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 2,
             workingDirectory: "/tmp/kill-all"
@@ -498,10 +482,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let registration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 3,
             workingDirectory: "/tmp/shutdown-termination"
@@ -540,7 +522,7 @@ struct ZellijSessionManagerTests {
 
         #expect(shutdownResult.completedBeforeTimeout)
         #expect(shutdownResult.remainingSessionNames.isEmpty)
-        #expect(await cleanupProbe.cleanedSessionNames == ["zenban-ws-\(cardID.uuidString.lowercased())"])
+        #expect(await cleanupProbe.cleanedSessionNames == ["zenban-ws-\(workspaceID.uuidString.lowercased())"])
         #expect(await preparationProbe.cancelled)
         #expect(!manager.isManagedWorkspace(workspaceID))
         #expect(!FileManager.default.fileExists(atPath: launchFilePath))
@@ -560,10 +542,8 @@ struct ZellijSessionManagerTests {
         }
 
         let workspaceID = UUID()
-        let cardID = UUID()
         let registration = try manager.registerWorkspace(
             workspaceId: workspaceID,
-            cardId: cardID,
             panelId: UUID(),
             portOrdinal: 4,
             workingDirectory: "/tmp/shutdown-timeout"
@@ -583,150 +563,12 @@ struct ZellijSessionManagerTests {
         let shutdownResult = await manager.shutdownAllSessionsForAppTermination(timeout: 0.01)
 
         #expect(!shutdownResult.completedBeforeTimeout)
-        #expect(shutdownResult.remainingSessionNames == ["zenban-ws-\(cardID.uuidString.lowercased())"])
+        #expect(shutdownResult.remainingSessionNames == ["zenban-ws-\(workspaceID.uuidString.lowercased())"])
         #expect(!manager.isManagedWorkspace(workspaceID))
         #expect(!FileManager.default.fileExists(atPath: launchFilePath))
         #expect(!FileManager.default.fileExists(atPath: registration.attachCommand))
         #expect((try? manager.startupEnvironment(for: workspaceID)) == nil)
         #expect((try? manager.attachCommand(for: workspaceID)) == nil)
-    }
-
-    private actor DeletedSessionsProbe {
-        private(set) var deletedSessionNames: [String] = []
-
-        func record(_ sessionName: String) {
-            deletedSessionNames.append(sessionName)
-        }
-    }
-
-    @Test
-    func reconcileSessionsOnStartupKillsOrphanedSessions() async throws {
-        let manager = ZellijSessionManager.shared
-        manager.resetTestingHooks()
-        manager.killAllSessions()
-        manager.configureReconciliationForTesting()
-        defer {
-            manager.resetTestingHooks()
-            manager.killAllSessions()
-            manager.configureReconciliationForTesting()
-        }
-
-        let validCardID = UUID()
-        let orphanedCardID = UUID()
-        let panelID = UUID()
-        let deletedProbe = DeletedSessionsProbe()
-
-        manager.configureSessionNamesHookForTesting {
-            [
-                "zenban-ws-\(validCardID.uuidString.lowercased())",
-                "zenban-ws-\(orphanedCardID.uuidString.lowercased())",
-                "zenban-ws-panel-\(panelID.uuidString.lowercased())",
-            ]
-        }
-        manager.configureDeleteSessionHookForTesting { sessionName in
-            await deletedProbe.record(sessionName)
-        }
-
-        await manager.reconcileSessionsOnStartup(validCardIDs: [validCardID])
-
-        #expect(manager.isSessionAlive(forCardId: validCardID))
-        #expect(!manager.isSessionAlive(forCardId: orphanedCardID))
-
-        try await waitUntil {
-            await deletedProbe.deletedSessionNames.count >= 2
-        }
-
-        let deleted = await deletedProbe.deletedSessionNames.sorted()
-        #expect(deleted.contains("zenban-ws-\(orphanedCardID.uuidString.lowercased())"))
-        #expect(deleted.contains("zenban-ws-panel-\(panelID.uuidString.lowercased())"))
-        #expect(!deleted.contains("zenban-ws-\(validCardID.uuidString.lowercased())"))
-    }
-
-    @Test
-    func reconcileSessionsOnStartupPreservesValidSessions() async throws {
-        let manager = ZellijSessionManager.shared
-        manager.resetTestingHooks()
-        manager.killAllSessions()
-        manager.configureReconciliationForTesting()
-        defer {
-            manager.resetTestingHooks()
-            manager.killAllSessions()
-            manager.configureReconciliationForTesting()
-        }
-
-        let cardID1 = UUID()
-        let cardID2 = UUID()
-
-        manager.configureSessionNamesHookForTesting {
-            [
-                "zenban-ws-\(cardID1.uuidString.lowercased())",
-                "zenban-ws-\(cardID2.uuidString.lowercased())",
-            ]
-        }
-        manager.configureDeleteSessionHookForTesting { _ in }
-
-        await manager.reconcileSessionsOnStartup(validCardIDs: [cardID1, cardID2])
-
-        #expect(manager.isSessionAlive(forCardId: cardID1))
-        #expect(manager.isSessionAlive(forCardId: cardID2))
-    }
-
-    @Test
-    func detachAllSessionsForAppTerminationClearsStateWithoutDeletingSessions() throws {
-        let manager = ZellijSessionManager.shared
-        manager.resetTestingHooks()
-        manager.killAllSessions()
-        defer {
-            manager.resetTestingHooks()
-            manager.killAllSessions()
-        }
-
-        let workspaceID = UUID()
-        let cardID = UUID()
-        let registration = try manager.registerWorkspace(
-            workspaceId: workspaceID,
-            cardId: cardID,
-            panelId: UUID(),
-            portOrdinal: 0,
-            workingDirectory: "/tmp/detach-test"
-        )
-
-        var deleteSessionCalled = false
-        manager.configureDeleteSessionHookForTesting { _ in
-            deleteSessionCalled = true
-        }
-
-        manager.detachAllSessionsForAppTermination()
-
-        #expect(!manager.isManagedWorkspace(workspaceID))
-        #expect(!deleteSessionCalled)
-        // Attach script should be preserved for reuse
-        #expect(FileManager.default.fileExists(atPath: registration.attachCommand))
-    }
-
-    @Test
-    func sessionNameUsesCardIdNotWorkspaceId() throws {
-        let manager = ZellijSessionManager.shared
-        manager.resetTestingHooks()
-        manager.killAllSessions()
-        defer {
-            manager.resetTestingHooks()
-            manager.killAllSessions()
-        }
-
-        let workspaceID = UUID()
-        let cardID = UUID()
-        let registration = try manager.registerWorkspace(
-            workspaceId: workspaceID,
-            cardId: cardID,
-            panelId: UUID(),
-            portOrdinal: 0,
-            workingDirectory: "/tmp/naming-test"
-        )
-
-        // Attach command path should contain the card UUID, not the workspace UUID
-        #expect(registration.attachCommand.contains(cardID.uuidString.lowercased()))
-        #expect(!registration.attachCommand.contains(workspaceID.uuidString.lowercased()))
     }
 
     private func waitUntil(

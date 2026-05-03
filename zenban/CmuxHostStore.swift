@@ -62,7 +62,6 @@ final class CmuxHostStore {
     private var cachedClaudeSummaryByCardID: [UUID: String] = [:]
     private var workspaceRuntimeStateByID: [UUID: WorkspaceRuntimeState] = [:]
     private var workspaceStatusObservationGeneration: UInt64 = 0
-    private var reattachedCardIDs: Set<UUID> = []
     private let zellijSessionManager = ZellijSessionManager.shared
 
     @ObservationIgnored private weak var boardStore: BoardStore?
@@ -104,10 +103,6 @@ final class CmuxHostStore {
         self.boardStore = boardStore
         configureAppDelegateIfNeeded()
         notificationStore.observer = self
-        let validCardIDs = Set(boardStore.boards.flatMap(\.cards).map(\.id))
-        Task {
-            await zellijSessionManager.reconcileSessionsOnStartup(validCardIDs: validCardIDs)
-        }
     }
 
     func registerMainWindow(_ window: NSWindow) {
@@ -222,15 +217,6 @@ final class CmuxHostStore {
         }
         guard zellijSessionManager.isManagedWorkspace(workspace.id) else {
             clearLaunchTracking(for: card.id)
-            return
-        }
-
-        // Reattached sessions may already have an agent running -- skip launch
-        if reattachedCardIDs.contains(card.id) {
-            reattachedCardIDs.remove(card.id)
-            let agent = resolvedAgent(for: card, boardID: boardID)
-            let signature = launchSignature(for: card, boardID: boardID, agent: agent)
-            launchSignatureByCardID[card.id] = signature
             return
         }
 
@@ -439,13 +425,9 @@ final class CmuxHostStore {
                 panelID: panelID
             )
         }
-        appDelegate.zenbanAppTerminationCleanupHandler = { [weak self, weak appDelegate] in
+        appDelegate.zenbanAppTerminationCleanupHandler = { [weak self] in
             guard let self else { return }
-            let killSessions = appDelegate?.killAllSessionsOnQuit ?? false
-            _ = await self.shutdownForApplicationTermination(
-                timeout: 2.0,
-                killSessions: killSessions
-            )
+            _ = await self.shutdownForApplicationTermination(timeout: 2.0)
         }
         didConfigureAppDelegate = true
     }
@@ -1323,7 +1305,6 @@ final class CmuxHostStore {
         do {
             let registration = try zellijSessionManager.registerWorkspace(
                 workspaceId: workspace.id,
-                cardId: cardID,
                 panelId: terminalPanel.id,
                 portOrdinal: terminalPanel.surface.portOrdinal,
                 workingDirectory: workingDirectory
@@ -1333,9 +1314,6 @@ final class CmuxHostStore {
                     command: registration.attachCommand,
                     environment: registration.startupEnvironment
                 )
-            }
-            if zellijSessionManager.isSessionAlive(forCardId: cardID) {
-                reattachedCardIDs.insert(cardID)
             }
             return true
         } catch {
@@ -1421,8 +1399,7 @@ final class CmuxHostStore {
     }
 
     func shutdownForApplicationTermination(
-        timeout: TimeInterval,
-        killSessions: Bool = false
+        timeout: TimeInterval
     ) async -> ZellijSessionManager.ShutdownResult {
         launchTasks.values.forEach { $0.cancel() }
         launchTasks.removeAll(keepingCapacity: false)
@@ -1432,13 +1409,7 @@ final class CmuxHostStore {
         hiddenWorkspaceReclaimTask = nil
         pendingLaunchByCardID.removeAll(keepingCapacity: false)
         launchSignatureByCardID.removeAll(keepingCapacity: false)
-        reattachedCardIDs.removeAll()
-        if killSessions {
-            return await zellijSessionManager.shutdownAllSessionsForAppTermination(timeout: timeout)
-        } else {
-            zellijSessionManager.detachAllSessionsForAppTermination()
-            return .completed
-        }
+        return await zellijSessionManager.shutdownAllSessionsForAppTermination(timeout: timeout)
     }
 
 }

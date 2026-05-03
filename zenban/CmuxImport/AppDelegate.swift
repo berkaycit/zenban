@@ -1956,7 +1956,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var zenbanLaunchRequestStartedHandler: ((UUID, UUID, String) -> Void)?
     var zenbanToggleTerminalFullscreenHandler: ((UUID, UUID) -> Bool)?
     var zenbanAppTerminationCleanupHandler: (() async -> Void)?
-    var killAllSessionsOnQuit = false
     var zenbanShortcutOverrideHandler: ((NSEvent) -> Bool)?
     var shortcutLayoutCharacterProvider: (UInt16, NSEvent.ModifierFlags) -> String? = KeyboardLayout.character(forKeyCode:modifierFlags:)
     private var workspaceObserver: NSObjectProtocol?
@@ -8085,9 +8084,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = String(localized: "dialog.quitCmux.title", defaultValue: "Quit Zenban?")
-        alert.informativeText = String(localized: "dialog.quitCmux.message", defaultValue: "Sessions will be preserved and restored on next launch.")
+        alert.informativeText = String(localized: "dialog.quitCmux.message", defaultValue: "This will close all windows and workspaces.")
         alert.addButton(withTitle: String(localized: "dialog.quitCmux.quit", defaultValue: "Quit"))
-        alert.addButton(withTitle: String(localized: "dialog.quitCmux.quitAndKill", defaultValue: "Quit & Kill Sessions"))
         alert.addButton(withTitle: String(localized: "common.cancel", defaultValue: "Cancel"))
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = String(localized: "dialog.dontWarnCmdQ", defaultValue: "Don't warn again for Cmd+Q")
@@ -8097,14 +8095,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             QuitWarningSettings.setEnabled(false)
         }
 
-        switch response {
-        case .alertFirstButtonReturn:
+        if response == .alertFirstButtonReturn {
             NSApp.terminate(nil)
-        case .alertSecondButtonReturn:
-            killAllSessionsOnQuit = true
-            NSApp.terminate(nil)
-        default:
-            break
         }
         return true
     }
@@ -10549,7 +10541,6 @@ extension AppDelegate {
         applicationTerminationCleanupTask = nil
         didSendApplicationTerminationReply = false
         isTerminatingApp = false
-        killAllSessionsOnQuit = false
         hostBundleIdentifierOverrideForTesting = nil
         notificationFirstResponderOwnerPanelIdOverrideForTesting = nil
         startupSessionSnapshot = nil

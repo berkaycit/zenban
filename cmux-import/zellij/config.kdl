@@ -5,6 +5,6 @@ scroll_buffer_size 5000
 on_force_close "detach"
 show_startup_tips false
 show_release_notes false
-session_serialization true
+session_serialization false
 web_server false
 web_sharing "disabled"
