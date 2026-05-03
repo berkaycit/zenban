@@ -43,12 +43,21 @@ enum NotificationSoundSettings {
     )
     private static let pendingCustomSoundPreparationLock = NSLock()
     private static var pendingCustomSoundPreparationPaths: Set<String> = []
+    private static let activePlaybackSoundsLock = NSLock()
+    private static var activePlaybackSounds: [ObjectIdentifier: NSSound] = [:]
+    private static let activePlaybackSoundDelegate = ActivePlaybackSoundDelegate()
     private static let notificationSoundSupportedExtensions: Set<String> = [
         "aif",
         "aiff",
         "caf",
         "wav",
     ]
+
+    private final class ActivePlaybackSoundDelegate: NSObject, NSSoundDelegate {
+        func sound(_ sound: NSSound, didFinishPlaying finishedPlaying: Bool) {
+            NotificationSoundSettings.releaseActivePlaybackSound(sound)
+        }
+    }
 
     private struct CustomSoundSourceMetadata: Codable, Equatable {
         let sourcePath: String
@@ -261,7 +270,16 @@ enum NotificationSoundSettings {
         playSoundFile(at: url)
     }
 
+    static func playSelectedSound(defaults: UserDefaults = .standard) {
+        let value = defaults.string(forKey: key) ?? defaultValue
+        playSound(value: value, defaults: defaults)
+    }
+
     static func previewSound(value: String, defaults: UserDefaults = .standard) {
+        playSound(value: value, defaults: defaults)
+    }
+
+    private static func playSound(value: String, defaults: UserDefaults) {
         switch value {
         case "default":
             NSSound.beep()
@@ -332,8 +350,24 @@ enum NotificationSoundSettings {
                 NSLog("Notification custom sound failed to load from path: \(url.path)")
                 return
             }
-            sound.play()
+            retainActivePlaybackSound(sound)
+            sound.delegate = activePlaybackSoundDelegate
+            if !sound.play() {
+                releaseActivePlaybackSound(sound)
+            }
         }
+    }
+
+    private static func retainActivePlaybackSound(_ sound: NSSound) {
+        activePlaybackSoundsLock.lock()
+        activePlaybackSounds[ObjectIdentifier(sound)] = sound
+        activePlaybackSoundsLock.unlock()
+    }
+
+    private static func releaseActivePlaybackSound(_ sound: NSSound) {
+        activePlaybackSoundsLock.lock()
+        activePlaybackSounds.removeValue(forKey: ObjectIdentifier(sound))
+        activePlaybackSoundsLock.unlock()
     }
 
     private static func cleanupStaleStagedSoundFiles(
@@ -711,6 +745,12 @@ final class TerminalNotificationStore: ObservableObject {
         notification in
         store.scheduleUserNotification(notification)
     }
+    private var suppressedNotificationFeedbackHandler: (TerminalNotificationStore, TerminalNotification) -> Void = {
+        store,
+        notification in
+        store.playSuppressedNotificationFeedback(for: notification)
+    }
+    private var lastNotificationDateByCooldownKey: [String: Date] = [:]
     private var indexes = NotificationIndexes()
 
     private init() {
@@ -859,7 +899,29 @@ final class TerminalNotificationStore: ObservableObject {
         indexes.latestUnreadByTabId[tabId] ?? indexes.latestByTabId[tabId]
     }
 
-    func addNotification(tabId: UUID, surfaceId: UUID?, title: String, subtitle: String, body: String) {
+    func addNotification(
+        tabId: UUID,
+        surfaceId: UUID?,
+        title: String,
+        subtitle: String,
+        body: String,
+        cooldownKey: String? = nil,
+        cooldownInterval: TimeInterval? = nil
+    ) {
+        let now = Date()
+        let resolvedCooldownInterval: TimeInterval?
+        if let cooldownInterval, cooldownInterval.isFinite, cooldownInterval > 0 {
+            resolvedCooldownInterval = cooldownInterval
+        } else {
+            resolvedCooldownInterval = nil
+        }
+        if let cooldownKey,
+           let resolvedCooldownInterval,
+           let lastNotificationDate = lastNotificationDateByCooldownKey[cooldownKey],
+           now.timeIntervalSince(lastNotificationDate) < resolvedCooldownInterval {
+            return
+        }
+
         var updated = notifications
         var idsToClear: [String] = []
         updated.removeAll { existing in
@@ -883,17 +945,22 @@ final class TerminalNotificationStore: ObservableObject {
             title: resolvedTitle,
             subtitle: subtitle,
             body: body,
-            createdAt: Date(),
+            createdAt: now,
             isRead: false
         )
         updated.insert(notification, at: 0)
         notifications = updated
+        if let cooldownKey, resolvedCooldownInterval != nil {
+            lastNotificationDateByCooldownKey[cooldownKey] = now
+        }
         observer?.terminalNotificationStore(self, didAdd: notification)
         if !idsToClear.isEmpty {
             center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
             center.removePendingNotificationRequestsOffMain(withIdentifiers: idsToClear)
         }
-        if !shouldSuppressExternalDelivery {
+        if shouldSuppressExternalDelivery {
+            suppressedNotificationFeedbackHandler(self, notification)
+        } else {
             notificationDeliveryHandler(self, notification)
         }
     }
@@ -979,7 +1046,10 @@ final class TerminalNotificationStore: ObservableObject {
         center.removeDeliveredNotificationsOffMain(withIdentifiers: [id.uuidString])
     }
 
-    func clearAll() {
+    func clearAll(discardQueuedNotifications: Bool = true) {
+        if discardQueuedNotifications {
+            TerminalMutationBus.shared.discardPendingNotifications()
+        }
         guard !notifications.isEmpty else { return }
         let ids = notifications.map { $0.id.uuidString }
         notifications.removeAll()
@@ -987,7 +1057,14 @@ final class TerminalNotificationStore: ObservableObject {
         center.removePendingNotificationRequestsOffMain(withIdentifiers: ids)
     }
 
-    func clearNotifications(forTabId tabId: UUID, surfaceId: UUID?) {
+    func clearNotifications(
+        forTabId tabId: UUID,
+        surfaceId: UUID?,
+        discardQueuedNotifications: Bool = true
+    ) {
+        if discardQueuedNotifications {
+            TerminalMutationBus.shared.discardPendingNotifications(forTabId: tabId, surfaceId: surfaceId)
+        }
         var updated: [TerminalNotification] = []
         updated.reserveCapacity(notifications.count)
         var idsToClear: [String] = []
@@ -1004,7 +1081,10 @@ final class TerminalNotificationStore: ObservableObject {
         center.removePendingNotificationRequestsOffMain(withIdentifiers: idsToClear)
     }
 
-    func clearNotifications(forTabId tabId: UUID) {
+    func clearNotifications(forTabId tabId: UUID, discardQueuedNotifications: Bool = true) {
+        if discardQueuedNotifications {
+            TerminalMutationBus.shared.discardPendingNotifications(forTabId: tabId)
+        }
         var updated: [TerminalNotification] = []
         updated.reserveCapacity(notifications.count)
         var idsToClear: [String] = []
@@ -1062,10 +1142,38 @@ final class TerminalNotificationStore: ObservableObject {
         }
     }
 
+    private func resolvedNotificationTitle(for notification: TerminalNotification) -> String {
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+            ?? "Zenban"
+        return notification.title.isEmpty ? appName : notification.title
+    }
+
+    private func playSuppressedNotificationFeedback(for notification: TerminalNotification) {
+        NotificationSoundSettings.playSelectedSound()
+        NotificationSoundSettings.runCustomCommand(
+            title: resolvedNotificationTitle(for: notification),
+            subtitle: notification.subtitle,
+            body: notification.body
+        )
+    }
+
     private func ensureAuthorization(
         origin: AuthorizationRequestOrigin,
         _ completion: @escaping (Bool) -> Void
     ) {
+        if origin == .notificationDelivery,
+           let cachedDecision = Self.cachedDeliveryAuthorizationDecision(
+               for: authorizationState,
+               isAppActive: AppFocusState.isAppActive()
+           ) {
+            if !cachedDecision, authorizationState == .notDetermined {
+                hasDeferredAuthorizationRequest = true
+            }
+            completion(cachedDecision)
+            return
+        }
+
         logAuthorization("ensure start origin=\(origin.rawValue)")
         center.getNotificationSettings { [weak self] settings in
             DispatchQueue.main.async {
@@ -1082,8 +1190,10 @@ final class TerminalNotificationStore: ObservableObject {
                 case .authorized, .provisional, .ephemeral:
                     completion(true)
                 case .denied:
-                    self.logAuthorization("ensure denied origin=\(origin.rawValue) prompting_settings")
-                    self.promptToEnableNotifications()
+                    if origin != .notificationDelivery {
+                        self.logAuthorization("ensure denied origin=\(origin.rawValue) prompting_settings")
+                        self.promptToEnableNotifications()
+                    }
                     completion(false)
                 case .notDetermined:
                     if Self.shouldDeferAutomaticAuthorizationRequest(
@@ -1278,11 +1388,24 @@ final class TerminalNotificationStore: ObservableObject {
         }
     }
 
+    func configureSuppressedNotificationFeedbackHandlerForTesting(
+        _ handler: @escaping (TerminalNotificationStore, TerminalNotification) -> Void
+    ) {
+        suppressedNotificationFeedbackHandler = handler
+    }
+
+    func resetSuppressedNotificationFeedbackHandlerForTesting() {
+        suppressedNotificationFeedbackHandler = { store, notification in
+            store.playSuppressedNotificationFeedback(for: notification)
+        }
+    }
+
     func promptToEnableNotificationsForTesting() {
         promptToEnableNotifications()
     }
 
     func replaceNotificationsForTesting(_ notifications: [TerminalNotification]) {
+        TerminalMutationBus.shared.discardPendingNotifications()
         self.notifications = notifications
     }
 #endif

@@ -1,6 +1,16 @@
 import SwiftUI
 import AppKit
 
+enum TabControlShortcutHintAnimation {
+    static let visibility: Animation = .easeOut(duration: 0.12)
+}
+
+extension View {
+    func tabControlShortcutHintVisibilityAnimation<Value: Equatable>(value: Value) -> some View {
+        animation(TabControlShortcutHintAnimation.visibility, value: value)
+    }
+}
+
 private enum TabControlShortcutHintDebugSettings {
     static let xKey = "shortcutHintPaneTabXOffset"
     static let yKey = "shortcutHintPaneTabYOffset"
@@ -42,7 +52,9 @@ struct TabItemView: View {
     let showsZoomIndicator: Bool
     let appearance: BonsplitConfiguration.Appearance
     let saturation: Double
+    let trailingSeparatorBottomInset: CGFloat
     let controlShortcutDigit: Int?
+    let allowsShortcutHints: Bool
     let showsControlShortcutHint: Bool
     let shortcutModifierSymbol: String
     let contextMenuState: TabContextMenuState
@@ -50,6 +62,7 @@ struct TabItemView: View {
     let onClose: () -> Void
     let onZoomToggle: () -> Void
     let onContextAction: (TabContextAction) -> Void
+    let onMoveDestination: (String) -> Void
 
     @State private var isHovered = false
     @State private var isCloseHovered = false
@@ -119,7 +132,7 @@ struct TabItemView: View {
                 .onChange(of: tab.icon) { _ in updateGlobeFallback() }
 
                 Text(tab.title)
-                    .font(.system(size: TabBarMetrics.titleFontSize))
+                    .font(.system(size: appearance.tabTitleFontSize))
                     .lineLimit(1)
                     .foregroundStyle(
                         isSelected
@@ -133,13 +146,13 @@ struct TabItemView: View {
                         onZoomToggle()
                     } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: max(8, TabBarMetrics.titleFontSize - 2), weight: .semibold))
+                            .font(.system(size: accessoryFontSize, weight: .semibold))
                             .foregroundStyle(
                                 isZoomHovered
                                     ? TabBarColors.activeText(for: appearance)
                                     : TabBarColors.inactiveText(for: appearance)
                             )
-                            .frame(width: TabBarMetrics.closeButtonSize, height: TabBarMetrics.closeButtonSize)
+                            .frame(width: accessorySlotSize, height: accessorySlotSize)
                             .background(
                                 Circle()
                                     .fill(
@@ -164,16 +177,14 @@ struct TabItemView: View {
             trailingAccessory
         }
         .padding(.horizontal, TabBarMetrics.tabHorizontalPadding)
-        .offset(y: isSelected ? 0.5 : 0)
         .frame(
             minWidth: TabBarMetrics.tabMinWidth,
             maxWidth: TabBarMetrics.tabMaxWidth,
-            minHeight: TabBarMetrics.tabHeight,
-            maxHeight: TabBarMetrics.tabHeight
+            minHeight: tabHeight,
+            maxHeight: tabHeight
         )
-        .padding(.bottom, isSelected ? 1 : 0)
         .background(tabBackground.saturation(saturation))
-        .animation(.easeInOut(duration: 0.14), value: showsShortcutHint)
+        .tabControlShortcutHintVisibilityAnimation(value: showsShortcutHint)
         .contentShape(Rectangle())
         // Middle click to close (macOS convention).
         // Uses an AppKit event monitor so it doesn't interfere with left click selection or drag/reorder.
@@ -181,6 +192,11 @@ struct TabItemView: View {
             guard !tab.isPinned else { return }
             onClose()
         }))
+        .background(TabContextMenuPresenter(
+            snapshot: TabContextMenuSnapshot(tabId: tab.id, state: contextMenuState),
+            onContextAction: onContextAction,
+            onMoveDestination: onMoveDestination
+        ))
         .onTapGesture {
             onSelect()
         }
@@ -188,13 +204,11 @@ struct TabItemView: View {
             // Keep icon rendering stable while hovering; only accessory/background elements animate.
             isHovered = hovering
         }
-        .contextMenu {
-            contextMenuContent
-        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(tab.title)
         .accessibilityValue(accessibilityValue)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .safeHelp(tab.title)
     }
 
     private func glyphSize(for iconName: String) -> CGFloat {
@@ -212,19 +226,32 @@ struct TabItemView: View {
     }
 
     private var showsShortcutHint: Bool {
-        (showsControlShortcutHint || alwaysShowShortcutHints) && shortcutHintLabel != nil
+        allowsShortcutHints && (showsControlShortcutHint || alwaysShowShortcutHints) && shortcutHintLabel != nil
     }
 
     private var shortcutHintSlotWidth: CGFloat {
         guard let label = shortcutHintLabel else {
-            return TabBarMetrics.closeButtonSize
+            return accessorySlotSize
         }
         let positiveDebugInset = max(0, CGFloat(TabControlShortcutHintDebugSettings.clamped(controlShortcutHintXOffset))) + 2
-        return max(TabBarMetrics.closeButtonSize, shortcutHintWidth(for: label) + positiveDebugInset)
+        return max(accessorySlotSize, shortcutHintWidth(for: label) + positiveDebugInset)
+    }
+
+    private var accessoryFontSize: CGFloat {
+        max(8, appearance.tabTitleFontSize - 2)
+    }
+
+    private var accessorySlotSize: CGFloat {
+        // Keep accessory affordances readable when the tab title font is increased.
+        min(tabHeight, max(TabBarMetrics.closeButtonSize, ceil(accessoryFontSize + 4)))
+    }
+
+    private var tabHeight: CGFloat {
+        max(1, appearance.tabBarHeight)
     }
 
     private func shortcutHintWidth(for label: String) -> CGFloat {
-        let font = NSFont.systemFont(ofSize: max(8, TabBarMetrics.titleFontSize - 2), weight: .semibold)
+        let font = NSFont.systemFont(ofSize: accessoryFontSize, weight: .semibold)
         let textWidth = (label as NSString).size(withAttributes: [.font: font]).width
         return ceil(textWidth) + 8
     }
@@ -234,7 +261,7 @@ struct TabItemView: View {
         ZStack(alignment: .center) {
             if let shortcutHintLabel {
                 Text(shortcutHintLabel)
-                    .font(.system(size: max(8, TabBarMetrics.titleFontSize - 2), weight: .semibold, design: .rounded))
+                    .font(.system(size: accessoryFontSize, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -266,8 +293,8 @@ struct TabItemView: View {
                 .opacity(showsShortcutHint ? 0 : 1)
                 .allowsHitTesting(!showsShortcutHint)
         }
-        .frame(width: shortcutHintSlotWidth, height: TabBarMetrics.closeButtonSize, alignment: .center)
-        .animation(.easeInOut(duration: 0.14), value: showsShortcutHint)
+        .frame(width: shortcutHintSlotWidth, height: accessorySlotSize, alignment: .center)
+        .tabControlShortcutHintVisibilityAnimation(value: showsShortcutHint)
     }
 
     private func updateGlobeFallback() {
@@ -321,78 +348,6 @@ struct TabItemView: View {
         return parts.joined(separator: ", ")
     }
 
-    @ViewBuilder
-    private var contextMenuContent: some View {
-        contextButton("Rename Tab…", action: .rename)
-
-        if contextMenuState.hasCustomTitle {
-            contextButton("Remove Custom Tab Name", action: .clearName)
-        }
-
-        Divider()
-
-        contextButton("Close Tabs to Left", action: .closeToLeft)
-            .disabled(!contextMenuState.canCloseToLeft)
-
-        contextButton("Close Tabs to Right", action: .closeToRight)
-            .disabled(!contextMenuState.canCloseToRight)
-
-        contextButton("Close Other Tabs", action: .closeOthers)
-            .disabled(!contextMenuState.canCloseOthers)
-
-        contextButton("Move Tab…", action: .move)
-
-        Divider()
-
-        contextButton("New Terminal Tab to Right", action: .newTerminalToRight)
-
-        contextButton("New Browser Tab to Right", action: .newBrowserToRight)
-
-        if contextMenuState.isBrowser {
-            Divider()
-
-            contextButton("Reload Tab", action: .reload)
-
-            contextButton("Duplicate Tab", action: .duplicate)
-        }
-
-        Divider()
-
-        if contextMenuState.hasSplits {
-            contextButton(
-                contextMenuState.isZoomed ? "Exit Zoom" : "Zoom Pane",
-                action: .toggleZoom
-            )
-        }
-
-        contextButton(
-            contextMenuState.isPinned ? "Unpin Tab" : "Pin Tab",
-            action: .togglePin
-        )
-
-        if contextMenuState.isUnread {
-            contextButton("Mark Tab as Read", action: .markAsRead)
-                .disabled(!contextMenuState.canMarkAsRead)
-        } else {
-            contextButton("Mark Tab as Unread", action: .markAsUnread)
-                .disabled(!contextMenuState.canMarkAsUnread)
-        }
-    }
-
-    @ViewBuilder
-    private func contextButton(_ title: String, action: TabContextAction) -> some View {
-        if let shortcut = contextMenuState.shortcuts[action] {
-            Button(title) {
-                onContextAction(action)
-            }
-            .keyboardShortcut(shortcut)
-        } else {
-            Button(title) {
-                onContextAction(action)
-            }
-        }
-    }
-
     // MARK: - Tab Background
 
     @ViewBuilder
@@ -406,19 +361,13 @@ struct TabItemView: View {
                 Color.clear
             }
 
-            // Top accent indicator for selected tab
-            if isSelected {
-                Rectangle()
-                    .fill(Color.accentColor)
-                    .frame(height: TabBarMetrics.activeIndicatorHeight)
-            }
-
             // Right border separator
             HStack {
                 Spacer()
                 Rectangle()
                     .fill(TabBarColors.separator(for: appearance))
                     .frame(width: 1)
+                    .padding(.bottom, max(0, trailingSeparatorBottomInset))
             }
         }
     }
@@ -450,7 +399,7 @@ struct TabItemView: View {
                     Image(systemName: "pin.fill")
                         .font(.system(size: TabBarMetrics.closeIconSize, weight: .semibold))
                         .foregroundStyle(TabBarColors.inactiveText(for: appearance))
-                        .frame(width: TabBarMetrics.closeButtonSize, height: TabBarMetrics.closeButtonSize)
+                        .frame(width: accessorySlotSize, height: accessorySlotSize)
                         .saturation(saturation)
                 }
             } else if isSelected || isHovered || isCloseHovered {
@@ -465,7 +414,7 @@ struct TabItemView: View {
                                 ? TabBarColors.activeText(for: appearance)
                                 : TabBarColors.inactiveText(for: appearance)
                         )
-                        .frame(width: TabBarMetrics.closeButtonSize, height: TabBarMetrics.closeButtonSize)
+                        .frame(width: accessorySlotSize, height: accessorySlotSize)
                         .background(
                             Circle()
                                 .fill(
@@ -482,7 +431,7 @@ struct TabItemView: View {
                 .saturation(saturation)
             }
         }
-        .frame(width: TabBarMetrics.closeButtonSize, height: TabBarMetrics.closeButtonSize)
+        .frame(width: accessorySlotSize, height: accessorySlotSize)
         .animation(.easeInOut(duration: TabBarMetrics.hoverDuration), value: isHovered)
         .animation(.easeInOut(duration: TabBarMetrics.hoverDuration), value: isCloseHovered)
     }
@@ -606,5 +555,340 @@ private struct MiddleClickMonitorView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.view = nsView
         context.coordinator.onMiddleClick = onMiddleClick
+    }
+}
+
+struct TabContextMenuSnapshot {
+    let tabId: UUID
+    let state: TabContextMenuState
+}
+
+final class TabContextMenuActionTarget: NSObject {
+    var onContextAction: ((TabContextAction) -> Void)?
+    var onMoveDestination: ((String) -> Void)?
+
+    @objc func performContextAction(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let action = TabContextAction(rawValue: rawValue) else {
+            return
+        }
+        onContextAction?(action)
+    }
+
+    @objc func performMoveDestination(_ sender: NSMenuItem) {
+        guard let destinationId = sender.representedObject as? String else { return }
+        onMoveDestination?(destinationId)
+    }
+}
+
+enum TabContextMenuBuilder {
+    static func makeMenu(
+        snapshot: TabContextMenuSnapshot,
+        target: TabContextMenuActionTarget
+    ) -> NSMenu {
+        let state = snapshot.state
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        addAction(
+            title: localized("tabContext.renameTab", defaultValue: "Rename Tab…"),
+            action: .rename,
+            state: state,
+            target: target,
+            to: menu
+        )
+
+        if state.hasCustomTitle {
+            addAction(
+                title: localized("tabContext.removeCustomTabName", defaultValue: "Remove Custom Tab Name"),
+                action: .clearName,
+                state: state,
+                target: target,
+                to: menu
+            )
+        }
+
+        menu.addItem(.separator())
+
+        addAction(
+            title: localized("tabContext.closeTabsToLeft", defaultValue: "Close Tabs to Left"),
+            action: .closeToLeft,
+            enabled: state.canCloseToLeft,
+            state: state,
+            target: target,
+            to: menu
+        )
+        addAction(
+            title: localized("tabContext.closeTabsToRight", defaultValue: "Close Tabs to Right"),
+            action: .closeToRight,
+            enabled: state.canCloseToRight,
+            state: state,
+            target: target,
+            to: menu
+        )
+        addAction(
+            title: localized("tabContext.closeOtherTabs", defaultValue: "Close Other Tabs"),
+            action: .closeOthers,
+            enabled: state.canCloseOthers,
+            state: state,
+            target: target,
+            to: menu
+        )
+
+        menu.addItem(moveSubmenuItem(state: state, target: target))
+
+        if state.isTerminal {
+            addAction(
+                title: localized("command.moveTabToLeftPane.title", defaultValue: "Move to Left Pane"),
+                action: .moveToLeftPane,
+                enabled: state.canMoveToLeftPane,
+                state: state,
+                target: target,
+                to: menu
+            )
+            addAction(
+                title: localized("command.moveTabToRightPane.title", defaultValue: "Move to Right Pane"),
+                action: .moveToRightPane,
+                enabled: state.canMoveToRightPane,
+                state: state,
+                target: target,
+                to: menu
+            )
+        }
+
+        menu.addItem(.separator())
+
+        addAction(
+            title: localized("tabContext.newTerminalTabToRight", defaultValue: "New Terminal Tab to Right"),
+            action: .newTerminalToRight,
+            state: state,
+            target: target,
+            to: menu
+        )
+        addAction(
+            title: localized("tabContext.newBrowserTabToRight", defaultValue: "New Browser Tab to Right"),
+            action: .newBrowserToRight,
+            state: state,
+            target: target,
+            to: menu
+        )
+
+        if state.isBrowser {
+            menu.addItem(.separator())
+            addAction(
+                title: localized("tabContext.reloadTab", defaultValue: "Reload Tab"),
+                action: .reload,
+                state: state,
+                target: target,
+                to: menu
+            )
+            addAction(
+                title: localized("tabContext.duplicateTab", defaultValue: "Duplicate Tab"),
+                action: .duplicate,
+                state: state,
+                target: target,
+                to: menu
+            )
+        }
+
+        menu.addItem(.separator())
+
+        if state.hasSplits {
+            addAction(
+                title: state.isZoomed
+                    ? localized("tabContext.exitZoom", defaultValue: "Exit Zoom")
+                    : localized("tabContext.zoomPane", defaultValue: "Zoom Pane"),
+                action: .toggleZoom,
+                state: state,
+                target: target,
+                to: menu
+            )
+        }
+
+        addAction(
+            title: state.isPinned
+                ? localized("tabContext.unpinTab", defaultValue: "Unpin Tab")
+                : localized("tabContext.pinTab", defaultValue: "Pin Tab"),
+            action: .togglePin,
+            state: state,
+            target: target,
+            to: menu
+        )
+
+        if state.isUnread {
+            addAction(
+                title: localized("tabContext.markTabAsRead", defaultValue: "Mark Tab as Read"),
+                action: .markAsRead,
+                enabled: state.canMarkAsRead,
+                state: state,
+                target: target,
+                to: menu
+            )
+        } else {
+            addAction(
+                title: localized("tabContext.markTabAsUnread", defaultValue: "Mark Tab as Unread"),
+                action: .markAsUnread,
+                enabled: state.canMarkAsUnread,
+                state: state,
+                target: target,
+                to: menu
+            )
+        }
+
+        menu.addItem(.separator())
+
+        addAction(
+            title: localized("command.copyIdentifiers.title", defaultValue: "Copy IDs"),
+            action: .copyIdentifiers,
+            state: state,
+            target: target,
+            to: menu
+        )
+
+        return menu
+    }
+
+    private static func moveSubmenuItem(
+        state: TabContextMenuState,
+        target: TabContextMenuActionTarget
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: localized("tabContext.moveTab", defaultValue: "Move Tab"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        addAction(
+            title: localized("command.moveTabToNewWorkspace.title", defaultValue: "Move Tab to New Workspace"),
+            action: .moveToNewWorkspace,
+            enabled: state.canMoveToNewWorkspace,
+            state: state,
+            target: target,
+            to: submenu
+        )
+        for destination in state.moveDestinations {
+            let destinationItem = NSMenuItem(
+                title: destination.title,
+                action: #selector(TabContextMenuActionTarget.performMoveDestination(_:)),
+                keyEquivalent: ""
+            )
+            destinationItem.target = target
+            destinationItem.representedObject = destination.id
+            destinationItem.isEnabled = destination.isEnabled
+            submenu.addItem(destinationItem)
+        }
+        item.submenu = submenu
+        item.isEnabled = state.canMoveToNewWorkspace || !state.moveDestinations.isEmpty
+        return item
+    }
+
+    @discardableResult
+    private static func addAction(
+        title: String,
+        action: TabContextAction,
+        enabled: Bool = true,
+        state: TabContextMenuState,
+        target: TabContextMenuActionTarget,
+        to menu: NSMenu
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: title,
+            action: #selector(TabContextMenuActionTarget.performContextAction(_:)),
+            keyEquivalent: ""
+        )
+        item.target = target
+        item.representedObject = action.rawValue
+        item.isEnabled = enabled
+        if let shortcut = state.shortcuts[action] {
+            applyShortcut(shortcut, to: item)
+        }
+        menu.addItem(item)
+        return item
+    }
+
+    private static func applyShortcut(_ shortcut: KeyboardShortcut, to item: NSMenuItem) {
+        item.keyEquivalent = String(shortcut.key.character).lowercased()
+        item.keyEquivalentModifierMask = shortcut.modifiers.nsMenuModifierMask
+    }
+
+    private static func localized(_ key: String, defaultValue: String) -> String {
+        Bundle.module.localizedString(forKey: key, value: defaultValue, table: nil)
+    }
+}
+
+private extension EventModifiers {
+    var nsMenuModifierMask: NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if contains(.command) { flags.insert(.command) }
+        if contains(.shift) { flags.insert(.shift) }
+        if contains(.option) { flags.insert(.option) }
+        if contains(.control) { flags.insert(.control) }
+        return flags
+    }
+}
+
+private struct TabContextMenuPresenter: NSViewRepresentable {
+    let snapshot: TabContextMenuSnapshot
+    let onContextAction: (TabContextAction) -> Void
+    let onMoveDestination: (String) -> Void
+
+    final class Coordinator {
+        var snapshot: TabContextMenuSnapshot
+        let actionTarget = TabContextMenuActionTarget()
+        weak var view: NSView?
+        var monitor: Any?
+
+        init(snapshot: TabContextMenuSnapshot) {
+            self.snapshot = snapshot
+        }
+
+        deinit {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+        }
+
+        func presentMenu(at point: NSPoint, in view: NSView) {
+            let menu = TabContextMenuBuilder.makeMenu(snapshot: snapshot, target: actionTarget)
+            menu.popUp(positioning: nil, at: point, in: view)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        let coordinator = Coordinator(snapshot: snapshot)
+        coordinator.actionTarget.onContextAction = onContextAction
+        coordinator.actionTarget.onMoveDestination = onMoveDestination
+        return coordinator
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+
+        context.coordinator.view = view
+
+        let coordinator = context.coordinator
+        coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { [weak coordinator] event in
+            guard event.type == .rightMouseDown || event.modifierFlags.contains(.control) else { return event }
+            guard let coordinator, let view = coordinator.view, let window = view.window else { return event }
+            guard event.window === window else { return event }
+
+            let point = view.convert(event.locationInWindow, from: nil)
+            guard view.bounds.contains(point) else { return event }
+
+            coordinator.presentMenu(at: point, in: view)
+            return nil
+        }
+
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.view = nsView
+        context.coordinator.snapshot = snapshot
+        context.coordinator.actionTarget.onContextAction = onContextAction
+        context.coordinator.actionTarget.onMoveDestination = onMoveDestination
     }
 }

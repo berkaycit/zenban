@@ -17,6 +17,7 @@ struct SplitViewContainer<Content: View, EmptyContent: View>: View {
         GeometryReader { geometry in
             splitNodeContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(TabBarColors.paneBackground(for: appearance))
                 .focusable()
                 .focusEffectDisabled()
                 .onChange(of: geometry.size) { _, newSize in

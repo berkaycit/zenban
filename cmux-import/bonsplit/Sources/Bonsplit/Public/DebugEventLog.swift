@@ -65,9 +65,9 @@ public final class DebugEventLog: @unchecked Sendable {
             let line = entry + "\n"
             if let data = line.data(using: .utf8) {
                 if let handle = FileHandle(forWritingAtPath: Self.logPath) {
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
+                    defer { try? handle.close() }
+                    guard (try? handle.seekToEnd()) != nil else { return }
+                    try? handle.write(contentsOf: data)
                 } else {
                     FileManager.default.createFile(atPath: Self.logPath, contents: data)
                 }

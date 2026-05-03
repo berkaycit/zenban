@@ -36,6 +36,11 @@ final class SplitViewController {
     /// updateNSView is called to toggle isHidden on the AppKit containers.
     var isInteractive: Bool = true
 
+    /// When false, pane tab shortcut hints stay hidden even if this pane is
+    /// selected. The host app owns this because keyboard focus can move outside
+    /// Bonsplit while the selected pane remains unchanged.
+    var tabShortcutHintsEnabled: Bool = true
+
     /// Handler for file/URL drops from external apps (e.g. Finder).
     /// Receives the dropped URLs and the pane ID where the drop occurred.
     @ObservationIgnored var onFileDrop: ((_ urls: [URL], _ paneId: PaneID) -> Bool)?
@@ -320,20 +325,15 @@ final class SplitViewController {
     // MARK: - Tab Operations
 
     /// Add a tab to the focused pane (or specified pane)
-    func addTab(
-        _ tab: TabItem,
-        toPane paneId: PaneID? = nil,
-        atIndex index: Int? = nil,
-        select: Bool = true
-    ) {
+    func addTab(_ tab: TabItem, toPane paneId: PaneID? = nil, atIndex index: Int? = nil) {
         let targetPaneId = paneId ?? focusedPaneId
         guard let targetPaneId,
               let pane = rootNode.findPane(targetPaneId) else { return }
 
         if let index {
-            pane.insertTab(tab, at: index, select: select)
+            pane.insertTab(tab, at: index)
         } else {
-            pane.addTab(tab, select: select)
+            pane.addTab(tab)
         }
     }
 
@@ -387,6 +387,20 @@ final class SplitViewController {
             focusPane(targetPaneId)
         }
         // No neighbor found = at edge, do nothing
+    }
+
+    /// Find the closest pane in the requested direction from the given pane.
+    func adjacentPane(to paneId: PaneID, direction: NavigationDirection) -> PaneID? {
+        let allPaneBounds = rootNode.computePaneBounds()
+        guard let currentBounds = allPaneBounds.first(where: { $0.paneId == paneId })?.bounds else {
+            return nil
+        }
+        return findBestNeighbor(
+            from: currentBounds,
+            currentPaneId: paneId,
+            direction: direction,
+            allPaneBounds: allPaneBounds
+        )
     }
 
     private func findBestNeighbor(from currentBounds: CGRect, currentPaneId: PaneID,

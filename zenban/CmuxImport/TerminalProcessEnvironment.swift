@@ -50,6 +50,7 @@ enum TerminalProcessEnvironment {
         env["CMUX_PANEL_ID"] = panelId.uuidString
         env["CMUX_TAB_ID"] = workspaceId.uuidString
         env["CMUX_SOCKET_PATH"] = SocketControlSettings.socketPath()
+        env.removeValue(forKey: "CMUX_SOCKET")
         if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
             env["CMUX_BUNDLE_ID"] = bundleId
         }
@@ -64,7 +65,12 @@ enum TerminalProcessEnvironment {
             env["CMUX_CLAUDE_HOOKS_DISABLED"] = "1"
         }
 
-        if let cliBinPath = Bundle.main.resourceURL?.appendingPathComponent("bin").path {
+        if let cliBinURL = Bundle.main.resourceURL?.appendingPathComponent("bin") {
+            let cliBinPath = cliBinURL.path
+            let bundledCLIURL = cliBinURL.appendingPathComponent("cmux")
+            if FileManager.default.isExecutableFile(atPath: bundledCLIURL.path) {
+                env["CMUX_BUNDLED_CLI_PATH"] = bundledCLIURL.path
+            }
             let currentPath = env["PATH"]
                 ?? getenv("PATH").map { String(cString: $0) }
                 ?? ProcessInfo.processInfo.environment["PATH"]

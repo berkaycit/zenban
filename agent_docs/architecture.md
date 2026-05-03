@@ -9,7 +9,7 @@
 - `zenban/Services`: git, AI, dev server, dependency, process helpers, and Zellij session management
 - `zenban/CmuxImport`: copied cmux Swift host layer, panels, browser, notifications, and AppleScript support
 - `zenban/CmuxHostStore.swift`: Zenban adapter that maps cards 1:1 onto cmux workspaces
-- `cmux-import/`: copied cmux CLI, Ghostty runtime, bonsplit package, and bundled assets
+- `cmux-import/`: copied cmux CLI, Ghostty runtime, current cmux Bonsplit package, and bundled assets
 - `zenban/Utilities`, `Commands`, `Extensions`: shared helpers and app commands
 
 ## Data Flow
@@ -25,6 +25,8 @@
 - `BoardStorage`: JSON persistence under Application Support.
 - `CmuxHostStore`: Card-scoped workspace registry, Ghostty/Zellij residency control, agent auto-launch bridge, browser surface management, and notification-to-card routing.
 - `ZellijSessionManager`: Bundles and owns the root workspace Zellij session plus independent panel-scoped sessions, along with attach scripts, config isolation, and quit-time cleanup.
+- `TerminalController`: Local cmux socket server for copied CLI commands, Feed hooks, notifications, top/debug snapshots, split equalization, and tab workspace moves.
+- `FeedBridgeStore`: In-memory bridge for Claude, Codex, and OpenCode hook telemetry plus blocking permission, question, and plan replies.
 - `GitService`: libgit2-backed repository, worktree, diff, commit, push, merge, and PR helpers.
 - `DevServerManager`: Runs setup and dev commands, buffers output, detects ready URLs, and owns process lifecycle.
 - `DependencyCheckService`: Reports whether external tools like `git` and `Claude Code CLI` are available on this Mac.
@@ -50,7 +52,7 @@ Boards store `DevServerConfig` with `setupCommand`, `devCommand`, and `skipSetup
 
 ## Notifications And Scripting
 
-`zenbanApp` bootstraps copied cmux app delegate state, Ghostty resources, bundled Zellij resources, and socket defaults before SwiftUI renders. `TerminalNotificationStore` still owns the desktop notification flow, and card routing continues to work even when a card terminal is detached because cmux-targeted notifications and Claude hooks do not depend on a mounted Ghostty surface. `cmux.sdef` exposes AppleScript support, and Finder Services call back into the copied `openTab` and `openWindow` handlers.
+`zenbanApp` bootstraps copied cmux app delegate state, Ghostty resources, current Bonsplit resources, bundled Zellij resources, and socket defaults before SwiftUI renders. `TerminalNotificationStore` and `TerminalNotificationQueue` own the desktop notification flow, and card routing continues to work even when a card terminal is detached because cmux-targeted notifications and Claude/Codex hooks do not depend on a mounted Ghostty surface. Zenban keeps cmux's Feed hook socket bridge without mounting the upstream sidebar UI, so hook telemetry and blocking replies flow through `feed.*` V2 methods, and the app bundle carries the Feed TUI and OpenCode hook-plugin resources used by the copied CLI. The copied CLI also has matching non-cloud socket support for `system.top`, `debug.terminals`, `tab.action` move-to-new-workspace, and tmux-compatible split equalization. Terminal paste/drop keeps upstream local clipboard fixes, including UTF-8 plain-text preference and image-only payload materialization, while remote upload paths stay disabled in Zenban. `cmux.sdef` exposes AppleScript support, and Finder Services call back into the copied `openTab` and `openWindow` handlers.
 
 ## Keyboard Shortcuts
 

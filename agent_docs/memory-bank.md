@@ -7,6 +7,9 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Sync cmux CLI hooks and socket parity
+- **Description**: Refreshed the copied cmux CLI, shell integrations, Bonsplit package, Claude/Codex hook handling, Feed TUI and OpenCode plugin resources, notification queue, Feed socket bridge, top/debug/equalize socket methods, tab move-to-new-workspace server path, and local terminal paste/drop behavior against the recent upstream window. Zenban keeps cloud, VM, remote, and upstream sidebar UI paths out of scope while preserving the valuable local hook, notification, and terminal workspace surfaces.
+
 - **Summary**: Auto-launch selected agent in extra terminals
 - **Description**: Ghostty-created tabs and splits now queue the card's currently selected agent command into each panel session's own Zellij launch-request file the first time that independent terminal starts. This keeps the root workspace terminal on the existing acknowledged Claude launch path while making new tabs and splits feel like full card terminals instead of empty shells. The extra panels still keep isolated sessions, so their shell state stays separate even though they launch the same selected agent by default.
 
@@ -72,33 +75,3 @@ Each item should follow this format:
 
 - **Summary**: Remove embedded runtime and preview host
 - **Description**: Deleted the current embedded terminal, browser host, notification flow, and agent launch runtime from the app, project settings, and bundled resources. Card detail and ready-state dev server views now show placeholders while keeping worktrees, git tooling, and dev server logs intact. Updated the architecture and feature docs to match this temporary stripped-down state before a future replacement is copied in.
-
-- **Summary**: Unify executable lookup and dev command UI
-- **Description**: Added a shared `ExecutableLocator` so npm and Claude executable discovery use the same candidate-path and PATH fallback behavior. Refactored package-manager parsing to reuse one lockfile-priority helper for setup-command and dev-command detection. Also cleaned up the repeated setup and dev command entry layout in the command sheet.
-
-- **Summary**: Simplify quick-win cleanup paths
-- **Description**: Removed unused helper APIs and stale compatibility shims that no longer had call sites. Simplified overlay handling, diff resets, placeholder UI, and file-browser error/session flows so more of the logic lives in one place. `DevServerManager` also now avoids rebuilding the full output string on every log chunk.
-
-- **Summary**: Robust Claude CLI install with node support
-- **Description**: `DependencyCheckService` now installs Node.js first when npm is missing before attempting the Claude Code CLI install. `ProcessEnvironment` was extended to better detect common node managers. The settings UI now shows check and install actions for each optional tool.
-
-- **Summary**: Add Git History tab with fast diff loading
-- **Description**: `GitChangesView` now includes both file changes and commit history. `GitLogService` loads commits and diffs asynchronously, and the diff renderer was rewritten for linear parsing to avoid slow repeated scans.
-
-- **Summary**: Optimize AI commit message generation
-- **Description**: Commit message generation now summarizes large changesets instead of always sending full diffs. The summarization path prioritizes representative files, trims oversized snippets, and skips generated or binary files to reduce latency and token usage.
-
-- **Summary**: Unify overlay state with OverlayState FSM
-- **Description**: Replaced separate overlay flags with a single `OverlayState` enum so dev server, git changes, and file browser views stay mutually exclusive. The store now centralizes cleanup when boards or cards change. This also made new overlay-specific shortcuts easier to add safely.
-
-- **Summary**: Migrate GitService to libgit2
-- **Description**: `GitService` now uses libgit2 instead of spawning git processes for core repository operations. Native repository, diff, branch, remote, and worktree helpers reduce process overhead and improve consistency across git features.
-
-- **Summary**: Add batch diff loading and scroll tracking
-- **Description**: Diff loading now supports fetching multiple file diffs in one pass and caches parsed output more directly. The diff UI also tracks visible files for better navigation and smoother synchronization with the file list.
-
-- **Summary**: Move Git Changes to the board area
-- **Description**: The Git Changes experience moved out of the card detail pane into the main board area, matching the dev server presentation model. A dedicated toggle action now opens and closes it without fighting other overlays.
-
-- **Summary**: Add delete confirmation dialog
-- **Description**: Added a dedicated delete confirmation flow for cards and updated keyboard shortcuts around destructive actions. The store now keeps delete request context so confirmation always applies to the intended card.

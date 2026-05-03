@@ -101,7 +101,8 @@ scrollback-limit = 25000000
     var fontSize: CGFloat = 12
     var theme: String?
     var workingDirectory: String?
-    var scrollbackLimit: Int = 10000
+    // Ghostty measures scrollback-limit in bytes, not lines.
+    var scrollbackLimit: Int = 10_000_000
     var unfocusedSplitOpacity: Double = 0.7
     var unfocusedSplitFill: NSColor?
     var splitDividerColor: NSColor?
@@ -450,7 +451,7 @@ scrollback-limit = 25000000
                 case "working-directory":
                     workingDirectory = value
                 case "scrollback-limit":
-                    if let limit = Int(value) {
+                    if let limit = Self.parseIntegerLiteral(value) {
                         scrollbackLimit = limit
                     }
                 case "background":
@@ -506,6 +507,12 @@ scrollback-limit = 25000000
                 }
             }
         }
+    }
+
+    private static func parseIntegerLiteral(_ value: String) -> Int? {
+        let normalized = value.replacingOccurrences(of: "_", with: "")
+        guard let parsed = Int(normalized), parsed >= 0 else { return nil }
+        return parsed
     }
 
     mutating func loadTheme(_ name: String) {
@@ -724,7 +731,8 @@ scrollback-limit = 25000000
         guard fileManager.fileExists(atPath: path) else { return nil }
 
         if let attributes = try? fileManager.attributesOfItem(atPath: path) {
-            if let type = attributes[.type] as? FileAttributeType, type != .typeRegular {
+            if let type = attributes[.type] as? FileAttributeType,
+               type != .typeRegular && type != .typeSymbolicLink {
                 return nil
             }
             if let size = attributes[.size] as? NSNumber, size.intValue == 0 {

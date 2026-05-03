@@ -201,6 +201,7 @@ extension Workspace {
         // restarts because the processes that set them are gone.
         statusEntries.removeAll()
         agentPIDs.removeAll()
+        agentListeningPorts.removeAll()
         logEntries = snapshot.logEntries.map { entry in
             SidebarLogEntry(
                 message: entry.message,
@@ -1012,6 +1013,7 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var pullRequest: SidebarPullRequestState?
     @Published var panelPullRequests: [UUID: SidebarPullRequestState] = [:]
     @Published var surfaceListeningPorts: [UUID: [Int]] = [:]
+    var agentListeningPorts: [Int] = []
     @Published var listeningPorts: [Int] = []
     var surfaceTTYNames: [UUID: String] = [:]
     private var panelShellActivityStates: [UUID: PanelShellActivityState] = [:]
@@ -1951,6 +1953,7 @@ final class Workspace: Identifiable, ObservableObject {
         pullRequest = nil
         panelPullRequests.removeAll()
         surfaceListeningPorts.removeAll()
+        agentListeningPorts.removeAll()
         listeningPorts.removeAll()
         metadataBlocks.removeAll()
         resetBrowserPanelsForContextChange(reason: reason)
@@ -2048,6 +2051,7 @@ final class Workspace: Identifiable, ObservableObject {
 
     func recomputeListeningPorts() {
         let unique = Set(surfaceListeningPorts.values.flatMap { $0 })
+            .union(agentListeningPorts)
         let next = unique.sorted()
         if listeningPorts != next {
             listeningPorts = next
@@ -2435,6 +2439,8 @@ final class Workspace: Identifiable, ObservableObject {
         launchMode: TerminalLaunchMode = .independentPersistent
     ) -> TerminalPanel? {
         let shouldFocusNewTab = focus ?? (bonsplitController.focusedPaneId == paneId)
+        let previousFocusedPanelId = focusedPanelId
+        let previousHostedView = focusedTerminalPanel?.hostedView
 
         let surfaceContext: ghostty_surface_context_e = GHOSTTY_SURFACE_CONTEXT_TAB
         let inheritedConfig = inheritedTerminalConfig(
@@ -2461,7 +2467,6 @@ final class Workspace: Identifiable, ObservableObject {
             kind: SurfaceKind.terminal,
             isDirty: newPanel.isDirty,
             isPinned: false,
-            select: shouldFocusNewTab,
             inPane: paneId
         ) else {
             discardCreatedTerminalPanel(newPanel.id)
@@ -2478,6 +2483,12 @@ final class Workspace: Identifiable, ObservableObject {
             bonsplitController.selectTab(newTabId)
             newPanel.focus()
             applyTabSelection(tabId: newTabId, inPane: paneId)
+        } else {
+            preserveFocusAfterNonFocusSplit(
+                preferredPanelId: previousFocusedPanelId,
+                splitPanelId: newPanel.id,
+                previousHostedView: previousHostedView
+            )
         }
         return newPanel
     }
@@ -2566,6 +2577,8 @@ final class Workspace: Identifiable, ObservableObject {
         bypassInsecureHTTPHostOnce: String? = nil
     ) -> BrowserPanel? {
         let shouldFocusNewTab = focus ?? (bonsplitController.focusedPaneId == paneId)
+        let previousFocusedPanelId = focusedPanelId
+        let previousHostedView = focusedTerminalPanel?.hostedView
 
         let browserPanel = BrowserPanel(
             workspaceId: id,
@@ -2582,7 +2595,6 @@ final class Workspace: Identifiable, ObservableObject {
             isDirty: browserPanel.isDirty,
             isLoading: browserPanel.isLoading,
             isPinned: false,
-            select: shouldFocusNewTab,
             inPane: paneId
         ) else {
             panels.removeValue(forKey: browserPanel.id)
@@ -2604,6 +2616,12 @@ final class Workspace: Identifiable, ObservableObject {
             bonsplitController.selectTab(newTabId)
             browserPanel.focus()
             applyTabSelection(tabId: newTabId, inPane: paneId)
+        } else {
+            preserveFocusAfterNonFocusSplit(
+                preferredPanelId: previousFocusedPanelId,
+                splitPanelId: browserPanel.id,
+                previousHostedView: previousHostedView
+            )
         }
 
         installBrowserPanelSubscription(browserPanel)
@@ -2691,6 +2709,8 @@ final class Workspace: Identifiable, ObservableObject {
         focus: Bool? = nil
     ) -> MarkdownPanel? {
         let shouldFocusNewTab = focus ?? (bonsplitController.focusedPaneId == paneId)
+        let previousFocusedPanelId = focusedPanelId
+        let previousHostedView = focusedTerminalPanel?.hostedView
 
         let markdownPanel = MarkdownPanel(workspaceId: id, filePath: filePath)
         panels[markdownPanel.id] = markdownPanel
@@ -2703,7 +2723,6 @@ final class Workspace: Identifiable, ObservableObject {
             isDirty: markdownPanel.isDirty,
             isLoading: false,
             isPinned: false,
-            select: shouldFocusNewTab,
             inPane: paneId
         ) else {
             panels.removeValue(forKey: markdownPanel.id)
@@ -2718,6 +2737,12 @@ final class Workspace: Identifiable, ObservableObject {
             bonsplitController.focusPane(paneId)
             bonsplitController.selectTab(newTabId)
             applyTabSelection(tabId: newTabId, inPane: paneId)
+        } else {
+            preserveFocusAfterNonFocusSplit(
+                preferredPanelId: previousFocusedPanelId,
+                splitPanelId: markdownPanel.id,
+                previousHostedView: previousHostedView
+            )
         }
 
         installMarkdownPanelSubscription(markdownPanel)

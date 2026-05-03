@@ -9,6 +9,20 @@ private class ThemedSplitView: NSSplitView {
     override var dividerColor: NSColor {
         customDividerColor ?? super.dividerColor
     }
+
+    override var isOpaque: Bool { false }
+
+    // NSSplitView's default `mouseDownCanMoveWindow` reports `true` whenever it
+    // appears opaque to AppKit, and even with `isOpaque=false` AppKit can
+    // promote it back to draggable when nested inside a non-titlebar window.
+    // In `presentationMode == "minimal"` (no titlebar drag region), AppKit was
+    // treating mouseDowns inside the LEFT pane of a horizontal split as window
+    // drag intents and consuming the mouseUp before SwiftUI's tap gesture
+    // could fire on tab items. Forcing `false` here keeps the entire pane
+    // hosting chain non-draggable so SwiftUI gestures get every click.
+    // See `NonDraggableHostingView` in SplitNodeView.swift for the rest of
+    // the chain.
+    override var mouseDownCanMoveWindow: Bool { false }
 }
 
 #if DEBUG
@@ -96,10 +110,6 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         )
     }
 
-    private var chromeBackgroundColor: NSColor {
-        TabBarColors.nsColorPaneBackground(for: appearance)
-    }
-
     func makeNSView(context: Context) -> NSSplitView {
 #if DEBUG
         let splitView: ThemedSplitView = {
@@ -114,26 +124,29 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         splitView.isVertical = splitState.orientation == .horizontal
         splitView.dividerStyle = .thin
         splitView.delegate = context.coordinator
-        // Bonsplit is often embedded in transparent/vibrant window backgrounds. Ensure the
-        // split view itself is not fully transparent so divider regions don't "show through"
-        // to whatever is behind the split hierarchy.
         splitView.wantsLayer = true
-        splitView.layer?.backgroundColor = chromeBackgroundColor.cgColor
+        splitView.layer?.backgroundColor = NSColor.clear.cgColor
+        splitView.layer?.isOpaque = false
 
         // Keep arranged subviews stable (always 2) to avoid transient "collapse" flashes when
         // replacing pane<->split content. We swap the hosted content within these containers.
-        let firstContainer = NSView()
+        // The containers use `SplitArrangedContainerView` (rather than bare NSView) so they
+        // override `mouseDownCanMoveWindow=false` — see `NonDraggableHostingView` in
+        // SplitNodeView.swift for the regression this guards against.
+        let firstContainer = SplitArrangedContainerView()
         firstContainer.wantsLayer = true
-        firstContainer.layer?.backgroundColor = chromeBackgroundColor.cgColor
+        firstContainer.layer?.backgroundColor = NSColor.clear.cgColor
+        firstContainer.layer?.isOpaque = false
         firstContainer.layer?.masksToBounds = true
         let firstController = makeHostingController(for: splitState.first)
         installHostingController(firstController, into: firstContainer)
         splitView.addArrangedSubview(firstContainer)
         context.coordinator.firstHostingController = firstController
 
-        let secondContainer = NSView()
+        let secondContainer = SplitArrangedContainerView()
         secondContainer.wantsLayer = true
-        secondContainer.layer?.backgroundColor = chromeBackgroundColor.cgColor
+        secondContainer.layer?.backgroundColor = NSColor.clear.cgColor
+        secondContainer.layer?.isOpaque = false
         secondContainer.layer?.masksToBounds = true
         let secondController = makeHostingController(for: splitState.second)
         installHostingController(secondController, into: secondContainer)
@@ -308,7 +321,8 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         // view-hierarchy-based NSDraggingDestination routing.
         splitView.isHidden = !controller.isInteractive
         splitView.wantsLayer = true
-        splitView.layer?.backgroundColor = chromeBackgroundColor.cgColor
+        splitView.layer?.backgroundColor = NSColor.clear.cgColor
+        splitView.layer?.isOpaque = false
         (splitView as? ThemedSplitView)?.customDividerColor = TabBarColors.nsColorSeparator(for: appearance)
 
         // Update orientation if changed
@@ -326,9 +340,11 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             let firstContainer = arranged[0]
             let secondContainer = arranged[1]
             firstContainer.wantsLayer = true
-            firstContainer.layer?.backgroundColor = chromeBackgroundColor.cgColor
+            firstContainer.layer?.backgroundColor = NSColor.clear.cgColor
+            firstContainer.layer?.isOpaque = false
             secondContainer.wantsLayer = true
-            secondContainer.layer?.backgroundColor = chromeBackgroundColor.cgColor
+            secondContainer.layer?.backgroundColor = NSColor.clear.cgColor
+            secondContainer.layer?.isOpaque = false
 
             updateHostedContent(
                 in: firstContainer,
@@ -355,8 +371,8 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
 
     // MARK: - Helpers
 
-    private func makeHostingController(for node: SplitNode) -> NSHostingController<AnyView> {
-        let hostingController = NSHostingController(rootView: AnyView(makeView(for: node)))
+    private func makeHostingController(for node: SplitNode) -> NonDraggableHostingController<AnyView> {
+        let hostingController = NonDraggableHostingController(rootView: AnyView(makeView(for: node)))
         if #available(macOS 13.0, *) {
             // NSSplitView owns pane geometry. Keep NSHostingController from publishing
             // intrinsic-size constraints that force a minimum pane width.
@@ -378,7 +394,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         return hostingController
     }
 
-    private func installHostingController(_ hostingController: NSHostingController<AnyView>, into container: NSView) {
+    private func installHostingController(_ hostingController: NonDraggableHostingController<AnyView>, into container: NSView) {
         let hostedView = hostingController.view
         hostedView.frame = container.bounds
         hostedView.autoresizingMask = [.width, .height]
@@ -391,7 +407,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         in container: NSView,
         node: SplitNode,
         nodeTypeChanged: Bool,
-        controller: inout NSHostingController<AnyView>?
+        controller: inout NonDraggableHostingController<AnyView>?
     ) {
         // Historically we recreated the NSHostingController when the child node type changed
         // (pane <-> split) to force a full detach/reattach of native AppKit subviews.
@@ -468,8 +484,8 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         var firstNodeType: SplitNode.NodeType
         var secondNodeType: SplitNode.NodeType
         /// Retain hosting controllers so SwiftUI content stays alive
-        var firstHostingController: NSHostingController<AnyView>?
-        var secondHostingController: NSHostingController<AnyView>?
+        var firstHostingController: NonDraggableHostingController<AnyView>?
+        var secondHostingController: NonDraggableHostingController<AnyView>?
 
         init(
             splitState: SplitState,
@@ -554,6 +570,13 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             let minPaneSize = effectiveMinimumPaneSize(in: splitView)
             let maxPosition = max(minPaneSize, available - minPaneSize)
             return min(max(position, minPaneSize), maxPosition)
+        }
+
+        private func dividerHitRectContains(_ point: NSPoint, rect: NSRect) -> Bool {
+            point.x >= rect.minX &&
+                point.x <= rect.maxX &&
+                point.y >= rect.minY &&
+                point.y <= rect.maxY
         }
 #if DEBUG
         private func debugLogDividerDragSkip(
@@ -730,8 +753,11 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 let y = max(0, a.maxY)
                 dividerRect = NSRect(x: 0, y: y, width: splitView.bounds.width, height: thickness)
             }
-            let hitRect = dividerRect.insetBy(dx: -4, dy: -4)
-            if hitRect.contains(location) {
+            // Match the divider's expanded effective rect and treat the max edge
+            // as inside so drag tracking doesn't miss when AppKit reports a point
+            // exactly on the divider boundary during multi-split resizes.
+            let hitRect = dividerRect.insetBy(dx: -5, dy: -5)
+            if dividerHitRectContains(location, rect: hitRect) {
                 isDragging = true
 #if DEBUG
                 dlog(
@@ -837,17 +863,18 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                     return
                 }
 
-                Task { @MainActor in
+                // NSSplitView delegate callbacks already arrive on the main thread.
+                // Deferring this write through a Task can replay stale divider ratios
+                // via updateNSView() and make fast drags snap back to older positions.
 #if DEBUG
-                    dlog(
-                        "divider.dragUpdate split=\(splitState.id.uuidString.prefix(5)) normalized=\(String(format: "%.3f", normalizedPosition)) px=\(Int(dividerPosition.rounded())) available=\(Int(availableSize.rounded()))"
-                    )
+                dlog(
+                    "divider.dragUpdate split=\(splitState.id.uuidString.prefix(5)) normalized=\(String(format: "%.3f", normalizedPosition)) px=\(Int(dividerPosition.rounded())) available=\(Int(availableSize.rounded()))"
+                )
 #endif
-                    self.splitState.dividerPosition = normalizedPosition
-                    self.lastAppliedPosition = normalizedPosition
-                    // Notify geometry change with drag state
-                    self.onGeometryChange?(wasDragging)
-                }
+                self.splitState.dividerPosition = normalizedPosition
+                self.lastAppliedPosition = normalizedPosition
+                // Notify geometry change with drag state
+                self.onGeometryChange?(wasDragging)
             }
         }
 

@@ -14,7 +14,7 @@ struct TabDragPreview: View {
             }
 
             Text(tab.title)
-                .font(.system(size: TabBarMetrics.titleFontSize))
+                .font(.system(size: appearance.tabTitleFontSize))
                 .lineLimit(1)
                 .foregroundStyle(TabBarColors.activeText(for: appearance))
         }

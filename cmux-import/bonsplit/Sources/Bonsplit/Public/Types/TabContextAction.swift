@@ -4,10 +4,14 @@ import Foundation
 public enum TabContextAction: String, CaseIterable, Sendable {
     case rename
     case clearName
+    case copyIdentifiers
     case closeToLeft
     case closeToRight
     case closeOthers
     case move
+    case moveToNewWorkspace
+    case moveToLeftPane
+    case moveToRightPane
     case newTerminalToRight
     case newBrowserToRight
     case reload
@@ -16,4 +20,16 @@ public enum TabContextAction: String, CaseIterable, Sendable {
     case markAsRead
     case markAsUnread
     case toggleZoom
+}
+
+public struct TabContextMoveDestination: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    public let isEnabled: Bool
+
+    public init(id: String, title: String, isEnabled: Bool = true) {
+        self.id = id
+        self.title = title
+        self.isEnabled = isEnabled
+    }
 }

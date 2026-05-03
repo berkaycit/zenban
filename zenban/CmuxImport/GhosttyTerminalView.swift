@@ -28,6 +28,54 @@ private func cmuxTransparentWindowBaseColor() -> NSColor {
     // avoids visual artifacts that can happen with a fully clear window background.
     NSColor.white.withAlphaComponent(0.001)
 }
+
+func cmuxGhosttyModifierActionForFlagsChanged(
+    keyCode: UInt16,
+    modifierFlagsRawValue: UInt
+) -> ghostty_input_action_e? {
+    let flags = NSEvent.ModifierFlags(rawValue: modifierFlagsRawValue)
+    let modifierActive: Bool
+    switch keyCode {
+    case 0x39:
+        modifierActive = flags.contains(.capsLock)
+    case 0x38, 0x3C:
+        modifierActive = flags.contains(.shift)
+    case 0x3B, 0x3E:
+        modifierActive = flags.contains(.control)
+    case 0x3A, 0x3D:
+        modifierActive = flags.contains(.option)
+    case 0x37, 0x36:
+        modifierActive = flags.contains(.command)
+    default:
+        return nil
+    }
+
+    guard modifierActive else { return GHOSTTY_ACTION_RELEASE }
+
+    let sidePressed: Bool
+    switch keyCode {
+    case 0x38:
+        sidePressed = modifierFlagsRawValue & UInt(NX_DEVICELSHIFTKEYMASK) != 0
+    case 0x3C:
+        sidePressed = modifierFlagsRawValue & UInt(NX_DEVICERSHIFTKEYMASK) != 0
+    case 0x3B:
+        sidePressed = modifierFlagsRawValue & UInt(NX_DEVICELCTLKEYMASK) != 0
+    case 0x3E:
+        sidePressed = modifierFlagsRawValue & UInt(NX_DEVICERCTLKEYMASK) != 0
+    case 0x3A:
+        sidePressed = modifierFlagsRawValue & UInt(NX_DEVICELALTKEYMASK) != 0
+    case 0x3D:
+        sidePressed = modifierFlagsRawValue & UInt(NX_DEVICERALTKEYMASK) != 0
+    case 0x37:
+        sidePressed = modifierFlagsRawValue & UInt(NX_DEVICELCMDKEYMASK) != 0
+    case 0x36:
+        sidePressed = modifierFlagsRawValue & UInt(NX_DEVICERCMDKEYMASK) != 0
+    default:
+        sidePressed = true
+    }
+
+    return sidePressed ? GHOSTTY_ACTION_PRESS : GHOSTTY_ACTION_RELEASE
+}
 #endif
 
 #if DEBUG
@@ -76,11 +124,18 @@ private func cmuxTabManager(for tabId: UUID) -> TabManager? {
 #endif
 
 private enum GhosttyPasteboardHelper {
+    enum ImageFileMaterializationResult {
+        case saved(URL)
+        case noDecodableImagePayload
+        case rejectedImagePayload
+    }
+
     private static let selectionPasteboard = NSPasteboard(
         name: NSPasteboard.Name("com.mitchellh.ghostty.selection")
     )
     private static let utf8PlainTextType = NSPasteboard.PasteboardType("public.utf8-plain-text")
     private static let shellEscapeCharacters = "\\ ()[]{}<>\"'`!#$&;|*?\t"
+    private static let temporaryImageFilenamePrefix = "clipboard-"
     private static let objectReplacementCharacter = Character(UnicodeScalar(0xFFFC)!)
 
     static func pasteboard(for location: ghostty_clipboard_e) -> NSPasteboard? {
@@ -95,46 +150,39 @@ private enum GhosttyPasteboardHelper {
     }
 
     static func stringContents(from pasteboard: NSPasteboard) -> String? {
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
+        let types = pasteboard.types ?? []
+
+        if (types.contains(.fileURL) || types.contains(.URL)),
+           let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
            !urls.isEmpty {
             return urls
                 .map { $0.isFileURL ? escapeForShell($0.path) : $0.absoluteString }
                 .joined(separator: " ")
         }
 
-        if let value = pasteboard.string(forType: .string) {
-            return value
-        }
-
-        if let value = pasteboard.string(forType: utf8PlainTextType) {
-            return value
-        }
-
-        if hasImageData(in: pasteboard),
+        let hasImagePayload = hasImageData(in: pasteboard)
+        let hasRTFDAttachmentPayload = types.contains(.rtfd)
+        if hasImagePayload,
            let html = pasteboard.string(forType: .html),
            htmlHasNoVisibleText(html) {
             return nil
         }
 
-        if let htmlText = attributedStringContents(from: pasteboard, type: .html, documentType: .html) {
-            return htmlText
+        if !hasImagePayload && !hasRTFDAttachmentPayload,
+           let value = plainTextContents(from: pasteboard) {
+            return value
         }
 
-        if let rtfText = attributedStringContents(from: pasteboard, type: .rtf, documentType: .rtf) {
-            return rtfText
-        }
-
-        return attributedStringContents(from: pasteboard, type: .rtfd, documentType: .rtfd)
+        return richTextContents(from: pasteboard)
     }
 
     static func hasString(for location: ghostty_clipboard_e) -> Bool {
         guard let pasteboard = pasteboard(for: location) else { return false }
-        let types = pasteboard.types ?? []
-        if types.contains(.fileURL) || types.contains(.string) || types.contains(utf8PlainTextType)
-            || types.contains(.html) || types.contains(.rtf) || types.contains(.rtfd) {
-            return true
-        }
-        return hasImageData(in: pasteboard)
+        return hasPasteableContents(in: pasteboard)
+    }
+
+    static func fallbackPlainTextContents(from pasteboard: NSPasteboard) -> String? {
+        plainTextContents(from: pasteboard)
     }
 
     static func writeString(_ string: String, to location: ghostty_clipboard_e) {
@@ -144,11 +192,19 @@ private enum GhosttyPasteboardHelper {
     }
 
     static func escapeForShell(_ value: String) -> String {
+        if value.contains(where: { $0 == "\n" || $0 == "\r" }) {
+            return shellSingleQuoted(value)
+        }
         var result = value
         for char in shellEscapeCharacters {
             result = result.replacingOccurrences(of: String(char), with: "\\\(char)")
         }
         return result
+    }
+
+    private static func shellSingleQuoted(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+        return "'\(escaped)'"
     }
 
     private static func attributedStringContents(
@@ -169,6 +225,61 @@ private enum GhosttyPasteboardHelper {
 
         guard let sanitized, !sanitized.isEmpty else { return nil }
         return sanitized
+    }
+
+    private static func richTextContents(from pasteboard: NSPasteboard) -> String? {
+        if let htmlText = attributedStringContents(from: pasteboard, type: .html, documentType: .html) {
+            return htmlText
+        }
+        if let rtfText = attributedStringContents(from: pasteboard, type: .rtf, documentType: .rtf) {
+            return rtfText
+        }
+        return attributedStringContents(from: pasteboard, type: .rtfd, documentType: .rtfd)
+    }
+
+    private static func plainTextContents(from pasteboard: NSPasteboard) -> String? {
+        let allTypes = pasteboard.types ?? []
+
+        for preferred in [utf8PlainTextType, NSPasteboard.PasteboardType.string] {
+            guard allTypes.contains(preferred) else { continue }
+            guard let value = pasteboard.string(forType: preferred), !value.isEmpty else { continue }
+            return value
+        }
+
+        for type in allTypes {
+            if type == utf8PlainTextType || type == .string { continue }
+            guard isPlainTextType(type) else { continue }
+            guard let value = pasteboard.string(forType: type), !value.isEmpty else { continue }
+            return value
+        }
+
+        return nil
+    }
+
+    private static func hasPasteableContents(in pasteboard: NSPasteboard) -> Bool {
+        let types = pasteboard.types ?? []
+        if types.contains(.fileURL) || types.contains(.URL)
+            || types.contains(.html) || types.contains(.rtf) || types.contains(.rtfd) {
+            return true
+        }
+        if types.contains(where: isPlainTextType) {
+            return true
+        }
+        return hasImageData(in: pasteboard)
+    }
+
+    private static func isPlainTextType(_ type: NSPasteboard.PasteboardType) -> Bool {
+        if type == .string || type == utf8PlainTextType {
+            return true
+        }
+
+        guard type != .html,
+              type != .rtf,
+              type != .rtfd,
+              type != .fileURL,
+              let utType = UTType(type.rawValue) else { return false }
+
+        return utType.conforms(to: .plainText)
     }
 
     private static func attributedString(
@@ -298,15 +409,9 @@ private enum GhosttyPasteboardHelper {
         return normalized.isEmpty
     }
 
-    /// When the clipboard contains only image data (or rich text that resolves to
-    /// an attachment-only image), saves it as a temporary image file and returns the
-    /// shell-escaped file path. Returns nil if the clipboard contains text or no image.
-    static func saveClipboardImageIfNeeded(
-        from pasteboard: NSPasteboard = .general,
-        assumeNoText: Bool = false
-    ) -> String? {
-        if !assumeNoText && stringContents(from: pasteboard) != nil { return nil }
-
+    static func materializeImageFileURLIfNeeded(
+        from pasteboard: NSPasteboard = .general
+    ) -> ImageFileMaterializationResult {
         let imageData: Data
         let fileExtension: String
         if let directImage = directImageRepresentation(in: pasteboard) {
@@ -320,7 +425,9 @@ private enum GhosttyPasteboardHelper {
                   let image = NSImage(pasteboard: pasteboard),
                   let tiffData = image.tiffRepresentation,
                   let bitmap = NSBitmapImageRep(data: tiffData),
-                  let pngData = bitmap.representation(using: .png, properties: [:]) else { return nil }
+                  let pngData = bitmap.representation(using: .png, properties: [:]) else {
+                return .noDecodableImagePayload
+            }
             imageData = pngData
             fileExtension = "png"
         }
@@ -330,26 +437,49 @@ private enum GhosttyPasteboardHelper {
 #if DEBUG
             dlog("terminal.paste.image.rejected reason=tooLarge bytes=\(imageData.count)")
 #endif
-            return nil
+            return .rejectedImagePayload
         }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         let timestamp = formatter.string(from: Date())
-        let filename = "clipboard-\(timestamp)-\(UUID().uuidString.prefix(8)).\(fileExtension)"
-        let path = (NSTemporaryDirectory() as NSString).appendingPathComponent(filename)
+        let filename = "\(temporaryImageFilenamePrefix)\(timestamp)-\(UUID().uuidString.prefix(8)).\(fileExtension)"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
 
         do {
-            try imageData.write(to: URL(fileURLWithPath: path))
+            try imageData.write(to: fileURL)
         } catch {
 #if DEBUG
             dlog("terminal.paste.image.writeFailed error=\(error.localizedDescription)")
 #endif
-            return nil
+            return .rejectedImagePayload
         }
 
-        return escapeForShell(path)
+        return .saved(fileURL)
+    }
+
+    static func saveImageFileURLIfNeeded(
+        from pasteboard: NSPasteboard = .general,
+        assumeNoText: Bool = false
+    ) -> URL? {
+        if !assumeNoText && stringContents(from: pasteboard) != nil { return nil }
+
+        guard case .saved(let fileURL) = materializeImageFileURLIfNeeded(from: pasteboard) else {
+            return nil
+        }
+        return fileURL
+    }
+
+    /// When the clipboard contains only image data (or rich text that resolves to
+    /// an attachment-only image), saves it as a temporary image file and returns the
+    /// shell-escaped file path. Returns nil if the clipboard contains text or no image.
+    static func saveClipboardImageIfNeeded(
+        from pasteboard: NSPasteboard = .general,
+        assumeNoText: Bool = false
+    ) -> String? {
+        saveImageFileURLIfNeeded(from: pasteboard, assumeNoText: assumeNoText)
+            .map { escapeForShell($0.path) }
     }
 }
 
@@ -5488,14 +5618,20 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             return
         }
 
+        let action = cmuxGhosttyModifierActionForFlagsChanged(
+            keyCode: event.keyCode,
+            modifierFlagsRawValue: event.modifierFlags.rawValue
+        ) ?? GHOSTTY_ACTION_PRESS
+
         var keyEvent = ghostty_input_key_s()
-        keyEvent.action = GHOSTTY_ACTION_PRESS
+        keyEvent.action = action
         keyEvent.keycode = UInt32(event.keyCode)
         keyEvent.mods = modsFromEvent(event)
         keyEvent.consumed_mods = GHOSTTY_MODS_NONE
         keyEvent.text = nil
         keyEvent.composing = false
-        _ = ghostty_surface_key(surface, keyEvent)
+        keyEvent.unshifted_codepoint = 0
+        _ = sendGhosttyKey(surface, keyEvent)
     }
 
     private func modsFromEvent(_ event: NSEvent) -> ghostty_input_mods_e {
@@ -6016,6 +6152,13 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             return urls
                 .map { Self.escapeDropForShell($0.path) }
                 .joined(separator: " ")
+        }
+
+        if let imagePath = GhosttyPasteboardHelper.saveClipboardImageIfNeeded(
+            from: pasteboard,
+            assumeNoText: true
+        ) {
+            return imagePath
         }
 
         if let rawURL = pasteboard.string(forType: .URL), !rawURL.isEmpty {

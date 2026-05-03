@@ -25,10 +25,12 @@
 - Hidden card terminals stop rendering after a short delay but keep their shell and agent processes running in Zellij
 - The app menu and General settings expose `Ghostty Settings…` and `Reload Configuration`; Zenban now seeds and opens its own app-scoped Ghostty config at `~/Library/Application Support/com.berkaycit.zenban/config.ghostty`
 - Embedded terminals no longer inherit the standalone Ghostty user config; Zenban reloads only its own Ghostty config plus bundled performance overrides
+- The embedded workspace chrome uses the current cmux Bonsplit tab and split package, including its latest tab-bar action lane and drop-handling behavior
 - When an embedded terminal is focused, terminal-local bindings such as `new_tab`, `new_split`, `previous_tab`, `next_tab`, and `close_surface` now route through Ghostty's own config instead of Zenban's host shortcut layer
 - `Cmd+T` and other remapped Ghostty tab shortcuts can now change with the Zenban-scoped Ghostty config; stale host shortcuts are swallowed instead of overriding Ghostty
 - Extra terminal tabs and splits now get their own persistent Zellij-backed shell sessions instead of sharing the root card session, those independent sessions survive card hide/reopen runtime reclaim, and each new panel auto-launches the card's currently selected agent command on first startup
 - When the selected card's Ghostty terminal is focused, `Cmd+Shift+T` toggles an app-content fullscreen mode for that card and exits automatically if selection, overlays, or workspace availability changes
+- Terminal paste/drop follows the current cmux local behavior for UTF-8 plain text and image-only payloads; remote upload handling is intentionally not enabled in Zenban
 - `Done` cards keep their terminal closed by default and expose an `Open Terminal` action for manual reopening
 - Leaving a reopened `Done` card closes its workspace and tears down that card's Zellij session again
 - Agent pills update stored card state and relaunch the selected command when needed
@@ -56,6 +58,9 @@
 ## Notifications And Finder Services
 
 - cmux-derived desktop notifications still queue, mark unread, move cards into `In Review`, and clear again when the owning workspace is focused
+- Claude, Codex, and OpenCode hook telemetry use the copied cmux Feed socket bridge for `feed.push`, `feed.list`, and blocking permission, question, and plan replies without exposing the upstream sidebar Feed UI
+- The bundled CLI includes the Feed TUI and OpenCode hook plugin resources needed by the copied hook commands
+- The copied cmux CLI can inspect Zenban terminal panels through `top` and `debug-terminals`, create caller-targeted notifications, equalize splits, and move a terminal tab into a new workspace without requiring cmux cloud, VM, or sidebar UI
 - Finder Services expose “New Zenban Workspace Here” and “New Zenban Window Here”
 - The app bundle includes a cmux-based AppleScript dictionary and English localization catalogs
 

@@ -23,6 +23,16 @@ public final class BonsplitController {
         }
     }
 
+    public struct ExternalFileDropRequest {
+        public let urls: [URL]
+        public let destination: ExternalTabDropRequest.Destination
+
+        public init(urls: [URL], destination: ExternalTabDropRequest.Destination) {
+            self.urls = urls
+            self.destination = destination
+        }
+    }
+
     // MARK: - Delegate
 
     /// Delegate for receiving callbacks about tab bar events
@@ -40,6 +50,15 @@ public final class BonsplitController {
         didSet { internalController.isInteractive = isInteractive }
     }
 
+    /// Whether pane tab shortcut hints are currently actionable.
+    ///
+    /// Pane focus is internal to Bonsplit, but host apps can move keyboard focus
+    /// to external controls while keeping the focused pane selected. Set this
+    /// to false when pane-number shortcuts should not currently be advertised.
+    public var tabShortcutHintsEnabled: Bool = true {
+        didSet { internalController.tabShortcutHintsEnabled = tabShortcutHintsEnabled }
+    }
+
     /// Handler for file/URL drops from external apps (e.g., Finder).
     /// Called when files are dropped onto a pane's content area.
     /// Return `true` if the drop was handled.
@@ -50,6 +69,13 @@ public final class BonsplitController {
     /// Handler for tab drops originating from another Bonsplit controller (e.g. another workspace/window).
     /// Return `true` when the drop has been handled by the host application.
     @ObservationIgnored public var onExternalTabDrop: ((ExternalTabDropRequest) -> Bool)?
+
+    /// Handler for file drops from external apps, routed through pane drop zones.
+    /// Return `true` when the drop has been handled by the host application.
+    @ObservationIgnored public var onExternalFileDrop: ((ExternalFileDropRequest) -> Bool)?
+
+    /// Host-provided destinations for the tab context menu's Move Tab submenu.
+    @ObservationIgnored public var tabContextMoveDestinationsProvider: ((TabID, PaneID) -> [TabContextMoveDestination])?
 
     /// Called when the user explicitly requests to close a tab from the tab strip UI.
     /// Internal host-driven closes should not use this hook.
@@ -80,7 +106,6 @@ public final class BonsplitController {
     ///   - showsNotificationBadge: Whether the tab shows an "unread/activity" badge
     ///   - isLoading: Whether the tab shows an activity/loading indicator (e.g. spinning icon)
     ///   - isPinned: Whether the tab should be treated as pinned
-    ///   - select: Whether the new tab should become the pane's selected tab
     ///   - pane: Optional pane to add the tab to (defaults to focused pane)
     /// - Returns: The TabID of the created tab, or nil if creation was vetoed by delegate
     @discardableResult
@@ -94,7 +119,6 @@ public final class BonsplitController {
         showsNotificationBadge: Bool = false,
         isLoading: Bool = false,
         isPinned: Bool = false,
-        select: Bool = true,
         inPane pane: PaneID? = nil
     ) -> TabID? {
         let tabId = TabID()
@@ -147,12 +171,7 @@ public final class BonsplitController {
             isLoading: isLoading,
             isPinned: isPinned
         )
-        internalController.addTab(
-            tabItem,
-            toPane: PaneID(id: targetPane.id),
-            atIndex: insertIndex,
-            select: select
-        )
+        internalController.addTab(tabItem, toPane: PaneID(id: targetPane.id), atIndex: insertIndex)
 
         // Notify delegate
         delegate?.splitTabBar(self, didCreateTab: tab, inPane: targetPane)
@@ -166,10 +185,21 @@ public final class BonsplitController {
         delegate?.splitTabBar(self, didRequestNewTab: kind, inPane: pane)
     }
 
+    /// Request the delegate to handle a host-defined tab bar action.
+    public func requestCustomAction(_ identifier: String, inPane pane: PaneID) {
+        delegate?.splitTabBar(self, didRequestCustomAction: identifier, inPane: pane)
+    }
+
     /// Request the delegate to handle a tab context-menu action.
     public func requestTabContextAction(_ action: TabContextAction, for tabId: TabID, inPane pane: PaneID) {
         guard let tab = tab(tabId) else { return }
         delegate?.splitTabBar(self, didRequestTabContextAction: action, for: tab, inPane: pane)
+    }
+
+    /// Request the delegate to move a tab to a host-provided destination.
+    public func requestTabMove(toDestination destinationId: String, for tabId: TabID, inPane pane: PaneID) {
+        guard let tab = tab(tabId) else { return }
+        delegate?.splitTabBar(self, didRequestTabMoveToDestination: destinationId, for: tab, inPane: pane)
     }
 
     /// Update an existing tab's metadata
@@ -581,6 +611,11 @@ public final class BonsplitController {
         if let focusedPaneId {
             delegate?.splitTabBar(self, didFocusPane: focusedPaneId)
         }
+    }
+
+    /// Find the closest pane in the requested direction from the given pane.
+    public func adjacentPane(to paneId: PaneID, direction: NavigationDirection) -> PaneID? {
+        internalController.adjacentPane(to: paneId, direction: direction)
     }
 
     // MARK: - Split Zoom
