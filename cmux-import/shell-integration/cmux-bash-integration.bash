@@ -405,6 +405,46 @@ _cmux_report_shell_activity_state() {
     } >/dev/null 2>&1 & disown
 }
 
+_cmux_consume_zellij_launch_request() {
+    local launch_file="${CMUX_ZELLIJ_LAUNCH_FILE:-}"
+    [[ -n "$launch_file" ]] || return 1
+    [[ -r "$launch_file" ]] || return 1
+
+    local claimed_file="${launch_file}.claimed.$$"
+    mv "$launch_file" "$claimed_file" >/dev/null 2>&1 || return 1
+
+    local token=""
+    local launch_command=""
+    if IFS= read -r token < "$claimed_file"; then
+        launch_command="$(sed -n '2p' "$claimed_file" 2>/dev/null || true)"
+    fi
+
+    rm -f "$claimed_file" >/dev/null 2>&1 || true
+
+    if [[ -z "$launch_command" ]]; then
+        launch_command="$token"
+        token=""
+    fi
+    [[ -n "$launch_command" ]] || return 1
+
+    if [[ -z "$token" ]]; then
+        token="legacy-$$-${SECONDS}"
+    fi
+
+    if [[ -S "$CMUX_SOCKET_PATH" ]] && [[ -n "$CMUX_TAB_ID" ]] && [[ -n "$CMUX_PANEL_ID" ]]; then
+        _cmux_send "launch_request_started $token --tab=$CMUX_TAB_ID --panel=$CMUX_PANEL_ID"
+    fi
+
+    _CMUX_CMD_START="$SECONDS"
+    _cmux_report_shell_activity_state running
+    _cmux_report_tty_once
+    _cmux_ports_kick command
+    _cmux_stop_pr_poll_loop
+
+    eval "$launch_command"
+    return 0
+}
+
 _cmux_ports_kick() {
     local reason="${1:-command}"
     # Lightweight: just tell the app to run a batched scan for this panel.
@@ -949,6 +989,9 @@ _cmux_bash_preexec_hook() {
 _cmux_prompt_command() {
     local last_status=$?
     _cmux_tmux_sync_cmux_environment
+    if _cmux_consume_zellij_launch_request; then
+        return 0
+    fi
 
     local cmux_has_unix_socket=0
     _cmux_socket_is_unix && cmux_has_unix_socket=1
