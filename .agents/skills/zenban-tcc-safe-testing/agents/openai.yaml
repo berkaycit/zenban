@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zenban TCC-Safe Testing"
+  short_description: "Run Zenban tests without TCC prompts"
+  default_prompt: "Use $zenban-tcc-safe-testing to run Zenban notification or terminal tests without macOS TCC prompts."

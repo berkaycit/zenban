@@ -21,6 +21,7 @@
 ## Testing
 
 - For notification, hook, Claude, Codex, or terminal-agent verification, run test boards and card workdirs from a non-protected path such as `~/Library/Caches/Zenban/notification-test-workdir`
+- Prefix app-hosted `xcodebuild` tests that can launch Zenban with `CMUX_UI_TEST_MODE=1` and `CMUX_UI_TEST_BOARD_STORAGE_DIRECTORY="$HOME/Library/Caches/Zenban/<test-name>"`; otherwise the test host can boot the normal app state and trigger TCC prompts from stale protected folders
 - Do not use Desktop, Documents, Downloads, Photos, Music, or other TCC-protected folders for unattended app verification; those prompts block Computer-driven tests
 - If TCC prompts reappear during notification tests, check for stale app state such as `NSOSPLastRootDirectory` pointing at a protected folder and move the board/card workdirs back under `~/Library/Caches/Zenban/...`
 - Confirm the launched agent environment uses the cache workdir for both `CMUX_AGENT_LAUNCH_CWD` and `PWD` before treating notification behavior as blocked

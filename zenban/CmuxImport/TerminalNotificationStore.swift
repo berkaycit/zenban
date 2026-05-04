@@ -690,6 +690,14 @@ final class TerminalNotificationStore: ObservableObject {
         let surfaceId: UUID?
     }
 
+    private struct DuplicateNotificationKey: Hashable {
+        let tabId: UUID
+        let surfaceId: UUID?
+        let title: String
+        let subtitle: String
+        let body: String
+    }
+
     private struct NotificationIndexes {
         var unreadCount = 0
         var unreadCountByTabId: [UUID: Int] = [:]
@@ -922,6 +930,29 @@ final class TerminalNotificationStore: ObservableObject {
             return
         }
 
+        let resolvedTitle = AppDelegate.shared?.tabTitle(for: tabId) ?? title
+        let duplicateKey = DuplicateNotificationKey(
+            tabId: tabId,
+            surfaceId: surfaceId,
+            title: resolvedTitle,
+            subtitle: subtitle,
+            body: body
+        )
+        if let existingUnreadNotification = notifications.first(where: {
+            !$0.isRead && Self.duplicateKey(for: $0) == duplicateKey
+        }) {
+            NSLog(
+                "agent.notification.store duplicate_suppressed existingId=%@ workspace=%@ surface=%@ title=%@ subtitle=%@ bodyLength=%d",
+                existingUnreadNotification.id.uuidString,
+                tabId.uuidString,
+                surfaceId?.uuidString ?? "nil",
+                resolvedTitle,
+                subtitle,
+                body.count
+            )
+            return
+        }
+
         var updated = notifications
         var idsToClear: [String] = []
         updated.removeAll { existing in
@@ -937,7 +968,6 @@ final class TerminalNotificationStore: ObservableObject {
             AppDelegate.shared?.tabManager?.moveTabToTopForNotification(tabId)
         }
 
-        let resolvedTitle = AppDelegate.shared?.tabTitle(for: tabId) ?? title
         let notification = TerminalNotification(
             id: UUID(),
             tabId: tabId,
@@ -973,6 +1003,16 @@ final class TerminalNotificationStore: ObservableObject {
         } else {
             notificationDeliveryHandler(self, notification)
         }
+    }
+
+    private static func duplicateKey(for notification: TerminalNotification) -> DuplicateNotificationKey {
+        DuplicateNotificationKey(
+            tabId: notification.tabId,
+            surfaceId: notification.surfaceId,
+            title: notification.title,
+            subtitle: notification.subtitle,
+            body: notification.body
+        )
     }
 
     func markRead(id: UUID) {

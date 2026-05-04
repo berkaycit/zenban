@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Add TCC-safe Zenban testing skill
+- **Description**: Added the repo-local `zenban-tcc-safe-testing` skill under `.agents/skills/` so future notification, hook, terminal-agent, app-hosted xcodebuild, and Computer verification runs use cache-backed state by default. The skill documents the required `CMUX_UI_TEST_MODE=1` and `CMUX_UI_TEST_BOARD_STORAGE_DIRECTORY=~/Library/Caches/Zenban/...` launch pattern, forbids protected Desktop/Documents/Downloads/Photos/Music workdirs, and includes a wrapper script for TCC-safe `xcodebuild` invocations.
+
+- **Summary**: Clarify TCC-safe app-hosted test launches
+- **Description**: App-hosted `xcodebuild` tests that can launch Zenban must be prefixed with `CMUX_UI_TEST_MODE=1` and `CMUX_UI_TEST_BOARD_STORAGE_DIRECTORY` pointing under `~/Library/Caches/Zenban/...`. Running those tests without the cache-backed env can boot the normal Zenban app state and surface stale TCC-protected folders such as Desktop, Documents, Downloads, Photos, or Music. If prompts reappear, clear stale app state such as `NSOSPLastRootDirectory` and rerun from a cache-backed board/workdir.
+
 - **Summary**: Restore visible card terminal startup and narrow git worktree latency
 - **Description**: Computer verification on the real `voxel-pipeline` board reproduced two separate issues: a card terminal could stay visually blank until the Ghostty view was clicked, and git-backed new cards spent most of their time in `Preparing workspace...` while the card worktree was being checked out. Visible workspace transitions now explicitly start/reattach the terminal surface, system `git` resolution is cached, initial workspace git metadata probes start later and stop after a usable snapshot, and new-card worktree creation uses system `git worktree add` without unconditional stale cleanup on the hot path. Follow-up Computer checks with `cc-33` and `cc-34` showed the terminal appears without clicking; remaining delay is dominated by the repo checkout itself. On `voxel-pipeline`, each worktree is about 3.6 GB, `repo-worktrees/card` was about 34 GB, and the disk had only about 1.7 GB free, so future speed tests should account for disk pressure before blaming terminal rendering. Continue using cache-backed `CMUX_UI_TEST_MODE=1` fixtures with `CMUX_UI_TEST_BOARD_STORAGE_DIRECTORY` under `~/Library/Caches/Zenban/...` for automated terminal/notification tests so TCC prompts for Desktop, Documents, Downloads, Photos, and Music do not block the run.
 
