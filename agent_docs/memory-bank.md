@@ -7,8 +7,11 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Port local cmux socket write hardening
+- **Description**: After auditing the last two months of upstream cmux commits, Zenban now carries the relevant cloud-free socket response write hardening from cmux: listener sockets are protected with `SO_NOSIGPIPE` before being made non-blocking, accepted socket clients are restored to blocking mode with a send timeout, socket responses write the full payload and stop on failed writes, and fast-closing accepted peers no longer spam `accept_client_config.failed`. The stale notification-ring state variable left after the OSC notification rendering fix was also removed. The audit confirmed the copied CLI and shell integration are otherwise already at the current cmux surface plus Zenban's Zellij launch additions.
+
 - **Summary**: Keep notification tests out of TCC-protected folders
-- **Description**: Computer-driven notification and hook verification should create or move test boards and card workdirs under `~/Library/Caches/Zenban/...`, then verify launched agents inherit that cache path in `CMUX_AGENT_LAUNCH_CWD` and `PWD`. Avoid Desktop, Documents, Downloads, Photos, and Music during unattended tests; if prompts return, check stale app state such as `NSOSPLastRootDirectory` before retesting notification delivery.
+- **Description**: Computer-driven notification and hook verification should launch Zenban with `CMUX_UI_TEST_MODE=1` and `CMUX_UI_TEST_BOARD_STORAGE_DIRECTORY` under `~/Library/Caches/Zenban/...`, then verify launched agents inherit that cache path in `CMUX_AGENT_LAUNCH_CWD` and `PWD`. Avoid Desktop, Documents, Downloads, Photos, and Music during unattended tests; if prompts return, check stale app state such as `NSOSPLastRootDirectory` before retesting notification delivery.
 
 - **Summary**: Restore bundled agent notification hooks
 - **Description**: Zenban `cmuxOnly` socket authorization now trusts the bundled cmux helper when it is launched from a Zenban terminal with the active socket, bundle, and surface environment, so Claude/Codex wrapper hooks can still deliver completion notifications after Zellij re-parents the shell outside the app process tree. Agent launch signatures also include the resolved launch command so wrapper changes force relaunch, and local notification verification should use a cache-backed workdir instead of protected user folders to avoid macOS TCC prompts.
