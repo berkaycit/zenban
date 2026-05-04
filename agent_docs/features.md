@@ -20,7 +20,7 @@
 
 ## Card Workspaces
 
-- The lower detail pane embeds a cmux-derived Ghostty workspace per card, backed by a bundled Zellij session per workspace
+- The lower detail pane embeds a cmux-derived Ghostty workspace per card; the root card terminal is backed by one bundled, workspace-scoped Zellij session, while extra tabs and splits get their own panel-scoped sessions
 - Claude auto-launch now goes through a per-workspace launch request queue that the shell prompt hook acknowledges before Zenban marks the launch as delivered or consumes a pending prompt
 - Hidden card terminals stop rendering after a short delay but keep their shell and agent processes running in Zellij
 - The app menu and General settings expose `Ghostty Settings…` and `Reload Configuration`; Zenban now seeds and opens its own app-scoped Ghostty config at `~/Library/Application Support/com.berkaycit.zenban/config.ghostty`
@@ -58,7 +58,8 @@
 ## Notifications And Finder Services
 
 - cmux-derived desktop notifications still queue, mark unread, move cards into `In Review`, and clear again when the owning workspace is focused
-- Claude and Codex card launches go through bundled wrappers so completion notifications and Feed hook telemetry target the active Zenban socket; OpenCode hook telemetry still uses the copied cmux Feed socket bridge
+- Claude and Codex card launches go through bundled wrappers so completion notifications and Feed hook telemetry target the active Zenban socket; `cmuxOnly` socket authorization accepts the bundled cmux helper when it carries Zenban's active terminal environment, so hooks still work after Zellij re-parents the shell outside Zenban's process tree
+- Notification and hook verification should use a non-protected workdir such as `~/Library/Caches/Zenban/...` instead of Desktop, Documents, Downloads, Photos, or Music paths so macOS TCC prompts do not block unattended test runs
 - The bundled CLI includes the Feed TUI and OpenCode hook plugin resources needed by the copied hook commands
 - The copied cmux CLI can inspect Zenban terminal panels through `top` and `debug-terminals`, create caller-targeted notifications, equalize splits, and move a terminal tab into a new workspace without requiring cmux cloud, VM, or sidebar UI
 - Finder Services expose “New Zenban Workspace Here” and “New Zenban Window Here”

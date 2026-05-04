@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Keep notification tests out of TCC-protected folders
+- **Description**: Computer-driven notification and hook verification should create or move test boards and card workdirs under `~/Library/Caches/Zenban/...`, then verify launched agents inherit that cache path in `CMUX_AGENT_LAUNCH_CWD` and `PWD`. Avoid Desktop, Documents, Downloads, Photos, and Music during unattended tests; if prompts return, check stale app state such as `NSOSPLastRootDirectory` before retesting notification delivery.
+
+- **Summary**: Restore bundled agent notification hooks
+- **Description**: Zenban `cmuxOnly` socket authorization now trusts the bundled cmux helper when it is launched from a Zenban terminal with the active socket, bundle, and surface environment, so Claude/Codex wrapper hooks can still deliver completion notifications after Zellij re-parents the shell outside the app process tree. Agent launch signatures also include the resolved launch command so wrapper changes force relaunch, and local notification verification should use a cache-backed workdir instead of protected user folders to avoid macOS TCC prompts.
+
 - **Summary**: Route Codex launches through bundled hooks
 - **Description**: Codex cards now launch the bundled `bin/codex` wrapper instead of relying on global Codex hook installation. The wrapper injects Zenban socket hooks at process launch, while the notification queue and delivery path now log accepted, dropped, suppressed, and scheduled events for reproducible agent notification debugging.
 - **Summary**: Sync cmux CLI hooks and socket parity

@@ -18,6 +18,13 @@
 - Use atomic writes: `data.write(to:options:.atomic)`
 - Store in `~/Library/Application Support/com.berkaycit.zenban/`
 
+## Testing
+
+- For notification, hook, Claude, Codex, or terminal-agent verification, run test boards and card workdirs from a non-protected path such as `~/Library/Caches/Zenban/notification-test-workdir`
+- Do not use Desktop, Documents, Downloads, Photos, Music, or other TCC-protected folders for unattended app verification; those prompts block Computer-driven tests
+- If TCC prompts reappear during notification tests, check for stale app state such as `NSOSPLastRootDirectory` pointing at a protected folder and move the board/card workdirs back under `~/Library/Caches/Zenban/...`
+- Confirm the launched agent environment uses the cache workdir for both `CMUX_AGENT_LAUNCH_CWD` and `PWD` before treating notification behavior as blocked
+
 ## Naming
 
 - Views: `*View.swift` (e.g., `BoardView`, `CardView`)
