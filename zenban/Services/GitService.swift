@@ -127,22 +127,24 @@ struct GitService {
             try fileManager.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
         }
 
-        await pruneAndCleanup(paths: paths, repositoryPath: repositoryPath)
+        let staleDirectoryExists = fileManager.fileExists(atPath: paths.directory)
+        if staleDirectoryExists {
+            await pruneAndCleanup(paths: paths, repositoryPath: repositoryPath)
+        }
 
         do {
-            try await runLibgit2 {
-                let repo = try Libgit2Repository(path: repositoryPath)
-                let baseBranch = try repo.currentBranchName()
-                try repo.addWorktree(
-                    name: paths.worktreeName,
-                    path: paths.directory,
-                    branch: paths.branch,
-                    createBranch: true,
-                    baseBranch: baseBranch
-                )
-            }
+            try await addWorktreeWithSystemGit(paths: paths, repositoryPath: repositoryPath)
         } catch {
-            throw GitError.worktreeCreationFailed(libgit2ErrorMessage(error))
+            if !staleDirectoryExists {
+                await pruneAndCleanup(paths: paths, repositoryPath: repositoryPath)
+                do {
+                    try await addWorktreeWithSystemGit(paths: paths, repositoryPath: repositoryPath)
+                } catch {
+                    throw normalizedWorktreeCreationError(error)
+                }
+            } else {
+                throw normalizedWorktreeCreationError(error)
+            }
         }
         return paths.directory
     }
@@ -173,10 +175,66 @@ struct GitService {
         return error.localizedDescription
     }
 
+    private static func normalizedWorktreeCreationError(_ error: Error) -> GitError {
+        if let gitError = error as? GitError {
+            return gitError
+        }
+        return GitError.worktreeCreationFailed(libgit2ErrorMessage(error))
+    }
+
     private static func runLibgit2<T>(_ work: @escaping () throws -> T) async throws -> T {
         try await Task.detached(priority: .utility) {
             try work()
         }.value
+    }
+
+    private static func addWorktreeWithSystemGit(paths: WorktreePaths, repositoryPath: String) async throws {
+        try await Task.detached(priority: .utility) {
+            guard let gitPath = DependencyCheckService.resolveGitPath() else {
+                throw GitError.worktreeCreationFailed("System git is unavailable")
+            }
+
+            let baseBranch = try Libgit2Repository(path: repositoryPath).currentBranchName() ?? "HEAD"
+            let output = try runProcess(
+                executablePath: gitPath,
+                arguments: [
+                    "-C", repositoryPath,
+                    "worktree", "add",
+                    "-b", paths.branch,
+                    paths.directory,
+                    baseBranch,
+                ]
+            )
+
+            guard output.status == 0 else {
+                throw GitError.worktreeCreationFailed(output.text)
+            }
+        }.value
+    }
+
+    private nonisolated static func runProcess(
+        executablePath: String,
+        arguments: [String]
+    ) throws -> (status: Int32, text: String) {
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+        process.waitUntilExit()
+
+        var output = Data()
+        output.append(stdout.fileHandleForReading.readDataToEndOfFile())
+        output.append(stderr.fileHandleForReading.readDataToEndOfFile())
+        let text = String(data: output, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (process.terminationStatus, text)
     }
 
     // MARK: - Status & Diff Operations

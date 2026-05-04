@@ -48,6 +48,9 @@ struct CardDetailView: View {
         .onChange(of: card.worktreePath) {
             syncDisplayedWorkspace()
         }
+        .onChange(of: cmuxHost.workspaceID(for: card.id)) {
+            syncDisplayedWorkspace()
+        }
         .onChange(of: card.column) {
             syncDisplayedWorkspace()
         }
@@ -416,11 +419,13 @@ struct CardDetailView: View {
             }
             activeWorkspace = targetWorkspace
             retiringWorkspace = nil
+            prepareVisibleTerminalSurface(targetWorkspace)
             return
         }
 
         guard previousActiveWorkspace?.id != targetWorkspace.id else {
             activeWorkspace = targetWorkspace
+            prepareVisibleTerminalSurface(targetWorkspace)
             return
         }
 
@@ -434,7 +439,16 @@ struct CardDetailView: View {
 
         activeWorkspace = targetWorkspace
         retiringWorkspace = previousActiveWorkspace
+        prepareVisibleTerminalSurface(targetWorkspace)
         scheduleWorkspaceHandoffCompletion(for: targetWorkspace)
+    }
+
+    private func prepareVisibleTerminalSurface(_ workspace: Workspace) {
+        workspace.prepareTerminalSurfaceForVisiblePresentation()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            workspace.prepareTerminalSurfaceForVisiblePresentation()
+        }
     }
 
     private func scheduleWorkspaceHandoffCompletion(for workspace: Workspace) {

@@ -72,7 +72,13 @@ actor DependencyCheckService {
         claudePathProvider()
     }
 
+    private nonisolated static let cachedGitPath = resolveGitPathUncached()
+
     nonisolated static func resolveGitPath() -> String? {
+        cachedGitPath
+    }
+
+    private nonisolated static func resolveGitPathUncached() -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["--find", "git"]

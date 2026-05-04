@@ -22,6 +22,38 @@ struct zenbanTests {
         #expect(createdCard.title == "cc-1")
     }
 
+    @MainActor
+    @Test
+    func failedWorktreeCreationReleasesWorkspaceWait() async throws {
+        let parentDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parentDirectory) }
+
+        let repositoryPath = try await GitService.createRepository(
+            name: "empty-repository",
+            parentPath: parentDirectory.path
+        )
+        let board = Board(name: "Empty Git", repositoryPath: repositoryPath, agent: .claude)
+        let store = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        let hostStore = CmuxHostStore()
+        store.cmuxHost = hostStore
+        hostStore.attach(boardStore: store)
+        store.selectedBoardID = board.id
+
+        store.addCardWithAutoName(to: board.id)
+
+        let createdCardID = try #require(store.board(for: board.id)?.cards.first?.id)
+        try await waitUntil {
+            !store.isWorktreeCreationPending(for: createdCardID)
+        }
+
+        let updatedCard = try #require(store.board(for: board.id)?.cards.first)
+        #expect(updatedCard.worktreePath == nil)
+        #expect(!hostStore.isWaitingForWorktree(for: updatedCard, boardID: board.id))
+        #expect(hostStore.workspace(for: updatedCard.id) != nil)
+    }
+
     @Test
     func legacyBoardsJsonDecodesWithoutAgentSummary() throws {
         let json = """
@@ -196,5 +228,24 @@ struct zenbanTests {
             hiddenInHierarchy: false,
             windowVisible: false
         ))
+    }
+
+    private func waitUntil(
+        timeout: Duration = .seconds(3),
+        condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        while clock.now < deadline {
+            if await condition() {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        throw WaitError.timedOut
+    }
+
+    private enum WaitError: Error {
+        case timedOut
     }
 }

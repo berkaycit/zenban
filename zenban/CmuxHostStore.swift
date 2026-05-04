@@ -40,6 +40,7 @@ final class CmuxHostStore {
         let command: String
         let targetSignature: String
         let shouldConsumePendingPrompt: Bool
+        var acceptedPanelIDs: Set<UUID>
         var didSendVisibleNudge: Bool
         var needsRequeue: Bool
         var retryCount: Int
@@ -74,7 +75,9 @@ final class CmuxHostStore {
     @ObservationIgnored private var hiddenWorkspaceReclaimTimeout: TimeInterval = 5 * 60
     @ObservationIgnored private var hiddenWorkspaceReclaimPollingInterval: Duration = .seconds(30)
     @ObservationIgnored private var hiddenWorkspaceDetachDelay: Duration = .seconds(3)
-    @ObservationIgnored private var pendingLaunchAckTimeout: TimeInterval = 5
+    @ObservationIgnored private var pendingLaunchAckTimeout: TimeInterval = 2
+    @ObservationIgnored private var pendingLaunchPollInterval: Duration = .milliseconds(50)
+    @ObservationIgnored private var pendingLaunchRetryLimit = 20
 #if DEBUG
     @ObservationIgnored private var launchCommandHandlerForTesting: ((UUID, String) -> Void)?
     @ObservationIgnored private var backgroundReclaimHandlerForTesting: ((UUID) -> Void)?
@@ -133,6 +136,10 @@ final class CmuxHostStore {
     func workspace(for cardID: UUID) -> Workspace? {
         guard let workspaceID = cardToWorkspaceID[cardID] else { return nil }
         return workspace(forID: workspaceID)
+    }
+
+    func workspaceID(for cardID: UUID) -> UUID? {
+        cardToWorkspaceID[cardID]
     }
 
     @discardableResult
@@ -198,12 +205,13 @@ final class CmuxHostStore {
     }
 
     func isWaitingForWorktree(for card: Card, boardID: UUID) -> Bool {
-        guard let board = boardStore?.board(for: boardID),
+        guard let boardStore,
+              let board = boardStore.board(for: boardID),
               let repositoryPath = board.repositoryPath,
               GitService.isGitRepository(path: repositoryPath) else {
             return false
         }
-        return card.worktreePath == nil
+        return card.worktreePath == nil && boardStore.isWorktreeCreationPending(for: card.id)
     }
 
     func updateTitle(for cardID: UUID, title: String) {
@@ -256,6 +264,7 @@ final class CmuxHostStore {
             command: command,
             targetSignature: postLaunchSignature,
             shouldConsumePendingPrompt: normalizedPrompt != nil,
+            acceptedPanelIDs: [],
             didSendVisibleNudge: false,
             needsRequeue: true,
             retryCount: 0,
@@ -465,7 +474,7 @@ final class CmuxHostStore {
         }
 
         guard let expectedPanelID = zellijSessionManager.sessionPanelId(for: workspaceID),
-              expectedPanelID == panelID else {
+              expectedPanelID == panelID || pendingLaunch.acceptedPanelIDs.contains(panelID) else {
             return
         }
 
@@ -490,21 +499,27 @@ final class CmuxHostStore {
         cardID: UUID,
         workspaceID: UUID
     ) {
+        var launchToQueue = pendingLaunch
+        if let panelID = zellijSessionManager.sessionPanelId(for: workspaceID) {
+            launchToQueue.acceptedPanelIDs.insert(panelID)
+        }
+        pendingLaunchByCardID[cardID] = launchToQueue
+
         do {
             try zellijSessionManager.queueLaunchRequest(
                 for: workspaceID,
-                token: pendingLaunch.token,
-                command: pendingLaunch.command
+                token: launchToQueue.token,
+                command: launchToQueue.command
             )
             if var storedPendingLaunch = pendingLaunchByCardID[cardID],
-               storedPendingLaunch.token == pendingLaunch.token {
+               storedPendingLaunch.token == launchToQueue.token {
                 storedPendingLaunch.needsRequeue = false
                 storedPendingLaunch.didSendVisibleNudge = false
                 storedPendingLaunch.lastQueuedAt = Date()
                 pendingLaunchByCardID[cardID] = storedPendingLaunch
             }
 #if DEBUG
-            launchCommandHandlerForTesting?(cardID, pendingLaunch.command)
+            launchCommandHandlerForTesting?(cardID, launchToQueue.command)
 #endif
         } catch {
             pendingLaunchByCardID.removeValue(forKey: cardID)
@@ -571,14 +586,14 @@ final class CmuxHostStore {
                 self.updateHiddenWorkspaceDetachScheduling(for: workspaceID)
             }
 
-            let shouldRecreateBackgroundSession =
-                self.workspaceRuntimeStateByID[workspaceID]?.residency == .backgroundPrewarmOnly
-                && !(self.workspace(forID: workspaceID)?.hasLoadedTerminalSurface() ?? false)
-            if shouldRecreateBackgroundSession {
+            let isBackgroundPrewarmOnly = self.workspaceRuntimeStateByID[workspaceID]?.residency == .backgroundPrewarmOnly
+            let hasLoadedTerminalSurface = self.workspace(forID: workspaceID)?.hasLoadedTerminalSurface() ?? false
+            let shouldPrepareBackgroundSession = isBackgroundPrewarmOnly && !hasLoadedTerminalSurface
+            if shouldPrepareBackgroundSession {
                 self.zellijSessionManager.killRuntime(for: workspaceID)
             }
 
-            if shouldRecreateBackgroundSession || !(self.workspace(forID: workspaceID)?.hasLoadedTerminalSurface() ?? false) {
+            if shouldPrepareBackgroundSession {
                 do {
                     try await self.zellijSessionManager.prepareBackgroundSession(workspaceId: workspaceID)
                 } catch {
@@ -591,9 +606,11 @@ final class CmuxHostStore {
                     self.launchSignatureByCardID.removeValue(forKey: cardID)
                     return
                 }
+            } else if !hasLoadedTerminalSurface {
+                self.prepareInteractiveSessionInBackground(workspaceID: workspaceID)
             }
 
-            for _ in 0..<120 {
+            for _ in 0..<300 {
                 guard !Task.isCancelled else { return }
                 guard let pendingLaunch = self.pendingLaunchByCardID[cardID],
                       let workspace = self.workspace(for: cardID),
@@ -616,7 +633,7 @@ final class CmuxHostStore {
 
                 if workspaceRuntimeStateByID[workspaceID]?.residency == .backgroundPrewarmOnly,
                    !workspace.hasLoadedTerminalSurface() {
-                    try? await Task.sleep(for: .milliseconds(200))
+                    try? await Task.sleep(for: self.pendingLaunchPollInterval)
                     continue
                 }
 
@@ -624,7 +641,7 @@ final class CmuxHostStore {
 
                 guard let terminalPanel = self.launchTerminalPanel(in: workspace),
                       self.isTerminalReadyForLaunch(terminalPanel) else {
-                    try? await Task.sleep(for: .milliseconds(200))
+                    try? await Task.sleep(for: self.pendingLaunchPollInterval)
                     continue
                 }
 
@@ -636,7 +653,27 @@ final class CmuxHostStore {
                     terminalPanel.sendText("\n")
                 }
 
-                try? await Task.sleep(for: .milliseconds(200))
+                try? await Task.sleep(for: self.pendingLaunchPollInterval)
+            }
+        }
+    }
+
+    private func prepareInteractiveSessionInBackground(workspaceID: UUID) {
+#if DEBUG
+        if launchCommandHandlerForTesting != nil {
+            return
+        }
+#endif
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.zellijSessionManager.prepareBackgroundSession(workspaceId: workspaceID)
+            } catch {
+                NSLog(
+                    "Failed to prepare zellij interactive session for workspace %@: %@",
+                    workspaceID.uuidString,
+                    String(describing: error)
+                )
             }
         }
     }
@@ -871,7 +908,7 @@ final class CmuxHostStore {
     ) -> Bool {
         zellijSessionManager.clearLaunchRequest(for: workspaceID)
 
-        if pendingLaunch.retryCount >= 1 {
+        if pendingLaunch.retryCount >= pendingLaunchRetryLimit {
             var manualRetryLaunch = pendingLaunch
             manualRetryLaunch.token = newLaunchToken()
             manualRetryLaunch.needsRequeue = true
@@ -880,9 +917,10 @@ final class CmuxHostStore {
             manualRetryLaunch.lastQueuedAt = nil
             pendingLaunchByCardID[cardID] = manualRetryLaunch
             NSLog(
-                "Launch request timed out for card %@ in workspace %@; awaiting another selection sync to retry.",
+                "Launch request timed out for card %@ in workspace %@ after %d automatic retries; awaiting another selection sync to retry.",
                 cardID.uuidString,
-                workspaceID.uuidString
+                workspaceID.uuidString,
+                pendingLaunchRetryLimit
             )
             return false
         }
@@ -1492,6 +1530,10 @@ extension CmuxHostStore {
 
     func setPendingLaunchAckTimeoutForTesting(_ timeout: TimeInterval) {
         pendingLaunchAckTimeout = timeout
+    }
+
+    func setPendingLaunchRetryLimitForTesting(_ retryLimit: Int) {
+        pendingLaunchRetryLimit = retryLimit
     }
 
     func pendingLaunchSnapshotForTesting(cardID: UUID) -> (token: String, retryCount: Int, needsRequeue: Bool)? {

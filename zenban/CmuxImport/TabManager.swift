@@ -641,7 +641,7 @@ class TabManager: ObservableObject {
     /// Global monotonically increasing counter for CMUX_PORT ordinal assignment.
     /// Static so port ranges don't overlap across multiple windows (each window has its own TabManager).
     private static var nextPortOrdinal: Int = 0
-    private static let initialWorkspaceGitProbeDelays: [TimeInterval] = [0, 0.5, 1.5, 3.0, 6.0, 10.0]
+    private static let initialWorkspaceGitProbeDelays: [TimeInterval] = [1.0, 3.0, 6.0, 10.0]
     @Published var selectedTabId: UUID? {
         willSet {
 #if DEBUG
@@ -1125,8 +1125,9 @@ class TabManager: ObservableObject {
         expectedDirectory: String,
         isLastAttempt: Bool
     ) {
+        let hasUsableSnapshot = snapshot.branch != nil
         defer {
-            if isLastAttempt,
+            if (hasUsableSnapshot || isLastAttempt),
                initialWorkspaceGitProbeGenerationByWorkspace[workspaceId] == generation {
                 clearInitialWorkspaceGitProbe(workspaceId: workspaceId)
             }

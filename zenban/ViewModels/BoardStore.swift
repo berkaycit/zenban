@@ -146,6 +146,7 @@ final class BoardStore {
 
     @ObservationIgnored private let persistenceEnabled: Bool
     private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var worktreeCreationCardIDs: Set<UUID> = []
 
     // O(1) board index cache - invalidated when boards change
     private var boardIndexCache: [UUID: Int]?
@@ -392,6 +393,10 @@ final class BoardStore {
         return boards[index]
     }
 
+    func isWorktreeCreationPending(for cardID: UUID) -> Bool {
+        worktreeCreationCardIDs.contains(cardID)
+    }
+
     func selectCard(_ cardID: UUID, in boardID: UUID) {
         guard let board = board(for: boardID),
               board.cards.contains(where: { $0.id == cardID }) else {
@@ -423,6 +428,7 @@ final class BoardStore {
         }
 
         for card in board.cards {
+            worktreeCreationCardIDs.remove(card.id)
             cmuxHost?.removeWorkspace(for: card.id)
             onCardDeleted?(card.id)
 
@@ -486,9 +492,7 @@ final class BoardStore {
 
         if let repoPath = boards[i].repositoryPath,
            GitService.isGitRepository(path: repoPath) {
-            Task {
-                await createWorktreeForCard(card.id, in: boardID, repositoryPath: repoPath)
-            }
+            startWorktreeCreation(for: card.id, in: boardID, repositoryPath: repoPath)
         }
     }
 
@@ -595,13 +599,11 @@ final class BoardStore {
         if let repositoryPath = boards[bi].repositoryPath,
            GitService.isGitRepository(path: repositoryPath) {
             for clonedCard in clonedCards {
-                Task {
-                    await createWorktreeForCard(
-                        clonedCard.id,
-                        in: boardID,
-                        repositoryPath: repositoryPath
-                    )
-                }
+                startWorktreeCreation(
+                    for: clonedCard.id,
+                    in: boardID,
+                    repositoryPath: repositoryPath
+                )
             }
         } else {
             for clonedCard in clonedCards {
@@ -901,6 +903,7 @@ final class BoardStore {
         }
 
         for card in cardsToDelete {
+            worktreeCreationCardIDs.remove(card.id)
             cmuxHost?.removeWorkspace(for: card.id)
             cmuxHost?.forgetCardRuntimeState(for: card.id)
             onCardDeleted?(card.id)
@@ -954,20 +957,40 @@ final class BoardStore {
 
     // MARK: - Worktree Operations
 
+    private func startWorktreeCreation(for cardID: UUID, in boardID: UUID, repositoryPath: String) {
+        worktreeCreationCardIDs.insert(cardID)
+        Task {
+            await createWorktreeForCard(cardID, in: boardID, repositoryPath: repositoryPath)
+        }
+    }
+
     private func createWorktreeForCard(_ cardID: UUID, in boardID: UUID, repositoryPath: String) async {
         do {
             let worktreePath = try await GitService.createWorktree(cardID: cardID, repositoryPath: repositoryPath)
-            guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
-            boards[bi].cards[ci].worktreePath = worktreePath
-            let updatedCard = boards[bi].cards[ci]
-            if selectedBoardID == boardID, selectedCardID == cardID {
-                cmuxHost?.syncSelection(card: updatedCard, boardID: boardID)
-            } else if updatedCard.pendingLaunchPrompt != nil {
-                cmuxHost?.prewarmWorkspaceForBackgroundLaunch(for: updatedCard, boardID: boardID)
-            }
-            scheduleSave()
+            finishWorktreeCreation(cardID, in: boardID, worktreePath: worktreePath)
         } catch {
             print("Failed to create worktree for card \(cardID): \(error)")
+            finishWorktreeCreation(cardID, in: boardID, worktreePath: nil)
+        }
+    }
+
+    private func finishWorktreeCreation(_ cardID: UUID, in boardID: UUID, worktreePath: String?) {
+        worktreeCreationCardIDs.remove(cardID)
+        guard let (bi, ci) = cardIndices(cardID: cardID, boardID: boardID) else { return }
+
+        if let worktreePath {
+            boards[bi].cards[ci].worktreePath = worktreePath
+        }
+
+        let updatedCard = boards[bi].cards[ci]
+        if selectedBoardID == boardID, selectedCardID == cardID {
+            cmuxHost?.syncSelection(card: updatedCard, boardID: boardID)
+        } else if updatedCard.pendingLaunchPrompt != nil {
+            cmuxHost?.prewarmWorkspaceForBackgroundLaunch(for: updatedCard, boardID: boardID)
+        }
+
+        if worktreePath != nil {
+            scheduleSave()
         }
     }
 

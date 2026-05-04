@@ -1761,6 +1761,25 @@ final class Workspace: Identifiable, ObservableObject {
         scheduleTerminalGeometryReconcile()
     }
 
+    func prepareTerminalSurfaceForVisiblePresentation() {
+        var needsReconcile = false
+        for terminalPanel in panels.values.compactMap({ $0 as? TerminalPanel }) {
+            terminalPanel.surface.requestBackgroundSurfaceStartIfNeeded()
+
+            let hostedView = terminalPanel.hostedView
+            let hasUsableBounds = hostedView.bounds.width > 1 && hostedView.bounds.height > 1
+            let isAttached = hostedView.window != nil && hostedView.superview != nil
+            if terminalPanel.surface.surface == nil || !isAttached || !hasUsableBounds {
+                terminalPanel.requestViewReattach()
+                needsReconcile = true
+            }
+        }
+
+        if needsReconcile {
+            scheduleTerminalGeometryReconcile()
+        }
+    }
+
     func hasLoadedTerminalSurface() -> Bool {
         let terminalPanels = panels.values.compactMap { $0 as? TerminalPanel }
         guard !terminalPanels.isEmpty else { return true }

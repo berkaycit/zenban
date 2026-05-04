@@ -219,7 +219,7 @@ struct CmuxHostStoreLaunchTests {
     }
 
     @Test
-    func claudeLaunchRetriesOnceAfterAckTimeoutThenWaitsForManualRetry() async throws {
+    func claudeLaunchKeepsRetryingAfterAckTimeoutUntilAcknowledged() async throws {
         let tempDirectory = try makeTemporaryDirectory()
         let prompt = "Investigate the failing login tests"
         let seededCard = Card(
@@ -245,7 +245,7 @@ struct CmuxHostStoreLaunchTests {
         hostStore.setPendingLaunchAckTimeoutForTesting(0.05)
         defer {
             hostStore.resetClaudeLaunchHooksForTesting()
-            hostStore.setPendingLaunchAckTimeoutForTesting(5)
+            hostStore.setPendingLaunchAckTimeoutForTesting(2)
             try? FileManager.default.removeItem(at: tempDirectory)
         }
 
@@ -278,25 +278,72 @@ struct CmuxHostStoreLaunchTests {
         #expect(!retriedSnapshot.needsRequeue)
 
         try await waitUntil {
-            hostStore.pendingLaunchSnapshotForTesting(cardID: seededCard.id)?.needsRequeue == true
+            guard let secondRetriedRequest = launchRequestRecord(hostStore: hostStore, cardID: seededCard.id) else {
+                return false
+            }
+            return secondRetriedRequest.token != retriedRequest.token
         }
 
-        let manualRetrySnapshot = try #require(
+        let secondRetrySnapshot = try #require(
             hostStore.pendingLaunchSnapshotForTesting(cardID: seededCard.id)
         )
-        #expect(manualRetrySnapshot.retryCount == 0)
-        #expect(manualRetrySnapshot.needsRequeue)
-        #expect(manualRetrySnapshot.token != retriedRequest.token)
+        #expect(secondRetrySnapshot.retryCount == 2)
+        #expect(!secondRetrySnapshot.needsRequeue)
+        #expect(secondRetrySnapshot.token != retriedRequest.token)
         #expect(boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == prompt)
-        #expect(!FileManager.default.fileExists(atPath: retriedRequest.url.path))
-
-        hostStore.syncSelection(card: seededCard, boardID: board.id)
-        try markWorkspacePromptIdle(hostStore: hostStore, cardID: seededCard.id)
-        try await waitUntil {
-            launchRequestRecord(hostStore: hostStore, cardID: seededCard.id)?.token == manualRetrySnapshot.token
-        }
 
         #expect(hostStore.acknowledgePendingLaunchForTesting(cardID: seededCard.id))
+        try await waitUntil { boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == nil }
+    }
+
+    @Test
+    func claudeLaunchAcknowledgementAcceptsPanelUsedWhenRequestWasQueued() async throws {
+        let tempDirectory = try makeTemporaryDirectory()
+        let prompt = "Investigate the failing login tests"
+        let seededCard = Card(
+            title: "cc-42",
+            lastSubmittedPrompt: prompt,
+            pendingLaunchPrompt: prompt,
+            column: .todo,
+            orderIndex: 0,
+            agent: .claude,
+            worktreePath: tempDirectory.path
+        )
+        let board = Board(
+            name: "Workspace Ownership",
+            cards: [seededCard],
+            repositoryPath: "/tmp/repo",
+            agent: .claude
+        )
+        let boardStore = BoardStore(initialBoards: [board], persistenceEnabled: false)
+        boardStore.selectedBoardID = board.id
+        boardStore.selectedCardID = seededCard.id
+        let hostStore = makeHostStore(boardStore: boardStore)
+        let appDelegate = AppDelegate()
+        hostStore.configureClaudeLaunchHooksForTesting { _, _ in }
+        defer {
+            hostStore.resetClaudeLaunchHooksForTesting()
+            try? FileManager.default.removeItem(at: tempDirectory)
+            _ = appDelegate
+        }
+
+        hostStore.syncSelection(card: seededCard, boardID: board.id)
+        try await waitUntil {
+            launchRequestRecord(hostStore: hostStore, cardID: seededCard.id) != nil
+        }
+
+        let request = try #require(launchRequestRecord(hostStore: hostStore, cardID: seededCard.id))
+        let workspace = try #require(hostStore.workspace(for: seededCard.id))
+        let queuedPanelID = try #require(ZellijSessionManager.shared.sessionPanelId(for: workspace.id))
+        _ = try ZellijSessionManager.shared.reassignWorkspacePanel(
+            workspaceId: workspace.id,
+            panelId: UUID(),
+            portOrdinal: 0
+        )
+
+        let handler = try #require(AppDelegate.shared?.zenbanLaunchRequestStartedHandler)
+        handler(workspace.id, queuedPanelID, request.token)
+
         try await waitUntil { boardStore.card(id: seededCard.id)?.pendingLaunchPrompt == nil }
     }
 
