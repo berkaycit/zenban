@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Zenban Codex wrapper - injects Codex hooks for card-launched sessions.
+
+find_real_codex() {
+    local custom="${CMUX_CUSTOM_CODEX_PATH:-}"
+    custom="${custom#"${custom%%[![:space:]]*}"}"
+    custom="${custom%"${custom##*[![:space:]]}"}"
+    if [[ -n "$custom" && -f "$custom" && -x "$custom" ]]; then
+        if [[ ! "$custom" -ef "$0" ]]; then
+            printf '%s' "$custom"
+            return 0
+        fi
+    fi
+
+    local self_dir
+    self_dir="$(cd "$(dirname "$0")" && pwd)"
+    local IFS=:
+    for d in $PATH; do
+        [[ "$d" == "$self_dir" ]] && continue
+        [[ -x "$d/codex" ]] && printf '%s' "$d/codex" && return 0
+    done
+    return 1
+}
+
+cmux_socket_available() {
+    local socket="${CMUX_SOCKET_PATH:-}"
+    [[ -n "$socket" && -S "$socket" ]] || return 1
+
+    local self_dir cmux_bin
+    self_dir="$(cd "$(dirname "$0")" && pwd)"
+    cmux_bin="$self_dir/cmux"
+    [[ -x "$cmux_bin" ]] || cmux_bin="$(command -v cmux || true)"
+    [[ -n "$cmux_bin" ]] || return 1
+
+    CMUXTERM_CLI_RESPONSE_TIMEOUT_SEC=0.75 \
+        "$cmux_bin" --socket "$socket" ping >/dev/null 2>&1
+}
+
+resolve_hook_cmux_bin() {
+    local self_dir bundled_cli
+    bundled_cli="${CMUX_BUNDLED_CLI_PATH:-}"
+    if [[ -n "$bundled_cli" && -x "$bundled_cli" ]]; then
+        printf '%s' "$bundled_cli"
+        return 0
+    fi
+
+    self_dir="$(cd "$(dirname "$0")" && pwd)"
+    bundled_cli="$self_dir/cmux"
+    if [[ -x "$bundled_cli" ]]; then
+        printf '%s' "$bundled_cli"
+        return 0
+    fi
+
+    bundled_cli="$(command -v cmux || true)"
+    if [[ -n "$bundled_cli" ]]; then
+        printf '%s' "$bundled_cli"
+        return 0
+    fi
+
+    printf '%s' "cmux"
+}
+
+encode_launch_argv() {
+    {
+        printf '%s\0' "$REAL_CODEX"
+        if (( $# > 0 )); then
+            printf '%s\0' "$@"
+        fi
+    } | base64 | tr -d '\n'
+}
+
+toml_escape() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\n'/\\n}"
+    printf '%s' "$value"
+}
+
+codex_hook_command() {
+    local subcommand="$1"
+    printf '%s' '[ -n "$CMUX_SURFACE_ID" ] && [ "${CMUX_CODEX_HOOKS_DISABLED:-0}" != "1" ] && "$CMUX_CODEX_HOOK_CMUX_BIN" hooks codex '"$subcommand"' || echo "{}"'
+}
+
+codex_feed_command() {
+    local event="$1"
+    printf '%s' '[ -n "$CMUX_SURFACE_ID" ] && [ "${CMUX_CODEX_HOOKS_DISABLED:-0}" != "1" ] && "$CMUX_CODEX_HOOK_CMUX_BIN" hooks feed --source codex --event '"$event"' || echo "{}"'
+}
+
+codex_hook_config() {
+    local event="$1"
+    local command="$2"
+    local timeout="$3"
+    printf 'hooks.%s=[{hooks=[{type="command",command="%s",timeout=%s}]}]' \
+        "$event" "$(toml_escape "$command")" "$timeout"
+}
+
+REAL_CODEX="$(find_real_codex)" || { echo "Error: codex not found in PATH" >&2; exit 127; }
+
+case "${1:-}" in
+    app|app-server|completion|debug|features|help|login|logout|mcp|mcp-server|plugin|sandbox|update)
+        exec "$REAL_CODEX" "$@"
+        ;;
+esac
+
+if [[ -z "${CMUX_SURFACE_ID:-}" || "${CMUX_CODEX_HOOKS_DISABLED:-0}" == "1" ]] || ! cmux_socket_available; then
+    exec "$REAL_CODEX" "$@"
+fi
+
+export CMUX_CODEX_HOOK_CMUX_BIN="$(resolve_hook_cmux_bin)"
+export CMUX_AGENT_LAUNCH_KIND="codex"
+export CMUX_AGENT_LAUNCH_EXECUTABLE="$REAL_CODEX"
+export CMUX_AGENT_LAUNCH_ARGV_B64="$(encode_launch_argv "$@")"
+export CMUX_AGENT_LAUNCH_CWD="$PWD"
+
+CODEX_HOOK_CONFIG_ARGS=(
+    --enable codex_hooks
+    -c "$(codex_hook_config SessionStart "$(codex_hook_command session-start)" 5000)"
+    -c "$(codex_hook_config UserPromptSubmit "$(codex_hook_command prompt-submit)" 5000)"
+    -c "$(codex_hook_config Stop "$(codex_hook_command stop)" 5000)"
+    -c "$(codex_hook_config PreToolUse "$(codex_feed_command PreToolUse)" 120000)"
+    -c "$(codex_hook_config PermissionRequest "$(codex_feed_command PermissionRequest)" 120000)"
+)
+
+exec "$REAL_CODEX" "${CODEX_HOOK_CONFIG_ARGS[@]}" "$@"

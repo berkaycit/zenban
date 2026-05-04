@@ -714,12 +714,12 @@ struct CmuxHostStoreLaunchTests {
         hostStore.syncSelection(card: card, boardID: board.id)
         try markWorkspacePromptIdle(hostStore: hostStore, cardID: card.id)
         try await waitUntil {
-            launchRequestRecords(hostStore: hostStore, cardIDs: [card.id]).contains { $0.command == "codex" }
+            launchRequestRecords(hostStore: hostStore, cardIDs: [card.id]).contains { $0.command == expectedCodexLaunchCommand() }
         }
         let codexRequest = try #require(
-            launchRequestRecords(hostStore: hostStore, cardIDs: [card.id]).first { $0.command == "codex" }
+            launchRequestRecords(hostStore: hostStore, cardIDs: [card.id]).first { $0.command == expectedCodexLaunchCommand() }
         )
-        #expect(codexRequest.command == "codex")
+        #expect(codexRequest.command == expectedCodexLaunchCommand())
 
         var claudeCard = card
         claudeCard.agent = .claude
@@ -1072,7 +1072,7 @@ struct CmuxHostStoreLaunchTests {
         guard lines.count >= 2 else { return nil }
 
         let command = lines[1]
-        guard command.contains("--dangerously-skip-permissions") || command == "codex" || command == "gemini" else {
+        guard command.contains("--dangerously-skip-permissions") || command == expectedCodexLaunchCommand() || command == "gemini" else {
             return nil
         }
 
@@ -1106,6 +1106,17 @@ struct CmuxHostStoreLaunchTests {
         Bundle.main.resourceURL?
             .appendingPathComponent("bin", isDirectory: true)
             .appendingPathComponent("claude", isDirectory: false)
+            .path
+    }
+
+    private func expectedCodexLaunchCommand() -> String {
+        shellQuotedForTesting(bundledCodexPathForTesting() ?? "codex")
+    }
+
+    private func bundledCodexPathForTesting() -> String? {
+        Bundle.main.resourceURL?
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("codex", isDirectory: false)
             .path
     }
 

@@ -37,7 +37,7 @@ struct CmuxHostStoreSummaryTests {
     }
 
     @Test
-    func agentSummaryPrefersMeaningfulStatusOverNotificationAndIgnoresGenericStatus() throws {
+    func agentSummaryPrefersMeaningfulStatusOverNotificationAndIgnoresGenericStatus() async throws {
         let notificationStore = TerminalNotificationStore.shared
         notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }
         notificationStore.replaceNotificationsForTesting([])
@@ -66,6 +66,9 @@ struct CmuxHostStoreSummaryTests {
             value: statusSummary
         )
         #expect(hostStore.agentSummary(for: card.id) == statusSummary)
+        try await waitUntil {
+            boardStore.card(id: card.id)?.agentSummary == statusSummary
+        }
         #expect(boardStore.card(id: card.id)?.agentSummary == statusSummary)
 
         workspace.statusEntries["claude_code"] = SidebarStatusEntry(
@@ -185,5 +188,24 @@ struct CmuxHostStoreSummaryTests {
         boardStore.cmuxHost = hostStore
         hostStore.attach(boardStore: boardStore)
         return (boardStore, board, card, hostStore)
+    }
+
+    private func waitUntil(
+        timeout: Duration = .seconds(3),
+        condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        while clock.now < deadline {
+            if condition() {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        throw WaitError.timedOut
+    }
+
+    private enum WaitError: Error {
+        case timedOut
     }
 }

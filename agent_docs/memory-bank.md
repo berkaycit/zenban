@@ -7,6 +7,8 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Route Codex launches through bundled hooks
+- **Description**: Codex cards now launch the bundled `bin/codex` wrapper instead of relying on global Codex hook installation. The wrapper injects Zenban socket hooks at process launch, while the notification queue and delivery path now log accepted, dropped, suppressed, and scheduled events for reproducible agent notification debugging.
 - **Summary**: Sync cmux CLI hooks and socket parity
 - **Description**: Refreshed the copied cmux CLI, shell integrations, Bonsplit package, Claude/Codex hook handling, Feed TUI and OpenCode plugin resources, notification queue, Feed socket bridge, top/debug/equalize socket methods, tab move-to-new-workspace server path, and local terminal paste/drop behavior against the recent upstream window. Zenban keeps cloud, VM, remote, and upstream sidebar UI paths out of scope while preserving the valuable local hook, notification, and terminal workspace surfaces.
 

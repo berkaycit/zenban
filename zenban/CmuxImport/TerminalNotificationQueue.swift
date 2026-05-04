@@ -318,6 +318,13 @@ extension TerminalController {
 extension TerminalNotificationStore {
     fileprivate func deliverQueuedNotification(_ notification: QueuedTerminalNotification) {
         guard shouldDeliverQueuedNotification(notification) else { return }
+        NSLog(
+            "agent.notification.queue delivering workspace=%@ surface=%@ title=%@ bodyLength=%d",
+            notification.key.tabId.uuidString,
+            notification.key.surfaceId?.uuidString ?? "nil",
+            notification.title,
+            notification.body.count
+        )
         addNotification(
             tabId: notification.key.tabId,
             surfaceId: notification.key.surfaceId,
@@ -328,19 +335,47 @@ extension TerminalNotificationStore {
     }
 
     private func shouldDeliverQueuedNotification(_ notification: QueuedTerminalNotification) -> Bool {
-        guard let appDelegate = AppDelegate.shared else { return false }
+        guard let appDelegate = AppDelegate.shared else {
+            NSLog(
+                "agent.notification.queue dropped reason=missing_app_delegate workspace=%@ surface=%@",
+                notification.key.tabId.uuidString,
+                notification.key.surfaceId?.uuidString ?? "nil"
+            )
+            return false
+        }
         guard let surfaceId = notification.key.surfaceId else {
             let tabManager = appDelegate.tabManagerFor(tabId: notification.key.tabId) ?? appDelegate.tabManager
-            return tabManager?.tabs.contains(where: { $0.id == notification.key.tabId }) == true
+            let shouldDeliver = tabManager?.tabs.contains(where: { $0.id == notification.key.tabId }) == true
+            if !shouldDeliver {
+                NSLog(
+                    "agent.notification.queue dropped reason=missing_workspace workspace=%@ surface=nil",
+                    notification.key.tabId.uuidString
+                )
+            }
+            return shouldDeliver
         }
 
         guard let target = appDelegate.workspaceContainingPanel(
             panelId: surfaceId,
             preferredWorkspaceId: notification.key.tabId
         ) else {
+            NSLog(
+                "agent.notification.queue dropped reason=missing_surface workspace=%@ surface=%@",
+                notification.key.tabId.uuidString,
+                surfaceId.uuidString
+            )
             return false
         }
-        return target.workspace.id == notification.key.tabId
+        let shouldDeliver = target.workspace.id == notification.key.tabId
+        if !shouldDeliver {
+            NSLog(
+                "agent.notification.queue dropped reason=workspace_mismatch expected=%@ actual=%@ surface=%@",
+                notification.key.tabId.uuidString,
+                target.workspace.id.uuidString,
+                surfaceId.uuidString
+            )
+        }
+        return shouldDeliver
     }
 
     static func cachedDeliveryAuthorizationDecision(

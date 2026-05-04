@@ -796,7 +796,8 @@ final class CmuxHostStore {
     ) -> String {
         let directory = workingDirectory(for: card, boardID: boardID) ?? ""
         let promptSignature = pendingPrompt ?? ""
-        return "\(agent.runtimeID)|\(directory)|\(promptSignature)"
+        let commandSignature = launchCommand(for: agent, pendingPrompt: pendingPrompt)
+        return "\(agent.runtimeID)|\(directory)|\(promptSignature)|\(commandSignature)"
     }
 
     private func launchCommand(for agent: Agent, pendingPrompt: String?) -> String {
@@ -804,7 +805,7 @@ final class CmuxHostStore {
         case .claude:
             return claudeLaunchCommand(prompt: pendingPrompt)
         case .codex:
-            return "codex"
+            return codexBinaryCommand()
         case .gemini:
             return "gemini"
         }
@@ -823,6 +824,13 @@ final class CmuxHostStore {
             .appendingPathComponent("bin", isDirectory: true)
             .appendingPathComponent("claude", isDirectory: false)
         return shellQuoted(binaryURL?.path ?? "claude")
+    }
+
+    private func codexBinaryCommand() -> String {
+        let binaryURL = Bundle.main.resourceURL?
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("codex", isDirectory: false)
+        return shellQuoted(binaryURL?.path ?? "codex")
     }
 
     private func shellQuoted(_ value: String) -> String {

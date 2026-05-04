@@ -58,7 +58,7 @@
 ## Notifications And Finder Services
 
 - cmux-derived desktop notifications still queue, mark unread, move cards into `In Review`, and clear again when the owning workspace is focused
-- Claude, Codex, and OpenCode hook telemetry use the copied cmux Feed socket bridge for `feed.push`, `feed.list`, and blocking permission, question, and plan replies without exposing the upstream sidebar Feed UI
+- Claude and Codex card launches go through bundled wrappers so completion notifications and Feed hook telemetry target the active Zenban socket; OpenCode hook telemetry still uses the copied cmux Feed socket bridge
 - The bundled CLI includes the Feed TUI and OpenCode hook plugin resources needed by the copied hook commands
 - The copied cmux CLI can inspect Zenban terminal panels through `top` and `debug-terminals`, create caller-targeted notifications, equalize splits, and move a terminal tab into a new workspace without requiring cmux cloud, VM, or sidebar UI
 - Finder Services expose “New Zenban Workspace Here” and “New Zenban Window Here”

@@ -953,6 +953,16 @@ final class TerminalNotificationStore: ObservableObject {
         if let cooldownKey, resolvedCooldownInterval != nil {
             lastNotificationDateByCooldownKey[cooldownKey] = now
         }
+        NSLog(
+            "agent.notification.store added id=%@ workspace=%@ surface=%@ delivery=%@ title=%@ subtitle=%@ bodyLength=%d",
+            notification.id.uuidString,
+            tabId.uuidString,
+            surfaceId?.uuidString ?? "nil",
+            shouldSuppressExternalDelivery ? "suppressed" : "scheduled",
+            resolvedTitle,
+            subtitle,
+            body.count
+        )
         observer?.terminalNotificationStore(self, didAdd: notification)
         if !idsToClear.isEmpty {
             center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
@@ -1103,7 +1113,17 @@ final class TerminalNotificationStore: ObservableObject {
 
     private func scheduleUserNotification(_ notification: TerminalNotification) {
         ensureAuthorization(origin: .notificationDelivery) { [weak self] authorized in
-            guard let self, authorized else { return }
+            guard let self else { return }
+            guard authorized else {
+                NSLog(
+                    "agent.notification.deliver blocked reason=authorization state=%@ id=%@ workspace=%@ surface=%@",
+                    self.authorizationState.statusLabel,
+                    notification.id.uuidString,
+                    notification.tabId.uuidString,
+                    notification.surfaceId?.uuidString ?? "nil"
+                )
+                return
+            }
 
             let content = UNMutableNotificationContent()
             let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
@@ -1132,6 +1152,12 @@ final class TerminalNotificationStore: ObservableObject {
                 if let error {
                     NSLog("Failed to schedule notification: \(error)")
                 } else {
+                    NSLog(
+                        "agent.notification.deliver scheduled id=%@ workspace=%@ surface=%@",
+                        notification.id.uuidString,
+                        notification.tabId.uuidString,
+                        notification.surfaceId?.uuidString ?? "nil"
+                    )
                     NotificationSoundSettings.runCustomCommand(
                         title: content.title,
                         subtitle: content.subtitle,

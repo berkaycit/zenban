@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import Darwin
 import Foundation
 import Bonsplit
 import WebKit
@@ -463,6 +464,109 @@ class TerminalController {
             current = parent
         }
         return false
+    }
+
+    private func isAuthorizedCmuxOnlyPeer(_ pid: pid_t) -> Bool {
+        if isDescendant(pid) {
+            return true
+        }
+        return isTrustedBundledCmuxPeer(pid)
+    }
+
+    private func isTrustedBundledCmuxPeer(_ pid: pid_t) -> Bool {
+        guard let bundledCmuxPath = Bundle.main.resourceURL?
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("cmux", isDirectory: false)
+            .path,
+              processPath(of: pid) == bundledCmuxPath,
+              let environment = processEnvironment(for: pid) else {
+            return false
+        }
+
+        let activeSocketPath = withListenerState { socketPath }
+        guard environment["CMUX_SOCKET_PATH"] == activeSocketPath else {
+            return false
+        }
+        if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
+            guard environment["CMUX_BUNDLE_ID"] == bundleId else {
+                return false
+            }
+        }
+        return environment["CMUX_SURFACE_ID"]?.isEmpty == false
+            || environment["CMUX_TAB_ID"]?.isEmpty == false
+    }
+
+    private func processPath(of pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4096)
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        let path = String(cString: buffer).trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? nil : path
+    }
+
+    private func processEnvironment(for pid: pid_t) -> [String: String]? {
+        var argMax: Int32 = 0
+        var argMaxSize = MemoryLayout<Int32>.size
+        var argMaxMib: [Int32] = [CTL_KERN, KERN_ARGMAX]
+        guard sysctl(&argMaxMib, UInt32(argMaxMib.count), &argMax, &argMaxSize, nil, 0) == 0,
+              argMax > 0 else {
+            return nil
+        }
+
+        var buffer = [UInt8](repeating: 0, count: Int(argMax))
+        var size = buffer.count
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        let status = buffer.withUnsafeMutableBytes { rawBuffer in
+            sysctl(&mib, UInt32(mib.count), rawBuffer.baseAddress, &size, nil, 0)
+        }
+        guard status == 0, size > MemoryLayout<Int32>.size else {
+            return nil
+        }
+
+        var argc: Int32 = 0
+        withUnsafeMutableBytes(of: &argc) { argcBytes in
+            for offset in 0..<MemoryLayout<Int32>.size {
+                argcBytes[offset] = buffer[offset]
+            }
+        }
+        guard argc >= 0 else { return nil }
+
+        var index = MemoryLayout<Int32>.size
+        while index < size, buffer[index] != 0 {
+            index += 1
+        }
+        while index < size, buffer[index] == 0 {
+            index += 1
+        }
+
+        for _ in 0..<argc {
+            while index < size, buffer[index] != 0 {
+                index += 1
+            }
+            while index < size, buffer[index] == 0 {
+                index += 1
+            }
+        }
+
+        var environment: [String: String] = [:]
+        while index < size {
+            let start = index
+            while index < size, buffer[index] != 0 {
+                index += 1
+            }
+            if index > start,
+               let entry = String(bytes: buffer[start..<index], encoding: .utf8),
+               let separator = entry.firstIndex(of: "=") {
+                let key = String(entry[..<separator])
+                let value = String(entry[entry.index(after: separator)...])
+                environment[key] = value
+            }
+            while index < size, buffer[index] == 0 {
+                index += 1
+            }
+        }
+
+        return environment.isEmpty ? nil : environment
     }
 
     /// Get the parent PID of a process using sysctl.
@@ -1422,7 +1526,7 @@ class TerminalController {
             // the peer can disconnect), falling back to live lookup.
             let pid = peerPid ?? getPeerPid(socket)
             if let pid {
-                guard isDescendant(pid) else {
+                guard isAuthorizedCmuxOnlyPeer(pid) else {
                     let msg = "ERROR: Access denied — only processes started inside Zenban can connect\n"
                     msg.withCString { ptr in _ = write(socket, ptr, strlen(ptr)) }
                     return
@@ -12189,6 +12293,14 @@ class TerminalController {
             return "ERROR: Usage: notify_target_async <workspace_uuid> <surface_uuid> <title>|<subtitle>|<body>"
         }
         let (title, subtitle, body) = parseNotificationPayload(payload)
+        NSLog(
+            "agent.notification.queue accepted workspace=%@ surface=%@ title=%@ subtitle=%@ bodyLength=%d",
+            tabId.uuidString,
+            surfaceId.uuidString,
+            title,
+            subtitle,
+            body.count
+        )
         TerminalMutationBus.shared.enqueueNotification(
             tabId: tabId,
             surfaceId: surfaceId,
