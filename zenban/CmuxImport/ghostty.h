@@ -463,12 +463,6 @@ typedef struct {
 
 // Config types
 
-// config.Path
-typedef struct {
-  const char* path;
-  bool optional;
-} ghostty_config_path_s;
-
 // config.Color
 typedef struct {
   uint8_t r;
@@ -910,6 +904,7 @@ typedef enum {
   GHOSTTY_ACTION_SEARCH_TOTAL,
   GHOSTTY_ACTION_SEARCH_SELECTED,
   GHOSTTY_ACTION_READONLY,
+  GHOSTTY_ACTION_COPY_TITLE_TO_CLIPBOARD,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -1114,8 +1109,6 @@ void ghostty_surface_complete_clipboard_request(ghostty_surface_t,
                                                 void*,
                                                 bool);
 bool ghostty_surface_has_selection(ghostty_surface_t);
-bool ghostty_surface_select_cursor_cell(ghostty_surface_t);
-bool ghostty_surface_clear_selection(ghostty_surface_t);
 bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_s*);
 bool ghostty_surface_read_text(ghostty_surface_t,
                                ghostty_selection_s,

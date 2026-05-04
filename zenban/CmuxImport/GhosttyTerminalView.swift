@@ -11,6 +11,12 @@ import Bonsplit
 import IOSurface
 import UniformTypeIdentifiers
 
+@_silgen_name("ghostty_surface_clear_selection")
+private func ghostty_surface_clear_selection_compat(_ surface: ghostty_surface_t) -> Bool
+
+@_silgen_name("ghostty_surface_select_cursor_cell")
+private func ghostty_surface_select_cursor_cell_compat(_ surface: ghostty_surface_t) -> Bool
+
 #if os(macOS)
 func cmuxShouldUseTransparentBackgroundWindow() -> Bool {
     let defaults = UserDefaults.standard
@@ -1341,7 +1347,7 @@ class GhosttyApp {
         #endif
     }
 
-    private func loadDefaultConfigFilesWithLegacyFallback(_ config: ghostty_config_t) {
+    func loadDefaultConfigFilesWithLegacyFallback(_ config: ghostty_config_t) {
         if let appScopedConfigURL = GhosttyConfig.ensureAppScopedConfigExists() {
             appScopedConfigURL.path.withCString { path in
                 ghostty_config_load_file(config, path)
@@ -1731,6 +1737,29 @@ class GhosttyApp {
         logThemeAction("reload end source=\(source) soft=\(soft) mode=full")
     }
 
+    func reloadSurfaceConfiguration(
+        _ surface: ghostty_surface_t,
+        soft: Bool = false,
+        source: String = "unspecified"
+    ) {
+        if soft, let config {
+            ghostty_surface_update_config(surface, config)
+            GhosttyConfig.invalidateLoadCache()
+            logThemeAction("surface reload end source=\(source) soft=\(soft) mode=soft")
+            return
+        }
+
+        guard let newConfig = ghostty_config_new() else {
+            logThemeAction("surface reload skipped source=\(source) soft=\(soft) reason=config_alloc_failed")
+            return
+        }
+        loadDefaultConfigFilesWithLegacyFallback(newConfig)
+        ghostty_surface_update_config(surface, newConfig)
+        GhosttyConfig.invalidateLoadCache()
+        logThemeAction("surface reload end source=\(source) soft=\(soft) mode=full")
+        ghostty_config_free(newConfig)
+    }
+
     private func scheduleSurfaceRefreshAfterConfigurationReload(source: String) {
         DispatchQueue.main.async {
             AppDelegate.shared?.refreshTerminalSurfacesAfterGhosttyConfigReload(source: source)
@@ -1884,10 +1913,10 @@ class GhosttyApp {
 
     private func bellAudioPath() -> String? {
         guard let config else { return nil }
-        var value = ghostty_config_path_s()
+        var value: UnsafePointer<Int8>?
         let key = "bell-audio-path"
         guard ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8))),
-              let rawPath = value.path else {
+              let rawPath = value else {
             return nil
         }
         let path = String(cString: rawPath)
@@ -2079,7 +2108,8 @@ class GhosttyApp {
                     // The hook system manages notifications with proper lifecycle tracking;
                     // raw OSC notifications would duplicate or outlive the structured hooks.
                     let owningManager = AppDelegate.shared?.tabManagerFor(tabId: tabId) ?? tabManager
-                    if let workspace = owningManager.tabs.first(where: { $0.id == tabId }),
+                    if ClaudeCodeIntegrationSettings.hooksEnabled(),
+                       let workspace = owningManager.tabs.first(where: { $0.id == tabId }),
                        workspace.agentPIDs["claude_code"] != nil {
                         return true
                     }
@@ -2413,7 +2443,8 @@ class GhosttyApp {
             performOnMain {
                 // Suppress OSC notifications for workspaces with active Claude hook sessions.
                 let owningManager = AppDelegate.shared?.tabManagerFor(tabId: tabId) ?? AppDelegate.shared?.tabManager
-                if let workspace = owningManager?.tabs.first(where: { $0.id == tabId }),
+                if ClaudeCodeIntegrationSettings.hooksEnabled(),
+                   let workspace = owningManager?.tabs.first(where: { $0.id == tabId }),
                    workspace.agentPIDs["claude_code"] != nil {
                     return
                 }
@@ -2482,11 +2513,12 @@ class GhosttyApp {
                 "reload request target=surface tab=\(surfaceView.tabId?.uuidString ?? "nil") surface=\(surfaceView.terminalSurface?.id.uuidString ?? "nil") soft=\(soft)"
             )
             return performOnMain {
-                // Keep all runtime theme/default-background state in the same path.
-                GhosttyApp.shared.reloadConfiguration(
+                GhosttyApp.shared.reloadSurfaceConfiguration(
+                    target.target.surface,
                     soft: soft,
                     source: "action.reload_config.surface tab=\(surfaceView.tabId?.uuidString ?? "nil") surface=\(surfaceView.terminalSurface?.id.uuidString ?? "nil")"
                 )
+                surfaceView.terminalSurface?.forceRefresh(reason: "surface.reloadConfig")
                 return true
             }
         case GHOSTTY_ACTION_KEY_SEQUENCE:
@@ -4399,7 +4431,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard surface != nil else { return false }
         setKeyboardCopyModeActive(!keyboardCopyModeActive)
         if !keyboardCopyModeActive, let surface {
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
         }
         return true
     }
@@ -4410,13 +4442,13 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         keyboardCopyModeActive = active
         if active, let surface {
             keyboardCopyModeViewportRow = keyboardCopyModeSelectionAnchor(surface: surface)?.row
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             if keyboardCopyModeViewportRow == nil {
                 keyboardCopyModeViewportRow = keyboardCopyModeImeViewportRow(surface: surface)
             }
             // Create a 1-cell selection at the terminal cursor to serve as a
             // visible cursor indicator in copy mode.
-            _ = ghostty_surface_select_cursor_cell(surface)
+            _ = ghostty_surface_select_cursor_cell_compat(surface)
         } else {
             keyboardCopyModeViewportRow = nil
         }
@@ -4453,7 +4485,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     private func keyboardCopyModeSelectionAnchor(surface: ghostty_surface_t) -> (row: Int, y: Double)? {
         let size = ghostty_surface_size(surface)
         guard size.rows > 0, size.columns > 0 else { return nil }
-        guard ghostty_surface_select_cursor_cell(surface) else { return nil }
+        guard ghostty_surface_select_cursor_cell_compat(surface) else { return nil }
 
         var text = ghostty_text_s()
         guard ghostty_surface_read_selection(surface, &text) else { return nil }
@@ -4474,7 +4506,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard let anchor = keyboardCopyModeSelectionAnchor(surface: surface) else { return }
         keyboardCopyModeViewportRow = anchor.row
         // Preserve the visible cursor indicator.
-        _ = ghostty_surface_select_cursor_cell(surface)
+        _ = ghostty_surface_select_cursor_cell_compat(surface)
     }
 
     private func copyCurrentViewportLinesToClipboard(
@@ -4489,7 +4521,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard let anchor = keyboardCopyModeSelectionAnchor(surface: surface) else {
             return false
         }
-        _ = ghostty_surface_clear_selection(surface)
+        _ = ghostty_surface_clear_selection_compat(surface)
 
         var imeX: Double = 0
         var imeY: Double = 0
@@ -4545,18 +4577,18 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
         switch action {
         case .exit:
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             setKeyboardCopyModeActive(false)
         case .startSelection:
             keyboardCopyModeVisualActive = true
         case .clearSelection:
             keyboardCopyModeVisualActive = false
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             // Re-create 1-cell cursor at terminal cursor position.
-            _ = ghostty_surface_select_cursor_cell(surface)
+            _ = ghostty_surface_select_cursor_cell_compat(surface)
         case .copyAndExit:
             _ = performBindingAction("copy_to_clipboard")
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             setKeyboardCopyModeActive(false)
         case .copyLineAndExit:
             let startRow = currentKeyboardCopyModeViewportRow(surface: surface)
@@ -4565,7 +4597,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
                 startRow: startRow,
                 lineCount: count
             )
-            _ = ghostty_surface_clear_selection(surface)
+            _ = ghostty_surface_clear_selection_compat(surface)
             setKeyboardCopyModeActive(false)
         case let .scrollLines(delta):
             _ = performBindingAction("scroll_page_lines:\(delta * count)")

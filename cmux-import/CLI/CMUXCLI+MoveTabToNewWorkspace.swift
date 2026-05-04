@@ -1,12 +1,37 @@
 import Foundation
 
 extension CMUXCLI {
-    func applyTabActionFocusOption(_ focusOpt: String?, to params: inout [String: Any]) throws {
-        guard let focusOpt else { return }
-        guard let focus = parseBoolString(focusOpt) else {
-            throw CLIError(message: "--focus must be true|false")
+    func applyFocusOption(_ focusOpt: String?, defaultValue: Bool? = nil, to params: inout [String: Any]) throws {
+        if let focusOpt {
+            guard let focus = parseBoolString(focusOpt) else {
+                throw CLIError(message: "--focus must be true|false")
+            }
+            params["focus"] = focus
+        } else if let defaultValue {
+            params["focus"] = defaultValue
         }
-        params["focus"] = focus
+    }
+
+    func applyTabActionFocusOption(_ focusOpt: String?, to params: inout [String: Any]) throws {
+        try applyFocusOption(focusOpt, defaultValue: false, to: &params)
+    }
+
+    func validatedSplitDirection(_ raw: String?, commandName: String) throws -> String {
+        guard let direction = raw, !direction.hasPrefix("--") else {
+            throw CLIError(message: "\(commandName) requires a direction")
+        }
+        switch direction.lowercased() {
+        case "left", "right", "up", "down", "l", "r", "u", "d":
+            return direction
+        default:
+            throw CLIError(message: "\(commandName): direction must be left|right|up|down")
+        }
+    }
+
+    func rejectConflictingFocusFlags(_ commandArgs: [String]) throws {
+        if commandArgs.contains("--focus"), commandArgs.contains("--no-focus") {
+            throw CLIError(message: "--focus and --no-focus cannot be used together")
+        }
     }
 
     func appendCreatedWorkspaceSummaryParts(

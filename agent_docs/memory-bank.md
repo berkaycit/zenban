@@ -7,6 +7,12 @@ Each item should follow this format:
 
 ## List
 
+- **Summary**: Align Ghostty header with linked kit
+- **Description**: Zenban keeps the current copied `GhosttyKit.xcframework` instead of upgrading to cmux's newer Ghostty submodule pointer. The copied `ghostty.h` now matches the canonical header for the linked `7dd589824d4c9bda8265355718800cccaf7189a0` GhosttyKit, while Swift-only compatibility declarations cover the extra selection symbols exported by that binary. Future Ghostty upgrades should update framework, header, and Swift adapter code together.
+
+- **Summary**: Port focus-neutral cmux layout commands
+- **Description**: After auditing the latest 45 upstream cmux commits, Zenban now carries the local, cloud-free pieces that affect copied runtime behavior: focus-neutral workspace/surface/pane creation, split-off routing, browser and markdown open focus flags, scoped surface config reloads, and Claude OSC suppression gated by the integration setting. The new `surface.split_off` socket method resolves real surfaces across windows, refuses empty-source split-offs, and preserves focus unless the caller explicitly passes `--focus true`. Review-bot, CI, cloud/VM, upstream sidebar PR UI, and settings-file-store commits stayed out of scope because they do not map cleanly onto Zenban's embedded card host.
+
 - **Summary**: Port local cmux socket write hardening
 - **Description**: After auditing the last two months of upstream cmux commits, Zenban now carries the relevant cloud-free socket response write hardening from cmux: listener sockets are protected with `SO_NOSIGPIPE` before being made non-blocking, accepted socket clients are restored to blocking mode with a send timeout, socket responses write the full payload and stop on failed writes, and fast-closing accepted peers no longer spam `accept_client_config.failed`. The stale notification-ring state variable left after the OSC notification rendering fix was also removed. The audit confirmed the copied CLI and shell integration are otherwise already at the current cmux surface plus Zenban's Zellij launch additions.
 
