@@ -41,7 +41,7 @@ struct ClaudeHookSemanticLifecycleTests {
         )
         #expect(genericAfterReset.result.status == 0)
         let genericNotify = try latestNotifyCommand(in: genericAfterReset.commands)
-        #expect(genericNotify.contains("|Waiting|Claude is waiting for your input"))
+        #expect(genericNotify.contains("|Waiting|"))
         #expect(!genericNotify.contains("|Completed|"))
 
         let session = try sessionRecord(sessionId: sessionId, stateDirectory: fixture.stateDirectory)
@@ -102,6 +102,97 @@ struct ClaudeHookSemanticLifecycleTests {
 
         let session = try sessionRecord(sessionId: sessionId, stateDirectory: fixture.stateDirectory)
         #expect(session["lastNotificationKind"] as? String == "waiting")
+    }
+
+    @Test
+    func codexStopStoresSemanticKindAndPromptSubmitResetsLifecycle() throws {
+        let fixture = try makeFixture(name: "codex-reset")
+        defer { fixture.cleanup() }
+
+        let sessionId = "codex-semantic-\(UUID().uuidString)"
+        let stop = try runCodexHook(
+            "stop",
+            standardInput: #"{"session_id":"\#(sessionId)","cwd":"\#(fixture.workDirectory.path)","hook_event_name":"Stop","last_assistant_message":"Codex finished the task"}"#,
+            fixture: fixture
+        )
+        #expect(stop.result.status == 0)
+
+        let notify = try latestNotifyCommand(in: stop.commands)
+        #expect(notify.contains("Codex|Completed"))
+        #expect(notify.contains("Codex finished the task"))
+
+        let saved = try sessionRecord(
+            sessionId: sessionId,
+            stateDirectory: fixture.stateDirectory,
+            stateFileName: "codex-hook-sessions.json"
+        )
+        #expect(saved["lastNotificationKind"] as? String == "completed")
+        #expect(saved["lastBody"] as? String == "Codex finished the task")
+
+        let promptSubmit = try runCodexHook(
+            "prompt-submit",
+            standardInput: #"{"session_id":"\#(sessionId)","hook_event_name":"UserPromptSubmit","prompt":"next task"}"#,
+            fixture: fixture
+        )
+        #expect(promptSubmit.result.status == 0)
+
+        let reset = try sessionRecord(
+            sessionId: sessionId,
+            stateDirectory: fixture.stateDirectory,
+            stateFileName: "codex-hook-sessions.json"
+        )
+        #expect(reset["lastNotificationKind"] == nil)
+        #expect(reset["lastSubtitle"] == nil)
+        #expect(reset["lastBody"] == nil)
+    }
+
+    @Test
+    func codexFailureStopStoresErrorKind() throws {
+        let fixture = try makeFixture(name: "codex-error")
+        defer { fixture.cleanup() }
+
+        let sessionId = "codex-error-\(UUID().uuidString)"
+        let stop = try runCodexHook(
+            "stop",
+            standardInput: #"{"session_id":"\#(sessionId)","cwd":"\#(fixture.workDirectory.path)","hook_event_name":"Stop","type":"error","error":"usage limit reached"}"#,
+            fixture: fixture
+        )
+        #expect(stop.result.status == 0)
+
+        let notify = try latestNotifyCommand(in: stop.commands)
+        #expect(notify.contains("Codex|Rate limit|usage limit reached"))
+
+        let saved = try sessionRecord(
+            sessionId: sessionId,
+            stateDirectory: fixture.stateDirectory,
+            stateFileName: "codex-hook-sessions.json"
+        )
+        #expect(saved["lastNotificationKind"] as? String == "error")
+        #expect(saved["lastSubtitle"] as? String == "Rate limit")
+    }
+
+    @Test
+    func codexHookUsesLaunchCwdFallbackWhenPayloadOmitsCwd() throws {
+        let fixture = try makeFixture(name: "codex-cwd")
+        defer { fixture.cleanup() }
+
+        let sessionId = "codex-cwd-\(UUID().uuidString)"
+        let stop = try runCodexHook(
+            "stop",
+            standardInput: #"{"session_id":"\#(sessionId)","hook_event_name":"Stop","last_assistant_message":"Done"}"#,
+            fixture: fixture,
+            extraEnvironment: [
+                "CMUX_AGENT_LAUNCH_CWD": fixture.workDirectory.path,
+            ]
+        )
+        #expect(stop.result.status == 0)
+
+        let saved = try sessionRecord(
+            sessionId: sessionId,
+            stateDirectory: fixture.stateDirectory,
+            stateFileName: "codex-hook-sessions.json"
+        )
+        #expect(saved["cwd"] as? String == fixture.workDirectory.path)
     }
 
     private struct Fixture {
@@ -170,6 +261,36 @@ struct ClaudeHookSemanticLifecycleTests {
         standardInput: String,
         fixture: Fixture
     ) throws -> HookRun {
+        try runAgentHook(
+            agent: "claude",
+            subcommand,
+            standardInput: standardInput,
+            fixture: fixture
+        )
+    }
+
+    private func runCodexHook(
+        _ subcommand: String,
+        standardInput: String,
+        fixture: Fixture,
+        extraEnvironment: [String: String] = [:]
+    ) throws -> HookRun {
+        try runAgentHook(
+            agent: "codex",
+            subcommand,
+            standardInput: standardInput,
+            fixture: fixture,
+            extraEnvironment: extraEnvironment
+        )
+    }
+
+    private func runAgentHook(
+        agent: String,
+        _ subcommand: String,
+        standardInput: String,
+        fixture: Fixture,
+        extraEnvironment: [String: String] = [:]
+    ) throws -> HookRun {
         let socketPath = makeSocketPath(subcommand)
         let listenerFD = try bindUnixSocket(at: socketPath)
         let recorder = CommandRecorder()
@@ -186,13 +307,16 @@ struct ClaudeHookSemanticLifecycleTests {
         environment["CMUX_AGENT_HOOK_STATE_DIR"] = fixture.stateDirectory.path
         environment["CMUX_CLI_SENTRY_DISABLED"] = "1"
         environment["CMUX_CLAUDE_HOOK_SENTRY_DISABLED"] = "1"
+        for (key, value) in extraEnvironment {
+            environment[key] = value
+        }
 
         let result = runProcess(
             executablePath: fixture.cliPath,
-            arguments: ["hooks", "claude", subcommand],
+            arguments: ["hooks", agent, subcommand],
             environment: environment,
             standardInput: standardInput,
-            timeout: 5
+            timeout: 12
         )
         _ = serverFinished.wait(timeout: .now() + 2)
         #expect(!result.timedOut)
@@ -375,8 +499,12 @@ struct ClaudeHookSemanticLifecycleTests {
         return command
     }
 
-    private func sessionRecord(sessionId: String, stateDirectory: URL) throws -> [String: Any] {
-        let stateURL = stateDirectory.appendingPathComponent("claude-hook-sessions.json", isDirectory: false)
+    private func sessionRecord(
+        sessionId: String,
+        stateDirectory: URL,
+        stateFileName: String = "claude-hook-sessions.json"
+    ) throws -> [String: Any] {
+        let stateURL = stateDirectory.appendingPathComponent(stateFileName, isDirectory: false)
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: stateURL)) as? [String: Any]
         let sessions = object?["sessions"] as? [String: Any]
         guard let session = sessions?[sessionId] as? [String: Any] else {

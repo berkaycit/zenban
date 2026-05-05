@@ -17220,6 +17220,18 @@ export default CMUXSessionRestore;
 
     // MARK: Generic hook handler
 
+    private func resolvedAgentHookSessionId(
+        def: AgentHookDef,
+        input: ClaudeHookParsedInput,
+        env: [String: String],
+        cwd: String?
+    ) -> String {
+        if let sessionId = normalizedHookValue(input.sessionId) {
+            return sessionId
+        }
+        return normalizedHookValue(env["CMUX_SURFACE_ID"]) ?? ""
+    }
+
     private func runGenericAgentHook(def: AgentHookDef, commandArgs: [String], client: SocketClient, telemetry: CLISocketSentryTelemetry) throws {
         let env = ProcessInfo.processInfo.environment
         let subcommand = commandArgs.first?.lowercased() ?? ""
@@ -17246,7 +17258,10 @@ export default CMUXSessionRestore;
             )
         )
 
-        let sessionId = input.sessionId ?? env["CMUX_SURFACE_ID"] ?? ""
+        let hookCwd = input.cwd
+            ?? normalizedHookValue(env["CMUX_AGENT_LAUNCH_CWD"])
+            ?? normalizedHookValue(env["PWD"])
+        let sessionId = resolvedAgentHookSessionId(def: def, input: input, env: env, cwd: hookCwd)
         let action = Self.subcommandActions[subcommand] ?? .noop
         let pidKey = "\(def.statusKey).\(sessionId.isEmpty ? "default" : sessionId)"
         var didSendFeedTelemetry = false
@@ -17268,6 +17283,7 @@ export default CMUXSessionRestore;
 
         switch action {
         case .sessionStart:
+            let mapped = sessionId.isEmpty ? nil : (try? store.lookup(sessionId: sessionId))
             let workspaceId = try resolvePreferredWorkspaceIdForClaudeHook(preferred: nil, fallback: workspaceArg, client: client)
             let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(preferred: nil, fallback: surfaceArg, workspaceId: workspaceId, client: client)
             sendAgentFeedTelemetry(workspaceId: workspaceId)
@@ -17276,14 +17292,14 @@ export default CMUXSessionRestore;
                 env,
                 fallbackPID: pid,
                 fallbackKind: def.name,
-                cwd: input.cwd
+                cwd: hookCwd ?? mapped?.cwd
             )
             if !sessionId.isEmpty {
                 try? store.upsert(
                     sessionId: sessionId,
                     workspaceId: workspaceId,
                     surfaceId: surfaceId,
-                    cwd: input.cwd,
+                    cwd: hookCwd ?? mapped?.cwd,
                     pid: pid,
                     launchCommand: launchCommand
                 )
@@ -17294,23 +17310,35 @@ export default CMUXSessionRestore;
 
         case .promptSubmit:
             let mapped = sessionId.isEmpty ? nil : (try? store.lookup(sessionId: sessionId))
-            let workspaceId = try resolvePreferredWorkspaceIdForClaudeHook(preferred: mapped?.workspaceId, fallback: workspaceArg, client: client)
+            let workspaceId = try resolvePreferredWorkspaceIdForClaudeHook(preferred: workspaceArg, fallback: mapped?.workspaceId, client: client)
+            let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(
+                preferred: surfaceArg,
+                fallback: mapped?.surfaceId,
+                workspaceId: workspaceId,
+                client: client
+            )
             sendAgentFeedTelemetry(workspaceId: workspaceId)
             let pid = mapped?.pid ?? inferredCodexAgentPID()
             let launchCommand = agentLaunchCommandFromEnvironment(
                 env,
                 fallbackPID: pid,
                 fallbackKind: def.name,
-                cwd: input.cwd ?? mapped?.cwd
+                cwd: hookCwd ?? mapped?.cwd
             )
             if !sessionId.isEmpty {
                 try? store.upsert(
                     sessionId: sessionId,
                     workspaceId: workspaceId,
-                    surfaceId: mapped?.surfaceId ?? (surfaceArg ?? ""),
-                    cwd: input.cwd ?? mapped?.cwd,
+                    surfaceId: surfaceId,
+                    cwd: hookCwd ?? mapped?.cwd,
                     pid: pid,
                     launchCommand: launchCommand
+                )
+                try? store.resetNotificationSummary(
+                    sessionId: sessionId,
+                    workspaceId: workspaceId,
+                    surfaceId: surfaceId,
+                    cwd: hookCwd ?? mapped?.cwd
                 )
             }
             if let pid {
@@ -17323,9 +17351,9 @@ export default CMUXSessionRestore;
                     sessionId: sessionId,
                     turnId: input.turnId,
                     transcriptPath: normalizedHookValue(input.transcriptPath),
-                    cwd: input.cwd ?? mapped?.cwd,
+                    cwd: hookCwd ?? mapped?.cwd,
                     workspaceId: workspaceId,
-                    surfaceId: mapped?.surfaceId ?? surfaceArg,
+                    surfaceId: surfaceId,
                     env: env
                 )
             }
@@ -17333,8 +17361,8 @@ export default CMUXSessionRestore;
         case .stop:
             do {
                 let mapped = sessionId.isEmpty ? nil : (try? store.lookup(sessionId: sessionId))
-                let workspaceId = try resolvePreferredWorkspaceIdForClaudeHook(preferred: mapped?.workspaceId, fallback: workspaceArg, client: client)
-                let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(preferred: mapped?.surfaceId, fallback: surfaceArg, workspaceId: workspaceId, client: client)
+                let workspaceId = try resolvePreferredWorkspaceIdForClaudeHook(preferred: workspaceArg, fallback: mapped?.workspaceId, client: client)
+                let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(preferred: surfaceArg, fallback: mapped?.surfaceId, workspaceId: workspaceId, client: client)
                 sendAgentFeedTelemetry(workspaceId: workspaceId)
                 let pid = mapped?.pid ?? inferredCodexAgentPID()
                 let codexFailure: CodexHookFailureSummary?
@@ -17346,7 +17374,7 @@ export default CMUXSessionRestore;
 
                 let lastMsg = input.object?["last_assistant_message"] as? String
                     ?? input.object?["lastAssistantMessage"] as? String
-                let cwd = input.cwd ?? mapped?.cwd
+                let cwd = hookCwd ?? mapped?.cwd
                 let projectName: String? = {
                     guard let cwd, !cwd.isEmpty else { return nil }
                     return URL(fileURLWithPath: NSString(string: cwd).expandingTildeInPath).lastPathComponent
@@ -17381,8 +17409,10 @@ export default CMUXSessionRestore;
                         fallbackKind: def.name,
                         cwd: cwd
                     )
+                    let notificationKind: ClaudeHookNotificationKind = codexFailure == nil ? .completed : .error
                     try? store.upsert(sessionId: sessionId, workspaceId: workspaceId, surfaceId: surfaceId, cwd: cwd, pid: pid,
                                       launchCommand: launchCommand,
+                                      lastNotificationKind: notificationKind,
                                       lastSubtitle: subtitle,
                                       lastBody: body)
                 }
