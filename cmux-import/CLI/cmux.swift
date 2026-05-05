@@ -366,6 +366,40 @@ private struct ClaudeHookParsedInput {
     let transcriptPath: String?
 }
 
+private enum ClaudeHookNotificationKind: String, Codable {
+    case genericWaiting
+    case waiting
+    case attention
+    case permission
+    case completed
+    case error
+
+    var isSpecificSummary: Bool {
+        self != .genericWaiting
+    }
+
+    var defaultSubtitle: String {
+        switch self {
+        case .genericWaiting, .waiting:
+            return "Waiting"
+        case .attention:
+            return "Attention"
+        case .permission:
+            return "Permission"
+        case .completed:
+            return "Completed"
+        case .error:
+            return "Error"
+        }
+    }
+}
+
+private struct ClaudeHookNotificationSummary {
+    var kind: ClaudeHookNotificationKind
+    var subtitle: String
+    var body: String
+}
+
 private struct ClaudeHookSessionRecord: Codable {
     var sessionId: String
     var workspaceId: String
@@ -373,6 +407,7 @@ private struct ClaudeHookSessionRecord: Codable {
     var cwd: String?
     var pid: Int?
     var launchCommand: AgentHookLaunchCommandRecord?
+    var lastNotificationKind: ClaudeHookNotificationKind?
     var lastSubtitle: String?
     var lastBody: String?
     var startedAt: TimeInterval
@@ -437,6 +472,7 @@ private final class ClaudeHookSessionStore {
         cwd: String?,
         pid: Int? = nil,
         launchCommand: AgentHookLaunchCommandRecord? = nil,
+        lastNotificationKind: ClaudeHookNotificationKind? = nil,
         lastSubtitle: String? = nil,
         lastBody: String? = nil
     ) throws {
@@ -451,6 +487,7 @@ private final class ClaudeHookSessionStore {
                 cwd: nil,
                 pid: nil,
                 launchCommand: nil,
+                lastNotificationKind: nil,
                 lastSubtitle: nil,
                 lastBody: nil,
                 startedAt: now,
@@ -469,12 +506,53 @@ private final class ClaudeHookSessionStore {
             if let launchCommand, !launchCommand.arguments.isEmpty {
                 record.launchCommand = launchCommand
             }
+            if let lastNotificationKind {
+                record.lastNotificationKind = lastNotificationKind
+            }
             if let subtitle = normalizeOptional(lastSubtitle) {
                 record.lastSubtitle = subtitle
             }
             if let body = normalizeOptional(lastBody) {
                 record.lastBody = body
             }
+            record.updatedAt = now
+            state.sessions[normalized] = record
+        }
+    }
+
+    func resetNotificationSummary(
+        sessionId: String,
+        workspaceId: String,
+        surfaceId: String,
+        cwd: String?
+    ) throws {
+        let normalized = normalizeSessionId(sessionId)
+        guard !normalized.isEmpty else { return }
+        try withLockedState { state in
+            let now = Date().timeIntervalSince1970
+            var record = state.sessions[normalized] ?? ClaudeHookSessionRecord(
+                sessionId: normalized,
+                workspaceId: workspaceId,
+                surfaceId: surfaceId,
+                cwd: nil,
+                pid: nil,
+                launchCommand: nil,
+                lastNotificationKind: nil,
+                lastSubtitle: nil,
+                lastBody: nil,
+                startedAt: now,
+                updatedAt: now
+            )
+            record.workspaceId = workspaceId
+            if !surfaceId.isEmpty {
+                record.surfaceId = surfaceId
+            }
+            if let cwd = normalizeOptional(cwd) {
+                record.cwd = cwd
+            }
+            record.lastNotificationKind = nil
+            record.lastSubtitle = nil
+            record.lastBody = nil
             record.updatedAt = now
             state.sessions[normalized] = record
         }
@@ -13960,6 +14038,7 @@ struct CMUXCLI {
                         workspaceId: workspaceId,
                         surfaceId: surfaceId,
                         cwd: parsedInput.cwd,
+                        lastNotificationKind: completion.kind,
                         lastSubtitle: completion.subtitle,
                         lastBody: completion.body
                     )
@@ -13998,6 +14077,20 @@ struct CMUXCLI {
                 fallback: workspaceArg,
                 client: client
             )
+            let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(
+                preferred: mappedSession?.surfaceId,
+                fallback: surfaceArg,
+                workspaceId: workspaceId,
+                client: client
+            )
+            if let sessionId = parsedInput.sessionId {
+                try? sessionStore.resetNotificationSummary(
+                    sessionId: sessionId,
+                    workspaceId: workspaceId,
+                    surfaceId: surfaceId,
+                    cwd: parsedInput.cwd
+                )
+            }
             sendClaudeFeedTelemetry(workspaceId: workspaceId)
             _ = try sendV1Command("clear_notifications --tab=\(workspaceId)", client: client)
             try setClaudeStatus(
@@ -14021,14 +14114,9 @@ struct CMUXCLI {
             )
             sendClaudeFeedTelemetry(workspaceId: workspaceId)
             if let mappedSession,
-               let savedBody = mappedSession.lastBody, !savedBody.isEmpty,
-               shouldReuseSavedClaudeHookNotificationBody(summary: summary) {
-                let sessionId = parsedInput.sessionId ?? "nil"
-                fputs(
-                    "agent.notification.trace event=claude_hook_reuse_saved_summary session=\(sessionId) workspace=\(mappedSession.workspaceId) surface=\(mappedSession.surfaceId) incomingSubtitle=\(summary.subtitle) savedSubtitle=\(mappedSession.lastSubtitle ?? "nil") incomingBodyLength=\(summary.body.count) savedBodyLength=\(savedBody.count)\n",
-                    stderr
-                )
-                summary = (subtitle: mappedSession.lastSubtitle ?? summary.subtitle, body: savedBody)
+               let savedSummary = storedClaudeHookNotificationSummary(from: mappedSession),
+               shouldReuseStoredClaudeHookNotificationSummary(incoming: summary, stored: savedSummary) {
+                summary = savedSummary
             }
 
             let surfaceId = try resolvePreferredSurfaceIdForClaudeHook(
@@ -14050,6 +14138,7 @@ struct CMUXCLI {
                     workspaceId: workspaceId,
                     surfaceId: surfaceId,
                     cwd: parsedInput.cwd,
+                    lastNotificationKind: summary.kind,
                     lastSubtitle: summary.subtitle,
                     lastBody: summary.body
                 )
@@ -14128,6 +14217,7 @@ struct CMUXCLI {
                     workspaceId: workspaceId,
                     surfaceId: existingSurfaceId,
                     cwd: parsedInput.cwd,
+                    lastNotificationKind: .waiting,
                     lastSubtitle: "Waiting",
                     lastBody: question
                 )
@@ -14722,7 +14812,7 @@ struct CMUXCLI {
     private func summarizeClaudeHookStop(
         parsedInput: ClaudeHookParsedInput,
         sessionRecord: ClaudeHookSessionRecord?
-    ) -> (subtitle: String, body: String)? {
+    ) -> ClaudeHookNotificationSummary? {
         let cwd = parsedInput.cwd ?? sessionRecord?.cwd
         let transcriptPath = parsedInput.transcriptPath
 
@@ -14741,7 +14831,11 @@ struct CMUXCLI {
             if let projectName, !projectName.isEmpty {
                 subtitle = "Completed in \(projectName)"
             }
-            return (subtitle, truncate(lastMsg, maxLength: 200))
+            return ClaudeHookNotificationSummary(
+                kind: .completed,
+                subtitle: subtitle,
+                body: truncate(lastMsg, maxLength: 200)
+            )
         }
 
         // Fallback: use session record data.
@@ -14756,7 +14850,7 @@ struct CMUXCLI {
         if let lastMessage, !lastMessage.isEmpty {
             body += ". Last: \(lastMessage)"
         }
-        return ("Completed", body)
+        return ClaudeHookNotificationSummary(kind: .completed, subtitle: "Completed", body: body)
     }
 
     private struct TranscriptSummary {
@@ -15390,12 +15484,16 @@ struct CMUXCLI {
         return nil
     }
 
-    private func summarizeClaudeHookNotification(parsedInput: ClaudeHookParsedInput) -> (subtitle: String, body: String) {
+    private func summarizeClaudeHookNotification(parsedInput: ClaudeHookParsedInput) -> ClaudeHookNotificationSummary {
         guard let object = parsedInput.object else {
             if let fallback = parsedInput.rawFallback, !fallback.isEmpty {
                 return classifyClaudeNotification(signal: fallback, message: fallback)
             }
-            return ("Waiting", "Claude is waiting for your input")
+            return ClaudeHookNotificationSummary(
+                kind: .genericWaiting,
+                subtitle: "Waiting",
+                body: "Claude is waiting for your input"
+            )
         }
 
         let nested = (object["notification"] as? [String: Any]) ?? (object["data"] as? [String: Any]) ?? [:]
@@ -15417,41 +15515,71 @@ struct CMUXCLI {
         return classified
     }
 
-    private func classifyClaudeNotification(signal: String, message: String) -> (subtitle: String, body: String) {
+    private func classifyClaudeNotification(signal: String, message: String) -> ClaudeHookNotificationSummary {
         let lower = "\(signal) \(message)".lowercased()
         if lower.contains("permission") || lower.contains("approve") || lower.contains("approval") || lower.contains("permission_prompt") {
             let body = message.isEmpty ? "Approval needed" : message
-            return ("Permission", body)
+            return ClaudeHookNotificationSummary(kind: .permission, subtitle: "Permission", body: body)
         }
         if lower.contains("error") || lower.contains("failed") || lower.contains("exception") {
             let body = message.isEmpty ? "Claude reported an error" : message
-            return ("Error", body)
+            return ClaudeHookNotificationSummary(kind: .error, subtitle: "Error", body: body)
         }
         if lower.contains("complet") || lower.contains("finish") || lower.contains("done") || lower.contains("success") {
             let body = message.isEmpty ? "Task completed" : message
-            return ("Completed", body)
+            return ClaudeHookNotificationSummary(kind: .completed, subtitle: "Completed", body: body)
         }
         if lower.contains("idle") || lower.contains("wait") || lower.contains("input") || lower.contains("idle_prompt") {
             let body = message.isEmpty ? "Waiting for input" : message
-            return ("Waiting", body)
+            let kind: ClaudeHookNotificationKind = isGenericClaudeHookPlaceholder(body)
+                ? .genericWaiting
+                : .waiting
+            return ClaudeHookNotificationSummary(kind: kind, subtitle: "Waiting", body: body)
         }
         // Use the message directly if it's meaningful (not a generic placeholder).
         if !message.isEmpty, message != "Claude needs your input" {
-            return ("Attention", message)
+            let kind: ClaudeHookNotificationKind = isGenericClaudeHookPlaceholder(message)
+                ? .genericWaiting
+                : .attention
+            let subtitle = kind == .genericWaiting ? "Waiting" : "Attention"
+            return ClaudeHookNotificationSummary(kind: kind, subtitle: subtitle, body: message)
         }
-        return ("Attention", "Claude needs your attention")
+        return ClaudeHookNotificationSummary(
+            kind: .genericWaiting,
+            subtitle: "Waiting",
+            body: "Claude is waiting for your input"
+        )
     }
 
-    private func shouldReuseSavedClaudeHookNotificationBody(summary: (subtitle: String, body: String)) -> Bool {
-        let subtitle = normalizedSingleLine(summary.subtitle).lowercased()
-        let body = normalizedSingleLine(summary.body).lowercased()
-        if body.contains("needs your attention") || body.contains("needs your input") {
-            return true
+    private func storedClaudeHookNotificationSummary(
+        from record: ClaudeHookSessionRecord
+    ) -> ClaudeHookNotificationSummary? {
+        guard let body = record.lastBody, !normalizedSingleLine(body).isEmpty else {
+            return nil
         }
-        guard subtitle == "waiting" else { return false }
-        return body == "claude is waiting for your input" ||
-            body == "waiting for input" ||
-            body == "claude needs your input"
+        let subtitle = record.lastSubtitle ?? ""
+        let kind = record.lastNotificationKind ??
+            classifyClaudeNotification(signal: subtitle, message: body).kind
+        return ClaudeHookNotificationSummary(
+            kind: kind,
+            subtitle: subtitle.isEmpty ? kind.defaultSubtitle : subtitle,
+            body: body
+        )
+    }
+
+    private func shouldReuseStoredClaudeHookNotificationSummary(
+        incoming: ClaudeHookNotificationSummary,
+        stored: ClaudeHookNotificationSummary
+    ) -> Bool {
+        incoming.kind == .genericWaiting && stored.kind.isSpecificSummary
+    }
+
+    private func isGenericClaudeHookPlaceholder(_ value: String) -> Bool {
+        let normalized = normalizedSingleLine(value).lowercased()
+        return normalized == "claude is waiting for your input" ||
+            normalized == "waiting for input" ||
+            normalized == "claude needs your input" ||
+            normalized == "claude needs your attention"
     }
 
     private func firstString(in object: [String: Any], keys: [String]) -> String? {

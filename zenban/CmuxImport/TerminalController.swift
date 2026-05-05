@@ -12541,14 +12541,6 @@ class TerminalController {
             return "ERROR: Usage: notify_target_async <workspace_uuid> <surface_uuid> <title>|<subtitle>|<body>"
         }
         let (title, subtitle, body) = parseNotificationPayload(payload)
-        NSLog(
-            "agent.notification.queue accepted workspace=%@ surface=%@ title=%@ subtitle=%@ bodyLength=%d",
-            tabId.uuidString,
-            surfaceId.uuidString,
-            title,
-            subtitle,
-            body.count
-        )
         TerminalMutationBus.shared.enqueueNotification(
             tabId: tabId,
             surfaceId: surfaceId,

@@ -181,6 +181,106 @@ struct TerminalNotificationStoreDuplicateTests {
     }
 
     @Test
+    func meaningfulWaitingReplacesGenericWaitingOnSameSurface() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        var deliveryCount = 0
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
+            deliveryCount += 1
+        }
+        notificationStore.replaceNotificationsForTesting([])
+        AppFocusState.overrideIsFocused = false
+        defer {
+            AppFocusState.overrideIsFocused = nil
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let tabId = UUID()
+        let surfaceId = UUID()
+
+        notificationStore.addNotification(
+            tabId: tabId,
+            surfaceId: surfaceId,
+            title: "Claude Code",
+            subtitle: "Waiting",
+            body: "Claude is waiting for your input"
+        )
+        let genericNotification = try #require(notificationStore.notifications.first)
+
+        notificationStore.addNotification(
+            tabId: tabId,
+            surfaceId: surfaceId,
+            title: "Claude Code",
+            subtitle: "Waiting",
+            body: "Which deployment target should I use?"
+        )
+        let replacementNotification = try #require(notificationStore.notifications.first)
+
+        #expect(deliveryCount == 2)
+        #expect(notificationStore.notifications.count == 1)
+        #expect(replacementNotification.id != genericNotification.id)
+        #expect(replacementNotification.body == "Which deployment target should I use?")
+    }
+
+    @Test
+    func errorAndPermissionReplaceGenericWaitingOnSameSurface() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        var deliveryCount = 0
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
+            deliveryCount += 1
+        }
+        notificationStore.replaceNotificationsForTesting([])
+        AppFocusState.overrideIsFocused = false
+        defer {
+            AppFocusState.overrideIsFocused = nil
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let tabId = UUID()
+        let surfaceId = UUID()
+
+        notificationStore.addNotification(
+            tabId: tabId,
+            surfaceId: surfaceId,
+            title: "Claude Code",
+            subtitle: "Waiting",
+            body: "Claude is waiting for your input"
+        )
+        notificationStore.addNotification(
+            tabId: tabId,
+            surfaceId: surfaceId,
+            title: "Claude Code",
+            subtitle: "Error",
+            body: "Build failed"
+        )
+        let errorNotification = try #require(notificationStore.notifications.first)
+
+        notificationStore.addNotification(
+            tabId: tabId,
+            surfaceId: surfaceId,
+            title: "Claude Code",
+            subtitle: "Waiting",
+            body: "Claude is waiting for your input"
+        )
+        #expect(notificationStore.notifications.first?.id == errorNotification.id)
+
+        notificationStore.addNotification(
+            tabId: tabId,
+            surfaceId: surfaceId,
+            title: "Claude Code",
+            subtitle: "Permission",
+            body: "Approval needed"
+        )
+        let permissionNotification = try #require(notificationStore.notifications.first)
+
+        #expect(deliveryCount == 3)
+        #expect(notificationStore.notifications.count == 1)
+        #expect(permissionNotification.id != errorNotification.id)
+        #expect(permissionNotification.subtitle == "Permission")
+    }
+
+    @Test
     func readSameSurfaceSameContentNotificationDoesNotBecomeUnreadAgain() throws {
         let notificationStore = TerminalNotificationStore.shared
         var deliveryCount = 0

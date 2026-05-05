@@ -341,24 +341,12 @@ struct zenbanApp: App {
 
             switch key {
             case .up:
-                NSLog(
-                    "agent.notification.trace event=keyboard_shortcut_nav key=up focusRegion=%@ selectedCard=%@ selectedBoard=%@",
-                    String(describing: store.focusRegion),
-                    store.selectedCardID?.uuidString ?? "nil",
-                    store.selectedBoardID?.uuidString ?? "nil"
-                )
                 if store.focusRegion == .sidebar {
                     store.selectPreviousBoard()
                 } else {
                     store.selectPreviousCard()
                 }
             case .down:
-                NSLog(
-                    "agent.notification.trace event=keyboard_shortcut_nav key=down focusRegion=%@ selectedCard=%@ selectedBoard=%@",
-                    String(describing: store.focusRegion),
-                    store.selectedCardID?.uuidString ?? "nil",
-                    store.selectedBoardID?.uuidString ?? "nil"
-                )
                 if store.focusRegion == .sidebar {
                     store.selectNextBoard()
                 } else {
@@ -366,20 +354,8 @@ struct zenbanApp: App {
                 }
             case .left:
                 guard store.focusRegion == .cards else { return event }
-                NSLog(
-                    "agent.notification.trace event=keyboard_shortcut_nav key=left focusRegion=%@ selectedCard=%@ selectedBoard=%@",
-                    String(describing: store.focusRegion),
-                    store.selectedCardID?.uuidString ?? "nil",
-                    store.selectedBoardID?.uuidString ?? "nil"
-                )
                 store.selectCardInPreviousColumn()
             case .right:
-                NSLog(
-                    "agent.notification.trace event=keyboard_shortcut_nav key=right focusRegion=%@ selectedCard=%@ selectedBoard=%@",
-                    String(describing: store.focusRegion),
-                    store.selectedCardID?.uuidString ?? "nil",
-                    store.selectedBoardID?.uuidString ?? "nil"
-                )
                 if store.focusRegion == .sidebar {
                     store.enterCardsFromSidebar()
                 } else {

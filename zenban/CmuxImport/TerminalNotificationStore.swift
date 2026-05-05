@@ -696,6 +696,19 @@ final class TerminalNotificationStore: ObservableObject {
         let body: String
     }
 
+    private enum NotificationSemanticKind {
+        case genericWaiting
+        case waiting
+        case attention
+        case permission
+        case completed
+        case error
+
+        var isSpecificSummary: Bool {
+            self != .genericWaiting
+        }
+    }
+
     private static let maxReadContentSignaturesPerTab = 64
 
     private struct NotificationIndexes {
@@ -806,10 +819,7 @@ final class TerminalNotificationStore: ObservableObject {
     }
 
     private func logAuthorization(_ message: String) {
-#if DEBUG
-        dlog("notification.auth \(message)")
-#endif
-        NSLog("notification.auth %@", message)
+        _ = message
     }
 
     private static func authorizationStatusLabel(_ status: UNAuthorizationStatus) -> String {
@@ -902,21 +912,7 @@ final class TerminalNotificationStore: ObservableObject {
     }
 
     func hasUnreadNotification(forTabId tabId: UUID, surfaceId: UUID?) -> Bool {
-        let hasUnread = indexes.unreadByTabSurface.contains(TabSurfaceKey(tabId: tabId, surfaceId: surfaceId))
-        if hasUnread {
-            let latest = indexes.latestUnreadByTabId[tabId] ?? indexes.latestByTabId[tabId]
-            NSLog(
-                "agent.notification.trace event=store_has_unread_true workspace=%@ surface=%@ unreadCount=%d latestId=%@ latestRead=%d latestSurface=%@ latestBodyLength=%d",
-                tabId.uuidString,
-                surfaceId?.uuidString ?? "nil",
-                indexes.unreadCountByTabId[tabId] ?? 0,
-                latest?.id.uuidString ?? "nil",
-                latest?.isRead == true ? 1 : 0,
-                latest?.surfaceId?.uuidString ?? "nil",
-                latest?.body.count ?? 0
-            )
-        }
-        return hasUnread
+        indexes.unreadByTabSurface.contains(TabSurfaceKey(tabId: tabId, surfaceId: surfaceId))
     }
 
     func hasVisibleNotificationIndicator(forTabId tabId: UUID, surfaceId: UUID?) -> Bool {
@@ -961,48 +957,24 @@ final class TerminalNotificationStore: ObservableObject {
             subtitle: subtitle,
             body: body
         )
-        if let existing = notifications.first(where: {
+        if notifications.contains(where: {
             $0.tabId == tabId &&
                 Self.contentSignature(for: $0) == nextSignature
         }) {
-            NSLog(
-                "agent.notification.trace event=add_duplicate_same_content_suppressed workspace=%@ surface=%@ existingId=%@ existingRead=%d existingSurface=%@ bodyLength=%d",
-                tabId.uuidString,
-                surfaceId?.uuidString ?? "nil",
-                existing.id.uuidString,
-                existing.isRead ? 1 : 0,
-                existing.surfaceId?.uuidString ?? "nil",
-                body.count
-            )
             return
         }
         if hasReadContentSignature(forTabId: tabId, signature: nextSignature) {
-            NSLog(
-                "agent.notification.trace event=add_read_content_suppressed workspace=%@ surface=%@ bodyLength=%d",
-                tabId.uuidString,
-                surfaceId?.uuidString ?? "nil",
-                body.count
-            )
             return
         }
-        if let existing = notifications.first(where: {
+        if notifications.contains(where: {
             $0.tabId == tabId &&
                 $0.surfaceId == surfaceId &&
-                Self.shouldSuppressGenericWaitingReplacement(
+                Self.shouldSuppressSemanticDowngrade(
                     existing: $0,
                     incomingSubtitle: subtitle,
                     incomingBody: body
                 )
         }) {
-            NSLog(
-                "agent.notification.trace event=add_generic_waiting_replacement_suppressed workspace=%@ surface=%@ existingId=%@ existingRead=%d existingSubtitle=%@ bodyLength=%d",
-                tabId.uuidString,
-                surfaceId?.uuidString ?? "nil",
-                existing.id.uuidString,
-                existing.isRead ? 1 : 0,
-                existing.subtitle,
-                body.count
-            )
             return
         }
 
@@ -1013,25 +985,10 @@ final class TerminalNotificationStore: ObservableObject {
             idsToClear.append(existing.id.uuidString)
             return true
         }
-        if !idsToClear.isEmpty {
-            NSLog(
-                "agent.notification.trace event=add_replacing_existing workspace=%@ surface=%@ removedCount=%d removedIds=%@",
-                tabId.uuidString,
-                surfaceId?.uuidString ?? "nil",
-                idsToClear.count,
-                idsToClear.joined(separator: ",")
-            )
-        }
 
         if let existingIndicatorSurfaceId = focusedReadIndicatorByTabId[tabId],
            existingIndicatorSurfaceId != surfaceId {
             focusedReadIndicatorByTabId.removeValue(forKey: tabId)
-            NSLog(
-                "agent.notification.trace event=focused_indicator_clear reason=surface_changed workspace=%@ oldSurface=%@ newSurface=%@",
-                tabId.uuidString,
-                existingIndicatorSurfaceId.uuidString,
-                surfaceId?.uuidString ?? "nil"
-            )
         }
 
         let shouldSuppressExternalDelivery =
@@ -1059,16 +1016,6 @@ final class TerminalNotificationStore: ObservableObject {
         if let cooldownKey, resolvedCooldownInterval != nil {
             lastNotificationDateByCooldownKey[cooldownKey] = now
         }
-        NSLog(
-            "agent.notification.store added id=%@ workspace=%@ surface=%@ delivery=%@ title=%@ subtitle=%@ bodyLength=%d",
-            notification.id.uuidString,
-            tabId.uuidString,
-            surfaceId?.uuidString ?? "nil",
-            shouldSuppressExternalDelivery ? "suppressed" : "scheduled",
-            resolvedTitle,
-            subtitle,
-            body.count
-        )
         observer?.terminalNotificationStore(self, didAdd: notification)
         if !idsToClear.isEmpty {
             center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
@@ -1082,38 +1029,16 @@ final class TerminalNotificationStore: ObservableObject {
     }
 
     func markRead(id: UUID, source: String = "unknown") {
+        _ = source
         var updated = notifications
         guard let index = updated.firstIndex(where: { $0.id == id }) else {
-            NSLog(
-                "agent.notification.trace event=mark_read_missing_id source=%@ id=%@ activeCount=%d",
-                source,
-                id.uuidString,
-                notifications.count
-            )
             return
         }
         guard !updated[index].isRead else {
             rememberReadContentSignature(for: updated[index])
             clearFocusedReadIndicator(forTabId: updated[index].tabId, surfaceId: updated[index].surfaceId)
-            NSLog(
-                "agent.notification.trace event=mark_read_noop_already_read source=%@ id=%@ workspace=%@ surface=%@ bodyLength=%d",
-                source,
-                id.uuidString,
-                updated[index].tabId.uuidString,
-                updated[index].surfaceId?.uuidString ?? "nil",
-                updated[index].body.count
-            )
             return
         }
-        NSLog(
-            "agent.notification.trace event=mark_read_id source=%@ id=%@ workspace=%@ surface=%@ unreadBefore=%d bodyLength=%d",
-            source,
-            id.uuidString,
-            updated[index].tabId.uuidString,
-            updated[index].surfaceId?.uuidString ?? "nil",
-            indexes.unreadCountByTabId[updated[index].tabId] ?? 0,
-            updated[index].body.count
-        )
         clearFocusedReadIndicator(forTabId: updated[index].tabId, surfaceId: updated[index].surfaceId)
         rememberReadContentSignature(for: updated[index])
         updated[index].isRead = true
@@ -1127,10 +1052,10 @@ final class TerminalNotificationStore: ObservableObject {
     }
 
     func markRead(forTabId tabId: UUID, source: String = "unknown") {
+        _ = source
         TerminalMutationBus.shared.discardPendingNotifications(forTabId: tabId)
         var updated = notifications
         var idsToClear: [String] = []
-        let unreadBefore = indexes.unreadCountByTabId[tabId] ?? 0
         for index in updated.indices {
             if updated[index].tabId == tabId && !updated[index].isRead {
                 rememberReadContentSignature(for: updated[index])
@@ -1139,14 +1064,6 @@ final class TerminalNotificationStore: ObservableObject {
             }
         }
         clearFocusedReadIndicator(forTabId: tabId)
-        NSLog(
-            "agent.notification.trace event=mark_read_tab source=%@ workspace=%@ unreadBefore=%d markedCount=%d markedIds=%@",
-            source,
-            tabId.uuidString,
-            unreadBefore,
-            idsToClear.count,
-            idsToClear.joined(separator: ",")
-        )
         if !idsToClear.isEmpty {
             notifications = updated
             center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
@@ -1155,10 +1072,10 @@ final class TerminalNotificationStore: ObservableObject {
     }
 
     func markRead(forTabId tabId: UUID, surfaceId: UUID?, source: String = "unknown") {
+        _ = source
         TerminalMutationBus.shared.discardPendingNotifications(forTabId: tabId, surfaceId: surfaceId)
         var updated = notifications
         var idsToClear: [String] = []
-        let unreadBefore = indexes.unreadCountByTabId[tabId] ?? 0
         for index in updated.indices {
             if updated[index].tabId == tabId,
                updated[index].surfaceId == surfaceId,
@@ -1169,15 +1086,6 @@ final class TerminalNotificationStore: ObservableObject {
             }
         }
         clearFocusedReadIndicator(forTabId: tabId, surfaceId: surfaceId)
-        NSLog(
-            "agent.notification.trace event=mark_read_surface source=%@ workspace=%@ surface=%@ unreadBefore=%d markedCount=%d markedIds=%@",
-            source,
-            tabId.uuidString,
-            surfaceId?.uuidString ?? "nil",
-            unreadBefore,
-            idsToClear.count,
-            idsToClear.joined(separator: ",")
-        )
         if !idsToClear.isEmpty {
             notifications = updated
             center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
@@ -1188,21 +1096,13 @@ final class TerminalNotificationStore: ObservableObject {
     func markUnread(forTabId tabId: UUID) {
         var updated = notifications
         var didChange = false
-        var changedIds: [String] = []
         for index in updated.indices {
             if updated[index].tabId == tabId, updated[index].isRead {
                 updated[index].isRead = false
                 forgetReadContentSignature(for: updated[index])
-                changedIds.append(updated[index].id.uuidString)
                 didChange = true
             }
         }
-        NSLog(
-            "agent.notification.trace event=mark_unread_tab workspace=%@ changedCount=%d changedIds=%@",
-            tabId.uuidString,
-            changedIds.count,
-            changedIds.joined(separator: ",")
-        )
         if didChange {
             notifications = updated
         }
@@ -1212,34 +1112,18 @@ final class TerminalNotificationStore: ObservableObject {
         guard let surfaceId else { return }
         guard focusedReadIndicatorByTabId[tabId] != surfaceId else { return }
         focusedReadIndicatorByTabId[tabId] = surfaceId
-        NSLog(
-            "agent.notification.trace event=focused_indicator_set workspace=%@ surface=%@",
-            tabId.uuidString,
-            surfaceId.uuidString
-        )
     }
 
     func clearFocusedReadIndicator(forTabId tabId: UUID, surfaceId: UUID? = nil) {
         guard let existingSurfaceId = focusedReadIndicatorByTabId[tabId] else { return }
         guard surfaceId == nil || existingSurfaceId == surfaceId else { return }
         focusedReadIndicatorByTabId.removeValue(forKey: tabId)
-        NSLog(
-            "agent.notification.trace event=focused_indicator_clear reason=explicit workspace=%@ surface=%@",
-            tabId.uuidString,
-            existingSurfaceId.uuidString
-        )
     }
 
     func clearFocusedReadIndicatorIfSurfaceChanged(forTabId tabId: UUID, surfaceId: UUID?) {
         guard let existingSurfaceId = focusedReadIndicatorByTabId[tabId] else { return }
         guard existingSurfaceId != surfaceId else { return }
         focusedReadIndicatorByTabId.removeValue(forKey: tabId)
-        NSLog(
-            "agent.notification.trace event=focused_indicator_clear reason=surface_changed workspace=%@ oldSurface=%@ newSurface=%@",
-            tabId.uuidString,
-            existingSurfaceId.uuidString,
-            surfaceId?.uuidString ?? "nil"
-        )
     }
 
     func markAllRead() {
@@ -1267,15 +1151,6 @@ final class TerminalNotificationStore: ObservableObject {
         let originalCount = updated.count
         updated.removeAll { $0.id == id }
         guard updated.count != originalCount else { return }
-        NSLog(
-            "agent.notification.trace event=remove_notification id=%@ removedCount=%d wasRead=%d workspace=%@ surface=%@ bodyLength=%d",
-            id.uuidString,
-            removedNotifications.count,
-            removedNotifications.first?.isRead == true ? 1 : 0,
-            removedNotifications.first?.tabId.uuidString ?? "nil",
-            removedNotifications.first?.surfaceId?.uuidString ?? "nil",
-            removedNotifications.first?.body.count ?? 0
-        )
         if let removed = removedNotifications.first {
             rememberReadContentSignature(for: removed)
             clearFocusedReadIndicator(forTabId: removed.tabId, surfaceId: removed.surfaceId)
@@ -1294,12 +1169,6 @@ final class TerminalNotificationStore: ObservableObject {
         for notification in notifications {
             rememberReadContentSignature(for: notification)
         }
-        NSLog(
-            "agent.notification.trace event=clear_all_notifications discardQueued=%d clearedCount=%d clearedIds=%@",
-            discardQueuedNotifications ? 1 : 0,
-            ids.count,
-            ids.joined(separator: ",")
-        )
         notifications.removeAll()
         focusedReadIndicatorByTabId.removeAll()
         center.removeDeliveredNotificationsOffMain(withIdentifiers: ids)
@@ -1326,14 +1195,6 @@ final class TerminalNotificationStore: ObservableObject {
             }
         }
         clearFocusedReadIndicator(forTabId: tabId, surfaceId: surfaceId)
-        NSLog(
-            "agent.notification.trace event=clear_notifications_surface workspace=%@ surface=%@ discardQueued=%d clearedCount=%d clearedIds=%@",
-            tabId.uuidString,
-            surfaceId?.uuidString ?? "nil",
-            discardQueuedNotifications ? 1 : 0,
-            idsToClear.count,
-            idsToClear.joined(separator: ",")
-        )
         guard !idsToClear.isEmpty else { return }
         notifications = updated
         center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
@@ -1356,13 +1217,6 @@ final class TerminalNotificationStore: ObservableObject {
             }
         }
         clearFocusedReadIndicator(forTabId: tabId)
-        NSLog(
-            "agent.notification.trace event=clear_notifications_tab workspace=%@ discardQueued=%d clearedCount=%d clearedIds=%@",
-            tabId.uuidString,
-            discardQueuedNotifications ? 1 : 0,
-            idsToClear.count,
-            idsToClear.joined(separator: ",")
-        )
         guard !idsToClear.isEmpty else { return }
         notifications = updated
         center.removeDeliveredNotificationsOffMain(withIdentifiers: idsToClear)
@@ -1410,12 +1264,6 @@ final class TerminalNotificationStore: ObservableObject {
                 if let error {
                     NSLog("Failed to schedule notification: \(error)")
                 } else {
-                    NSLog(
-                        "agent.notification.deliver scheduled id=%@ workspace=%@ surface=%@",
-                        notification.id.uuidString,
-                        notification.tabId.uuidString,
-                        notification.surfaceId?.uuidString ?? "nil"
-                    )
                     NotificationSoundSettings.runCustomCommand(
                         title: content.title,
                         subtitle: content.subtitle,
@@ -1640,27 +1488,63 @@ final class TerminalNotificationStore: ObservableObject {
         )
     }
 
-    private static func shouldSuppressGenericWaitingReplacement(
+    private static func shouldSuppressSemanticDowngrade(
         existing: TerminalNotification,
         incomingSubtitle: String,
         incomingBody: String
     ) -> Bool {
-        guard isGenericWaitingNotification(subtitle: incomingSubtitle, body: incomingBody) else {
-            return false
-        }
-        return !isGenericWaitingNotification(subtitle: existing.subtitle, body: existing.body)
+        let incomingKind = semanticKind(subtitle: incomingSubtitle, body: incomingBody)
+        let existingKind = semanticKind(subtitle: existing.subtitle, body: existing.body)
+        return incomingKind == .genericWaiting && existingKind.isSpecificSummary
     }
 
-    private static func isGenericWaitingNotification(subtitle: String, body: String) -> Bool {
-        let normalizedSubtitle = subtitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard normalizedSubtitle == "waiting" else { return false }
-        let normalizedBody = body
+    private static func semanticKind(subtitle: String, body: String) -> NotificationSemanticKind {
+        let normalizedSubtitle = subtitle
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        return normalizedBody == "claude is waiting for your input" ||
+        let normalizedBody = normalizedNotificationText(body)
+        let combined = "\(normalizedSubtitle) \(normalizedBody)"
+
+        if combined.contains("permission") ||
+            combined.contains("approve") ||
+            combined.contains("approval") ||
+            combined.contains("permission_prompt") {
+            return .permission
+        }
+        if combined.contains("error") ||
+            combined.contains("failed") ||
+            combined.contains("exception") {
+            return .error
+        }
+        if combined.contains("complet") ||
+            combined.contains("finish") ||
+            combined.contains("done") ||
+            combined.contains("success") {
+            return .completed
+        }
+        if normalizedSubtitle == "waiting" ||
+            combined.contains("idle") ||
+            combined.contains("wait") ||
+            combined.contains("input") ||
+            combined.contains("idle_prompt") {
+            return isGenericWaitingBody(normalizedBody) ? .genericWaiting : .waiting
+        }
+        return isGenericWaitingBody(normalizedBody) ? .genericWaiting : .attention
+    }
+
+    private static func normalizedNotificationText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func isGenericWaitingBody(_ normalizedBody: String) -> Bool {
+        normalizedBody == "claude is waiting for your input" ||
             normalizedBody == "waiting for input" ||
-            normalizedBody == "claude needs your input"
+            normalizedBody == "claude needs your input" ||
+            normalizedBody == "claude needs your attention"
     }
 
     private func hasReadContentSignature(

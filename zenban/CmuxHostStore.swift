@@ -181,52 +181,14 @@ final class CmuxHostStore {
             forTabId: workspace.id,
             surfaceId: terminalPanel.id
         )
-        if hasUnread {
-            let latest = notificationStore.latestNotification(forTabId: workspace.id)
-            NSLog(
-                "agent.notification.trace event=card_outline_unread card=%@ workspace=%@ surface=%@ unreadCount=%d latestId=%@ latestRead=%d latestSurface=%@ latestBodyLength=%d",
-                cardID.uuidString,
-                workspace.id.uuidString,
-                terminalPanel.id.uuidString,
-                notificationStore.unreadCount(forTabId: workspace.id),
-                latest?.id.uuidString ?? "nil",
-                latest?.isRead == true ? 1 : 0,
-                latest?.surfaceId?.uuidString ?? "nil",
-                latest?.body.count ?? 0
-            )
-        }
         return hasUnread
     }
 
     func markTerminalNotificationsRead(for cardID: UUID, source: String = "unknown") {
         guard let workspaceID = cardToWorkspaceID[cardID] else {
-            NSLog(
-                "agent.notification.trace event=host_mark_read_missing_workspace source=%@ card=%@",
-                source,
-                cardID.uuidString
-            )
             return
         }
-        let latest = notificationStore.latestNotification(forTabId: workspaceID)
-        NSLog(
-            "agent.notification.trace event=host_mark_read_start source=%@ card=%@ workspace=%@ unreadBefore=%d latestId=%@ latestRead=%d latestSurface=%@ latestBodyLength=%d",
-            source,
-            cardID.uuidString,
-            workspaceID.uuidString,
-            notificationStore.unreadCount(forTabId: workspaceID),
-            latest?.id.uuidString ?? "nil",
-            latest?.isRead == true ? 1 : 0,
-            latest?.surfaceId?.uuidString ?? "nil",
-            latest?.body.count ?? 0
-        )
         notificationStore.markRead(forTabId: workspaceID, source: "host.\(source)")
-        NSLog(
-            "agent.notification.trace event=host_mark_read_done source=%@ card=%@ workspace=%@ unreadAfter=%d",
-            source,
-            cardID.uuidString,
-            workspaceID.uuidString,
-            notificationStore.unreadCount(forTabId: workspaceID)
-        )
     }
 
     func agentSummary(for cardID: UUID) -> String? {
@@ -757,14 +719,6 @@ final class CmuxHostStore {
         )
         if mode != .backgroundPrewarm {
             selectWorkspace(workspace)
-            NSLog(
-                "agent.notification.trace event=launch_workspace_mark_read mode=%@ card=%@ board=%@ workspace=%@ unreadBefore=%d",
-                String(describing: mode),
-                card.id.uuidString,
-                boardID.uuidString,
-                workspace.id.uuidString,
-                notificationStore.unreadCount(forTabId: workspace.id)
-            )
             notificationStore.markRead(forTabId: workspace.id, source: "launchWorkspace.\(String(describing: mode))")
         }
         setWorkspaceResidency(
@@ -1612,44 +1566,14 @@ extension CmuxHostStore: TerminalNotificationStoreObserver {
         didAdd notification: TerminalNotification
     ) {
         guard let boardStore else {
-            NSLog(
-                "agent.notification.trace event=host_observer_did_add_missing_board_store notification=%@ workspace=%@ surface=%@ read=%d bodyLength=%d",
-                notification.id.uuidString,
-                notification.tabId.uuidString,
-                notification.surfaceId?.uuidString ?? "nil",
-                notification.isRead ? 1 : 0,
-                notification.body.count
-            )
             return
         }
         guard let cardID = workspaceToCardID[notification.tabId],
               let boardID = workspaceToBoardID[notification.tabId],
               let card = boardStore.card(id: cardID) else {
-            NSLog(
-                "agent.notification.trace event=host_observer_did_add_missing_mapping notification=%@ workspace=%@ surface=%@ read=%d bodyLength=%d mappedCard=%@ mappedBoard=%@",
-                notification.id.uuidString,
-                notification.tabId.uuidString,
-                notification.surfaceId?.uuidString ?? "nil",
-                notification.isRead ? 1 : 0,
-                notification.body.count,
-                workspaceToCardID[notification.tabId]?.uuidString ?? "nil",
-                workspaceToBoardID[notification.tabId]?.uuidString ?? "nil"
-            )
             return
         }
 
-        NSLog(
-            "agent.notification.trace event=host_observer_did_add notification=%@ card=%@ board=%@ workspace=%@ surface=%@ cardColumn=%@ read=%d unreadCount=%d bodyLength=%d",
-            notification.id.uuidString,
-            cardID.uuidString,
-            boardID.uuidString,
-            notification.tabId.uuidString,
-            notification.surfaceId?.uuidString ?? "nil",
-            String(describing: card.column),
-            notification.isRead ? 1 : 0,
-            store.unreadCount(forTabId: notification.tabId),
-            notification.body.count
-        )
 
         if resolvedAgent(for: card, boardID: boardID) == .claude {
             cacheClaudeSummary(from: notification, for: cardID, in: boardID)
@@ -1658,20 +1582,8 @@ extension CmuxHostStore: TerminalNotificationStoreObserver {
         recordWorkspaceAgentActivity(notification.tabId)
 
         guard card.column == .todo else {
-            NSLog(
-                "agent.notification.trace event=host_observer_skip_move notification=%@ card=%@ column=%@",
-                notification.id.uuidString,
-                cardID.uuidString,
-                String(describing: card.column)
-            )
             return
         }
-        NSLog(
-            "agent.notification.trace event=host_observer_move_to_in_progress notification=%@ card=%@ board=%@",
-            notification.id.uuidString,
-            cardID.uuidString,
-            boardID.uuidString
-        )
         _ = boardStore.moveCard(cardID, to: .inProgress, in: boardID)
     }
 }

@@ -318,13 +318,6 @@ extension TerminalController {
 extension TerminalNotificationStore {
     fileprivate func deliverQueuedNotification(_ notification: QueuedTerminalNotification) {
         guard shouldDeliverQueuedNotification(notification) else { return }
-        NSLog(
-            "agent.notification.queue delivering workspace=%@ surface=%@ title=%@ bodyLength=%d",
-            notification.key.tabId.uuidString,
-            notification.key.surfaceId?.uuidString ?? "nil",
-            notification.title,
-            notification.body.count
-        )
         addNotification(
             tabId: notification.key.tabId,
             surfaceId: notification.key.surfaceId,
