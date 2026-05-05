@@ -64,7 +64,7 @@ struct WorkspaceContentView: View {
                     isFocused: isFocused
                 )
                 let hasUnreadNotification = Workspace.shouldShowUnreadIndicator(
-                    hasUnreadNotification: notificationStore.hasUnreadNotification(forTabId: workspace.id, surfaceId: panel.id),
+                    hasUnreadNotification: notificationStore.hasVisibleNotificationIndicator(forTabId: workspace.id, surfaceId: panel.id),
                     isManuallyUnread: workspace.manualUnreadPanelIds.contains(panel.id)
                 )
                 PanelContentView(

@@ -3,6 +3,17 @@ import Testing
 
 struct ShellIntegrationLaunchRequestTests {
     @Test
+    func bundledClaudeWrapperDisablesClaudeNativeNotificationChannel() throws {
+        let wrapperURL = repositoryRoot()
+            .appendingPathComponent("cmux-import/bin/claude", isDirectory: false)
+        let contents = try String(contentsOf: wrapperURL, encoding: .utf8)
+
+        #expect(FileManager.default.isExecutableFile(atPath: wrapperURL.path))
+        #expect(contents.contains(#""preferredNotifChannel":"notifications_disabled""#))
+        #expect(contents.contains(#""${CMUX_CLAUDE_HOOK_CMUX_BIN:-cmux}" hooks claude notification"#))
+    }
+
+    @Test
     func zshPromptConsumesQueuedZellijLaunchRequest() throws {
         try assertShellIntegrationConsumesLaunchRequest(
             shell: "/bin/zsh",

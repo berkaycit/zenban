@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct CardView: View {
@@ -66,8 +67,30 @@ struct CardView: View {
         .accessibilityIdentifier("BoardCard.\(card.title)")
         .accessibilityLabel(card.title)
         .onTapGesture {
+            NSLog(
+                "agent.notification.trace event=card_tap card=%@ board=%@ title=%@ column=%@ selectedBefore=%d focusRegion=%@",
+                card.id.uuidString,
+                boardID.uuidString,
+                card.title,
+                String(describing: card.column),
+                isSelected ? 1 : 0,
+                String(describing: store.focusRegion)
+            )
             store.selectedCardID = card.id
             store.focusRegion = .cards
+            cmuxHost.markTerminalNotificationsRead(for: card.id, source: "card_tap")
+        }
+        .onHover { hovering in
+            guard hovering else { return }
+            NSLog(
+                "agent.notification.trace event=card_hover_no_mark_read card=%@ board=%@ title=%@ column=%@ selected=%d focusRegion=%@",
+                card.id.uuidString,
+                boardID.uuidString,
+                card.title,
+                String(describing: card.column),
+                isSelected ? 1 : 0,
+                String(describing: store.focusRegion)
+            )
         }
     }
 }

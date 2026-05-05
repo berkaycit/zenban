@@ -1643,7 +1643,7 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     private func hasUnreadNotification(panelId: UUID) -> Bool {
-        AppDelegate.shared?.notificationStore?.hasUnreadNotification(forTabId: id, surfaceId: panelId) ?? false
+        AppDelegate.shared?.notificationStore?.hasVisibleNotificationIndicator(forTabId: id, surfaceId: panelId) ?? false
     }
 
     private func syncUnreadBadgeStateForPanel(_ panelId: UUID) {
@@ -3760,6 +3760,14 @@ final class Workspace: Identifiable, ObservableObject {
         if requiresSplit && !isSplit {
             return
         }
+        terminalPanel.triggerNotificationDismissFlash()
+    }
+
+    func triggerNotificationDismissFlash(panelId: UUID) {
+        guard NotificationPaneFlashSettings.showsNotificationFlash(
+            userPreferenceEnabled: NotificationPaneFlashSettings.isEnabled()
+        ) else { return }
+        guard let terminalPanel = terminalPanel(for: panelId) else { return }
         terminalPanel.triggerNotificationDismissFlash()
     }
 

@@ -122,6 +122,13 @@ final class BoardStore {
     var selectedCardID: UUID? {
         didSet {
             guard oldValue != selectedCardID else { return }
+            NSLog(
+                "agent.notification.trace event=board_selected_card_did_set old=%@ new=%@ board=%@ focusRegion=%@",
+                oldValue?.uuidString ?? "nil",
+                selectedCardID?.uuidString ?? "nil",
+                selectedBoardID?.uuidString ?? "nil",
+                String(describing: focusRegion)
+            )
             reconcileTerminalFullscreenState()
         }
     }
@@ -403,6 +410,12 @@ final class BoardStore {
             return
         }
 
+        NSLog(
+            "agent.notification.trace event=board_select_card_method source=selectCard card=%@ board=%@ focusRegionBefore=%@",
+            cardID.uuidString,
+            boardID.uuidString,
+            String(describing: focusRegion)
+        )
         selectedBoardID = boardID
         selectedCardID = cardID
         focusRegion = .cards
@@ -672,30 +685,47 @@ final class BoardStore {
     func selectPreviousCard() {
         guard let board = selectedBoard,
               let card = selectedCard else {
+            NSLog("agent.notification.trace event=board_keyboard_nav source=selectPreviousCard fallback=firstTodo")
             selectFirstCard(in: .todo)
             return
         }
         let cards = board.cards(in: card.column)
         guard let index = cards.firstIndex(where: { $0.id == card.id }),
               index > 0 else { return }
+        NSLog(
+            "agent.notification.trace event=board_keyboard_nav source=selectPreviousCard from=%@ to=%@ board=%@ column=%@",
+            card.id.uuidString,
+            cards[index - 1].id.uuidString,
+            board.id.uuidString,
+            String(describing: card.column)
+        )
         selectedCardID = cards[index - 1].id
     }
 
     func selectNextCard() {
         guard let board = selectedBoard,
               let card = selectedCard else {
+            NSLog("agent.notification.trace event=board_keyboard_nav source=selectNextCard fallback=firstTodo")
             selectFirstCard(in: .todo)
             return
         }
         let cards = board.cards(in: card.column)
         guard let index = cards.firstIndex(where: { $0.id == card.id }),
               index < cards.count - 1 else { return }
+        NSLog(
+            "agent.notification.trace event=board_keyboard_nav source=selectNextCard from=%@ to=%@ board=%@ column=%@",
+            card.id.uuidString,
+            cards[index + 1].id.uuidString,
+            board.id.uuidString,
+            String(describing: card.column)
+        )
         selectedCardID = cards[index + 1].id
     }
 
     func selectCardInPreviousColumn() {
         guard let board = selectedBoard,
               let card = selectedCard else {
+            NSLog("agent.notification.trace event=board_keyboard_nav source=selectCardInPreviousColumn fallback=firstTodo")
             selectFirstCard(in: .todo)
             return
         }
@@ -715,6 +745,14 @@ final class BoardStore {
             let targetCards = board.cards(in: columns[i])
             if !targetCards.isEmpty {
                 let targetIndex = min(currentIndex, targetCards.count - 1)
+                NSLog(
+                    "agent.notification.trace event=board_keyboard_nav source=selectCardInPreviousColumn from=%@ to=%@ board=%@ fromColumn=%@ toColumn=%@",
+                    card.id.uuidString,
+                    targetCards[targetIndex].id.uuidString,
+                    board.id.uuidString,
+                    String(describing: card.column),
+                    String(describing: columns[i])
+                )
                 selectedCardID = targetCards[targetIndex].id
                 return
             }
@@ -726,6 +764,7 @@ final class BoardStore {
     func selectCardInNextColumn() {
         guard let board = selectedBoard,
               let card = selectedCard else {
+            NSLog("agent.notification.trace event=board_keyboard_nav source=selectCardInNextColumn fallback=firstTodo")
             selectFirstCard(in: .todo)
             return
         }
@@ -739,6 +778,14 @@ final class BoardStore {
             let targetCards = board.cards(in: columns[i])
             if !targetCards.isEmpty {
                 let targetIndex = min(currentIndex, targetCards.count - 1)
+                NSLog(
+                    "agent.notification.trace event=board_keyboard_nav source=selectCardInNextColumn from=%@ to=%@ board=%@ fromColumn=%@ toColumn=%@",
+                    card.id.uuidString,
+                    targetCards[targetIndex].id.uuidString,
+                    board.id.uuidString,
+                    String(describing: card.column),
+                    String(describing: columns[i])
+                )
                 selectedCardID = targetCards[targetIndex].id
                 return
             }
@@ -779,6 +826,12 @@ final class BoardStore {
     private func selectFirstCard(in column: Column) -> Bool {
         guard let board = selectedBoard,
               let firstCard = board.cards(in: column).first else { return false }
+        NSLog(
+            "agent.notification.trace event=board_keyboard_nav source=selectFirstCard to=%@ board=%@ column=%@",
+            firstCard.id.uuidString,
+            board.id.uuidString,
+            String(describing: column)
+        )
         selectedCardID = firstCard.id
         focusRegion = .cards
         return true

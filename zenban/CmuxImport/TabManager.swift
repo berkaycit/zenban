@@ -700,7 +700,7 @@ class TabManager: ObservableObject {
                 self.focusSelectedTabPanel(previousTabId: previousTabId)
                 self.updateWindowTitleForSelectedTab()
                 if let selectedTabId = self.selectedTabId {
-                    self.markFocusedPanelReadIfActive(tabId: selectedTabId)
+                    self.dismissFocusedPanelNotificationIfActive(tabId: selectedTabId)
                 }
 #if DEBUG
                 let dtMs = self.debugWorkspaceSwitchStartTime > 0
@@ -793,7 +793,7 @@ class TabManager: ObservableObject {
                 guard let self else { return }
                 guard let tabId = notification.userInfo?[GhosttyNotificationKey.tabId] as? UUID else { return }
                 guard let surfaceId = notification.userInfo?[GhosttyNotificationKey.surfaceId] as? UUID else { return }
-                markPanelReadOnFocusIfActive(tabId: tabId, panelId: surfaceId)
+                dismissPanelNotificationOnFocus(tabId: tabId, panelId: surfaceId, explicitFocusIntent: true)
             }
         })
 
@@ -2130,42 +2130,56 @@ class TabManager: ObservableObject {
         selectedTabId != pendingTabId
     }
 
-    private func markFocusedPanelReadIfActive(tabId: UUID) {
+    private enum NotificationDismissalContext {
+        case activeFocus
+        case directInteraction
+    }
+
+    private func dismissFocusedPanelNotificationIfActive(tabId: UUID) {
         let shouldSuppressFlash = suppressFocusFlash
         suppressFocusFlash = false
         guard !shouldSuppressFlash else { return }
-        guard AppFocusState.isAppActive() else { return }
         guard let panelId = focusedPanelId(for: tabId) else { return }
-        _ = dismissNotificationIfActive(tabId: tabId, surfaceId: panelId, triggerFlash: true)
+        dismissPanelNotificationOnFocus(tabId: tabId, panelId: panelId, explicitFocusIntent: false)
     }
 
-    private func markPanelReadOnFocusIfActive(tabId: UUID, panelId: UUID) {
+    private func dismissPanelNotificationOnFocus(tabId: UUID, panelId: UUID, explicitFocusIntent: Bool) {
         guard selectedTabId == tabId else { return }
         guard !suppressFocusFlash else { return }
-        _ = dismissNotificationIfActive(tabId: tabId, surfaceId: panelId, triggerFlash: true)
+        _ = dismissNotification(
+            tabId: tabId,
+            surfaceId: panelId,
+            context: explicitFocusIntent ? .directInteraction : .activeFocus
+        )
     }
 
     @discardableResult
     func dismissNotificationOnDirectInteraction(tabId: UUID, surfaceId: UUID?) -> Bool {
-        dismissNotificationIfActive(tabId: tabId, surfaceId: surfaceId, triggerFlash: true)
+        dismissNotification(tabId: tabId, surfaceId: surfaceId, context: .directInteraction)
     }
 
     @discardableResult
-    private func dismissNotificationIfActive(
+    private func dismissNotification(
         tabId: UUID,
         surfaceId: UUID?,
-        triggerFlash: Bool
+        context: NotificationDismissalContext
     ) -> Bool {
         guard selectedTabId == tabId else { return false }
-        guard AppFocusState.isAppActive() else { return false }
-        guard let notificationStore = AppDelegate.shared?.notificationStore else { return false }
-        guard notificationStore.hasUnreadNotification(forTabId: tabId, surfaceId: surfaceId) else { return false }
-        if triggerFlash,
-           let panelId = surfaceId,
-           let tab = tabs.first(where: { $0.id == tabId }) {
-            tab.triggerNotificationFocusFlash(panelId: panelId, requiresSplit: false, shouldFocus: false)
+        if context == .activeFocus {
+            guard AppFocusState.isAppActive() else { return false }
         }
-        notificationStore.markRead(forTabId: tabId, surfaceId: surfaceId)
+        guard let notificationStore = AppDelegate.shared?.notificationStore else { return false }
+        let hasUnreadNotification = notificationStore.hasUnreadNotification(forTabId: tabId, surfaceId: surfaceId)
+        let hasFocusedIndicator = notificationStore.hasVisibleNotificationIndicator(forTabId: tabId, surfaceId: surfaceId)
+        guard hasUnreadNotification || hasFocusedIndicator else { return false }
+        if hasUnreadNotification {
+            notificationStore.markRead(forTabId: tabId, surfaceId: surfaceId, source: "tabManager.notificationDismiss")
+        }
+        notificationStore.clearFocusedReadIndicator(forTabId: tabId, surfaceId: surfaceId)
+        if let panelId = surfaceId,
+           let tab = tabs.first(where: { $0.id == tabId }) {
+            tab.triggerNotificationDismissFlash(panelId: panelId)
+        }
         return true
     }
 
@@ -2302,10 +2316,7 @@ class TabManager: ObservableObject {
             let targetPanelId = desiredPanelId ?? tab.focusedPanelId
             guard let targetPanelId,
                   tab.panels[targetPanelId] != nil else { return }
-            guard let notificationStore = AppDelegate.shared?.notificationStore else { return }
-            guard notificationStore.hasUnreadNotification(forTabId: tabId, surfaceId: targetPanelId) else { return }
-            tab.triggerNotificationFocusFlash(panelId: targetPanelId, requiresSplit: false, shouldFocus: true)
-            notificationStore.markRead(forTabId: tabId, surfaceId: targetPanelId)
+            _ = self.dismissNotificationOnDirectInteraction(tabId: tabId, surfaceId: targetPanelId)
         }
         return true
     }

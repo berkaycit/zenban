@@ -32,6 +32,13 @@ struct ZenbanRootView: View {
             cmuxHost.syncSelection(card: store.selectedCard, boardID: store.selectedBoardID)
         }
         .onChange(of: store.selectedCardID) {
+            NSLog(
+                "agent.notification.trace event=root_selected_card_changed card=%@ board=%@ column=%@ focusRegion=%@",
+                store.selectedCardID?.uuidString ?? "nil",
+                store.selectedBoardID?.uuidString ?? "nil",
+                store.selectedCard.map { String(describing: $0.column) } ?? "nil",
+                String(describing: store.focusRegion)
+            )
             cmuxHost.syncSelection(card: store.selectedCard, boardID: store.selectedBoardID)
         }
         .onChange(of: store.showDevServer) { wasShowing, isShowing in

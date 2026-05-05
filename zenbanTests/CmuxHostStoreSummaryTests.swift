@@ -111,6 +111,44 @@ struct CmuxHostStoreSummaryTests {
     }
 
     @Test
+    func selectingCardMarksWorkspaceNotificationReadWithoutDroppingSummary() throws {
+        let notificationStore = TerminalNotificationStore.shared
+        notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }
+        notificationStore.replaceNotificationsForTesting([])
+        AppFocusState.overrideIsFocused = false
+        defer {
+            AppFocusState.overrideIsFocused = nil
+            notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetNotificationDeliveryHandlerForTesting()
+        }
+
+        let (boardStore, board, card, hostStore) = makeHostFixture()
+        hostStore.syncSelection(card: card, boardID: board.id)
+        let workspace = try #require(hostStore.workspace(for: card.id))
+        let summary = "Completed the focused notification fix"
+
+        notificationStore.addNotification(
+            tabId: workspace.id,
+            surfaceId: workspace.focusedPanelId,
+            title: "Claude Code",
+            subtitle: "Waiting",
+            body: summary
+        )
+
+        let notification = try #require(notificationStore.notifications.first)
+        #expect(!notification.isRead)
+        #expect(notificationStore.hasUnreadNotification(forTabId: workspace.id, surfaceId: workspace.focusedPanelId))
+
+        hostStore.syncSelection(card: card, boardID: board.id)
+
+        #expect(notificationStore.notifications.first?.id == notification.id)
+        #expect(notificationStore.notifications.first?.isRead == true)
+        #expect(!notificationStore.hasUnreadNotification(forTabId: workspace.id, surfaceId: workspace.focusedPanelId))
+        #expect(boardStore.card(id: card.id)?.agentSummary == summary)
+        #expect(hostStore.agentSummary(for: card.id) == summary)
+    }
+
+    @Test
     func nonClaudeCardDoesNotExposeClaudeSummary() throws {
         let notificationStore = TerminalNotificationStore.shared
         notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in }

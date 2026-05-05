@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import zenban
 
+@Suite(.serialized)
 @MainActor
 struct CmuxHostStoreLifecycleTests {
     private enum WaitError: Error {
@@ -456,12 +457,17 @@ struct CmuxHostStoreLifecycleTests {
     func zenbanHostSuppressesNotificationWhenExactTerminalPanelOwnsFirstResponder() throws {
         let notificationStore = TerminalNotificationStore.shared
         var deliveryCount = 0
+        var suppressedFeedbackCount = 0
         notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
             deliveryCount += 1
+        }
+        notificationStore.configureSuppressedNotificationFeedbackHandlerForTesting { _, _ in
+            suppressedFeedbackCount += 1
         }
         notificationStore.replaceNotificationsForTesting([])
         defer {
             notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetSuppressedNotificationFeedbackHandlerForTesting()
             notificationStore.resetNotificationDeliveryHandlerForTesting()
         }
 
@@ -490,8 +496,13 @@ struct CmuxHostStoreLifecycleTests {
 
         let notification = try #require(notificationStore.notifications.first)
         #expect(deliveryCount == 0)
+        #expect(suppressedFeedbackCount == 1)
         #expect(notification.title == card.title)
         #expect(notification.subtitle == "Workspace notification")
+        #expect(!notification.isRead)
+        #expect(notificationStore.hasUnreadNotification(forTabId: workspace.id, surfaceId: workspace.focusedPanelId))
+        #expect(notificationStore.hasVisibleNotificationIndicator(forTabId: workspace.id, surfaceId: workspace.focusedPanelId))
+        #expect(notificationStore.focusedReadIndicatorSurfaceId(forTabId: workspace.id) == workspace.focusedPanelId)
         #expect(boardStore.card(id: card.id)?.column == .inProgress)
     }
 
@@ -499,12 +510,17 @@ struct CmuxHostStoreLifecycleTests {
     func zenbanHostSuppressesNotificationWhenExactBrowserPanelOwnsFirstResponder() throws {
         let notificationStore = TerminalNotificationStore.shared
         var deliveryCount = 0
+        var suppressedFeedbackCount = 0
         notificationStore.configureNotificationDeliveryHandlerForTesting { _, _ in
             deliveryCount += 1
+        }
+        notificationStore.configureSuppressedNotificationFeedbackHandlerForTesting { _, _ in
+            suppressedFeedbackCount += 1
         }
         notificationStore.replaceNotificationsForTesting([])
         defer {
             notificationStore.replaceNotificationsForTesting([])
+            notificationStore.resetSuppressedNotificationFeedbackHandlerForTesting()
             notificationStore.resetNotificationDeliveryHandlerForTesting()
         }
 
@@ -520,18 +536,21 @@ struct CmuxHostStoreLifecycleTests {
         }
 
         hostStore.syncSelection(card: card, boardID: board.id)
-        let workspace = try #require(hostStore.workspace(for: card.id))
+        _ = try #require(hostStore.workspace(for: card.id))
         hostStore.ensureBrowserSurface(
             for: card,
             boardID: board.id,
             url: URL(string: "http://localhost:5173")!
         )
         let browserContext = try #require(hostStore.browserSurface(for: card.id))
-        workspace.focusPanel(browserContext.panel.id)
+        hostStore.focusBrowserSurface(for: card.id)
+        let browserWorkspace = try #require(
+            hostStore.tabManager.tabs.first { $0.panels[browserContext.panel.id] != nil }
+        )
         appDelegate.setNotificationFirstResponderOwnerPanelIdForTesting(browserContext.panel.id)
 
         notificationStore.addNotification(
-            tabId: workspace.id,
+            tabId: browserWorkspace.id,
             surfaceId: browserContext.panel.id,
             title: "Build finished",
             subtitle: "Workspace notification",
@@ -540,9 +559,13 @@ struct CmuxHostStoreLifecycleTests {
 
         let notification = try #require(notificationStore.notifications.first)
         #expect(deliveryCount == 0)
-        #expect(notification.title == card.title)
+        #expect(suppressedFeedbackCount == 1)
+        #expect(notification.title == "\(card.title) Preview")
         #expect(notification.subtitle == "Workspace notification")
-        #expect(boardStore.card(id: card.id)?.column == .inProgress)
+        #expect(!notification.isRead)
+        #expect(notificationStore.hasVisibleNotificationIndicator(forTabId: browserWorkspace.id, surfaceId: browserContext.panel.id))
+        #expect(notificationStore.focusedReadIndicatorSurfaceId(forTabId: browserWorkspace.id) == browserContext.panel.id)
+        #expect(boardStore.card(id: card.id)?.column == .todo)
     }
 
     @Test

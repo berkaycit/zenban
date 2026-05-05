@@ -27,6 +27,7 @@
 - Unit tests live in `zenbanTests/` using Swift Testing (`@Test`, `#expect(...)`).
 - UI tests live in `zenbanUITests/` using XCTest (`XCTestCase`, `XCUIApplication`).
 - Name tests `*Tests.swift` or `*UITests.swift` and add regression coverage near the feature.
+- For any Zenban app-hosted test or Computer verification that can launch the app, use `.agents/skills/zenban-tcc-safe-testing/SKILL.md`. Run `xcodebuild test` through `.agents/skills/zenban-tcc-safe-testing/scripts/run-xcodebuild-tcc-safe.sh`, use `CMUX_UI_TEST_MODE=1`, keep board/card workdirs under `~/Library/Caches/Zenban/...`, clear stale `NSOSPLastRootDirectory`, and do not use `open Zenban.app` or TCC-protected locations such as Desktop, Documents, Downloads, Photos, or Music. If a TCC prompt appears, stop and fix the launch state; treat that run as invalid.
 
 ## Commit & Pull Request Guidelines
 - Commits are short, imperative, sentence case (e.g., "Add terminal backend", "Update ...", "Fix ..."). Use "Revert ..." for rollbacks.

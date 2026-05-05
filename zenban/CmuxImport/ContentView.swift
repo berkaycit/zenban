@@ -4620,7 +4620,8 @@ struct ContentView: View {
             )
             snapshot.setBool(
                 CommandPaletteContextKeys.workspaceHasUnread,
-                notificationStore.notifications.contains { $0.tabId == workspace.id && !$0.isRead }
+                notificationStore.notifications.contains { $0.tabId == workspace.id && !$0.isRead } ||
+                    notificationStore.focusedReadIndicatorSurfaceId(forTabId: workspace.id) != nil
             )
             snapshot.setBool(
                 CommandPaletteContextKeys.workspaceHasRead,
@@ -4642,7 +4643,7 @@ struct ContentView: View {
             snapshot.setBool(CommandPaletteContextKeys.panelHasCustomName, workspace.panelCustomTitles[panelId] != nil)
             snapshot.setBool(CommandPaletteContextKeys.panelShouldPin, !workspace.isPanelPinned(panelId))
             let hasUnread = workspace.manualUnreadPanelIds.contains(panelId)
-                || notificationStore.hasUnreadNotification(forTabId: workspace.id, surfaceId: panelId)
+                || notificationStore.hasVisibleNotificationIndicator(forTabId: workspace.id, surfaceId: panelId)
             snapshot.setBool(CommandPaletteContextKeys.panelHasUnread, hasUnread)
 
             if panelIsTerminal {
@@ -5543,7 +5544,7 @@ struct ContentView: View {
                 return
             }
             let hasUnread = panelContext.workspace.manualUnreadPanelIds.contains(panelContext.panelId)
-                || notificationStore.hasUnreadNotification(forTabId: panelContext.workspace.id, surfaceId: panelContext.panelId)
+                || notificationStore.hasVisibleNotificationIndicator(forTabId: panelContext.workspace.id, surfaceId: panelContext.panelId)
             if hasUnread {
                 panelContext.workspace.markPanelRead(panelContext.panelId)
             } else {

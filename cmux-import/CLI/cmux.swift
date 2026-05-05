@@ -14022,7 +14022,12 @@ struct CMUXCLI {
             sendClaudeFeedTelemetry(workspaceId: workspaceId)
             if let mappedSession,
                let savedBody = mappedSession.lastBody, !savedBody.isEmpty,
-               summary.body.contains("needs your attention") || summary.body.contains("needs your input") {
+               shouldReuseSavedClaudeHookNotificationBody(summary: summary) {
+                let sessionId = parsedInput.sessionId ?? "nil"
+                fputs(
+                    "agent.notification.trace event=claude_hook_reuse_saved_summary session=\(sessionId) workspace=\(mappedSession.workspaceId) surface=\(mappedSession.surfaceId) incomingSubtitle=\(summary.subtitle) savedSubtitle=\(mappedSession.lastSubtitle ?? "nil") incomingBodyLength=\(summary.body.count) savedBodyLength=\(savedBody.count)\n",
+                    stderr
+                )
                 summary = (subtitle: mappedSession.lastSubtitle ?? summary.subtitle, body: savedBody)
             }
 
@@ -15435,6 +15440,18 @@ struct CMUXCLI {
             return ("Attention", message)
         }
         return ("Attention", "Claude needs your attention")
+    }
+
+    private func shouldReuseSavedClaudeHookNotificationBody(summary: (subtitle: String, body: String)) -> Bool {
+        let subtitle = normalizedSingleLine(summary.subtitle).lowercased()
+        let body = normalizedSingleLine(summary.body).lowercased()
+        if body.contains("needs your attention") || body.contains("needs your input") {
+            return true
+        }
+        guard subtitle == "waiting" else { return false }
+        return body == "claude is waiting for your input" ||
+            body == "waiting for input" ||
+            body == "claude needs your input"
     }
 
     private func firstString(in object: [String: Any], keys: [String]) -> String? {
