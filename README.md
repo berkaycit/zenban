@@ -48,7 +48,3 @@ Needs macOS 15.6 and Xcode 26.2.
 - **[cmux](https://github.com/manaflow-ai/cmux)** powers the embedded terminal stack, Ghostty workspaces, browser surface, notifications, and the bundled CLI helpers.
 - **[CodeEdit](https://github.com/CodeEditApp/CodeEdit)** (CodeEditSourceEditor, CodeEditLanguages, CodeEditTextView, CodeEditSymbols) drives the in-card file browser and source viewer.
 - **[aizen](https://github.com/vivy-company/aizen)** is where the file browser layer and a handful of utilities were first shaped before landing here.
-
-## Bundle
-
-`com.berkaycit.zenban`
