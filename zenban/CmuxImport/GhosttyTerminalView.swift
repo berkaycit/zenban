@@ -123,11 +123,11 @@ private func cmuxScalarHex(_ value: String?) -> String {
         .map { String(format: "%04X", $0.value) }
         .joined(separator: ",")
 }
+#endif
 
 private func cmuxTabManager(for tabId: UUID) -> TabManager? {
     AppDelegate.shared?.tabManagerFor(tabId: tabId) ?? AppDelegate.shared?.tabManager
 }
-#endif
 
 private enum GhosttyPasteboardHelper {
     enum ImageFileMaterializationResult {
