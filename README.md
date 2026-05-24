@@ -6,6 +6,8 @@
 
 <p align="center">A kanban board for macOS where every card is a real workspace.</p>
 
+<img width="1514" height="768" alt="image" src="https://github.com/user-attachments/assets/f604ccf8-9121-4b89-8211-6de9f90bcff4" />
+
 Drop a card into **To Do**, pick an agent, and Claude opens up inside the card's own git worktree. Keep working. When the agent finishes the job, the card slides over to **In Review** on its own. Dev server, browser preview, file browser, git diff, all already living inside the card.
 
 ## What you get
